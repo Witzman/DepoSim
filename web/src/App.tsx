@@ -76,6 +76,7 @@ export function App() {
       setSnapshot((prev) =>
         prev && {
           ...prev, running: m.running, depot: m.depot, prices: m.prices, fx: m.fx, venues: m.venues,
+          liveLimit: m.liveLimit, delayS: m.delayS, phase: m.phase,
           simulation: { ...prev.simulation, simulationTime: m.simulationTime },
         },
       );
@@ -137,8 +138,8 @@ export function App() {
     return () => { current = false; };
   }, [selectedId, symbol]);
 
-  async function create(name: string, startAt: number) {
-    const sim = await createSimulation({ name, startAt });
+  async function create(input: { name: string; startAt?: number; live?: boolean }) {
+    const sim = await createSimulation(input);
     setSimulations((prev) => [...prev, sim]);
     setSelectedId(sim.id);
   }
@@ -211,6 +212,10 @@ export function App() {
                   tempo={live.tempo as Tempo}
                   running={snapshot?.running ?? false}
                   disabled={locked}
+                  live={live.live}
+                  phase={snapshot?.phase ?? "replay"}
+                  lagS={snapshot ? Math.max(snapshot.liveLimit - live.simulationTime, 0) : 0}
+                  delayS={snapshot?.delayS ?? 900}
                   onTempo={(t) => socket.current?.send({ type: "tempo", tempo: t })}
                   onRun={() => { setNotice(null); socket.current?.send({ type: "run" }); }}
                   onPause={() => socket.current?.send({ type: "pause" })}

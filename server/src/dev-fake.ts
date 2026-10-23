@@ -18,14 +18,20 @@ export function fakePrice(symbol: string, t: number): number {
   return base + 3 * Math.sin(t / 1800 + h) + 1.5 * Math.sin(t / 420);
 }
 
-/** Minute bars Monday to Friday during each market's hours; the exchange rate runs all day. */
-export function fakeMarketData(): MarketData {
+// A present that moves: Friday 2026-10-23, 13:00 UTC at the start, then in real time. The
+// bars of the test data reach exactly up to it, so a live simulation meets the edge of the present.
+const FAKE_BASE = Date.UTC(2026, 9, 23, 13, 0, 0) / 1000;
+const startedAt = Date.now();
+export const fakeNow = () => FAKE_BASE + (Date.now() - startedAt) / 1000;
+
+/** Minute bars Monday to Friday during each market's hours, only those that are over by `now`; the exchange rate runs all day. */
+export function fakeMarketData(now: () => number = () => Date.now() / 1000): MarketData {
   const venue = new Map<string, string>(WATCHLIST.map((i) => [i.symbol, i.venue]));
   return {
     async bars(symbol, fromT, toT) {
       const bars: Bar[] = [];
       const first = Math.ceil(fromT / MINUTE) * MINUTE;
-      for (let t = first; t < toT; t += MINUTE) {
+      for (let t = first; t < toT && t + MINUTE <= now(); t += MINUTE) {
         const weekday = new Date(t * 1000).getUTCDay();
         if (weekday === 0 || weekday === 6) continue;
         const secondOfDay = t % DAY;
@@ -47,7 +53,10 @@ export function fakeMarketData(): MarketData {
 }
 
 export async function startFake(port: number) {
-  const app = buildApp({ dbPath: ":memory:", marketData: fakeMarketData(), minGapMs: 0, tickMs: 100 });
+  const app = buildApp({
+    dbPath: ":memory:", marketData: fakeMarketData(fakeNow), minGapMs: 0, tickMs: 100,
+    now: fakeNow, catchUpTempo: 6000, liveRefreshS: 1,
+  });
   await app.listen({ port, host: "127.0.0.1" });
   return app;
 }

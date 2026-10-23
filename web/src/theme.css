@@ -146,3 +146,12 @@ dialog .actions { display: flex; gap: 8px; justify-content: flex-end; }
 .watch-row:hover { border-color: var(--border); }
 .watch-row[aria-current="true"] { border-color: var(--accent); }
 .watch-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.status { margin-top: 2px; font-size: 0.85rem; color: var(--muted); }
+.status.up { color: var(--up); }
+.badge {
+  margin-left: 6px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--up); color: var(--up);
+  font-size: 0.7rem; font-weight: 500; vertical-align: middle;
+}
+dialog label.check { display: flex; align-items: center; gap: 8px; color: var(--text); }
+dialog label.check input { width: auto; }

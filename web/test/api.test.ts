@@ -122,3 +122,12 @@ describe("orders", () => {
     expect(init.method).toBe("DELETE");
   });
 });
+
+describe("createSimulation, live", () => {
+  it("sends the live flag and no start when the simulation starts from now", async () => {
+    const fn = stubFetch(201, { id: 5, live: true });
+    await createSimulation({ name: "Live", live: true });
+    const [, init] = fn.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({ name: "Live", live: true });
+  });
+});

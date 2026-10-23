@@ -64,7 +64,7 @@ test("at 360 px wide nothing scrolls sideways", async ({ page }) => {
 });
 
 test("a day with no trading is explained in words, and nothing is created", async ({ page }) => {
-  await createSimulation(page, "2026-10-24"); // a Saturday
+  await createSimulation(page, "2026-10-17"); // a Saturday in the past: the test server's present is Friday 2026-10-23
   await expect(page.getByRole("alert")).toContainText("keine Kurse");
   await expect(page.getByTestId("sim-time")).toHaveCount(0);
 });

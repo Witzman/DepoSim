@@ -40,7 +40,7 @@ const json = (method: string, body: unknown): RequestInit => ({
 
 export const getWatchlist = () => request<Instrument[]>("/api/watchlist");
 export const listSimulations = () => request<Simulation[]>("/api/simulations");
-export const createSimulation = (body: { name: string; startAt: number; startCash?: number }) =>
+export const createSimulation = (body: { name: string; startAt?: number; live?: boolean; startCash?: number }) =>
   request<Simulation>("/api/simulations", json("POST", body));
 export const deleteSimulation = (id: number) => request<void>(`/api/simulations/${id}`, { method: "DELETE" });
 export const endSimulation = (id: number) => request<Simulation>(`/api/simulations/${id}/end`, json("POST", {}));

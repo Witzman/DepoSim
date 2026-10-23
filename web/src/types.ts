@@ -29,6 +29,8 @@ export interface Simulation {
   startCash: number;
   createdAt: number;
   endedAt: number | null;
+  /** Catches up to the present by itself and then follows real time; the tempo is not the person's to set. */
+  live: boolean;
 }
 
 export interface OrderRecord {
@@ -88,6 +90,10 @@ export interface Snapshot {
   prices: Record<string, { price: number; barT: number }>;
   fx: number | null;
   venues: Record<Venue, boolean>;
+  /** The latest simulation time that may be shown: the present minus the delay. */
+  liveLimit: number;
+  delayS: number;
+  phase: "replay" | "catchup" | "live";
 }
 
 export type ServerMessage =
@@ -101,6 +107,9 @@ export type ServerMessage =
       prices: Snapshot["prices"];
       fx: number | null;
       venues: Snapshot["venues"];
+      liveLimit: number;
+      delayS: number;
+      phase: Snapshot["phase"];
     }
   | { type: "notice"; text: string }
   | { type: "error"; text: string };
