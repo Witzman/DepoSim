@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { buildApp } from "../src/app.js";
-import { MarketDataError, type MarketDataErrorKind } from "../src/data/marketdata.js";
+import { type MarketData, MarketDataError, type MarketDataErrorKind } from "../src/data/marketdata.js";
 import { AAPL, D0, D1, H, SAP, makeSource } from "./fakes.js";
 
 const NOW = D0 + 5 * 86400;
@@ -331,5 +331,110 @@ describe("live simulations over the API", () => {
     expect(res.statusCode).toBe(502);
     expect(res.json().error).toMatch(/drosselt/);
     expect((await app.inject({ url: "/api/simulations" })).json()).toEqual([]);
+  });
+});
+
+describe("the clock of a live simulation (websocket)", () => {
+  const T0700 = D0 + 7 * H;
+  const at = (minute: number) => T0700 + minute * 60;
+
+  /** SAP only. `sapUntil` cuts its bars off, `all` lets a test bring them back, `clock` is the present. */
+  function makeLive(opts: { now: number; sapUntil?: number; catchUpTempo?: number; liveRefreshS?: number }) {
+    const inner = makeSource();
+    const whole = inner.all["SAP.DE"].slice();
+    if (opts.sapUntil !== undefined) inner.all["SAP.DE"] = whole.filter((b) => b.t < opts.sapUntil!);
+    const clock = { now: opts.now };
+    const log: { symbol: string; at: number }[] = [];
+    const source: MarketData = {
+      bars: async (symbol, from, to) => {
+        log.push({ symbol, at: performance.now() });
+        return inner.source.bars(symbol, from, to);
+      },
+    };
+    const app = buildApp({
+      dbPath: ":memory:", marketData: source, instruments: [SAP], now: () => clock.now, minGapMs: 0, tickMs: 20,
+      catchUpTempo: opts.catchUpTempo ?? 6000, liveRefreshS: opts.liveRefreshS ?? 0.1,
+    });
+    open.push(app);
+    return { app, all: inner.all, whole, clock, log };
+  }
+
+  async function sim(app: FastifyInstance, body: Record<string, unknown>) {
+    const res = await post(app, "/api/simulations", { name: "L", ...body });
+    expect(res.statusCode).toBe(201);
+    return res.json().id as number;
+  }
+
+  it("catches up to the live limit and then stays on it, without a word about the end of the data", async () => {
+    const t = makeLive({ now: at(45) + 900 }); // the live limit is 07:45, the bars run to 08:00
+    const id = await sim(t.app, { live: true, startAt: T0700 });
+    const { msgs, send } = await connect(t.app, id);
+    await until(() => msgs.length >= 1);
+    expect(msgs[0]).toMatchObject({ type: "snapshot", phase: "catchup", simulation: { live: true } });
+    send({ type: "run" });
+    // Within 120 s of the limit it counts as live, and the next tick snaps onto the limit itself.
+    await until(() => msgs.some((m) => m.type === "tick" && m.simulationTime === at(45)));
+    const ticks = msgs.filter((m) => m.type === "tick");
+    for (const m of ticks) expect(m.simulationTime).toBeLessThanOrEqual(m.liveLimit);
+    expect(ticks.some((m) => m.phase === "catchup")).toBe(true);
+    expect(ticks[ticks.length - 1]).toMatchObject({ simulationTime: at(45), phase: "live" });
+    await new Promise((r) => setTimeout(r, 120));
+    expect(msgs.some((m) => m.type === "notice")).toBe(false);
+    expect(t.app.session.isRunning(id)).toBe(true);
+    expect(t.app.session.snapshot(id).simulation.simulationTime).toBe(at(45));
+  });
+
+  it("waits at the edge of the present with one notice, asks the source no oftener than the refresh time, and goes on when bars arrive", async () => {
+    const t = makeLive({ now: at(40) + 900, sapUntil: at(30) }); // the last bar ends at 07:30, the limit is 07:40
+    const id = await sim(t.app, { live: true, startAt: at(20) });
+    const created = t.log.length;
+    const { msgs, send } = await connect(t.app, id);
+    send({ type: "run" });
+    await until(() => msgs.some((m) => m.type === "notice" && /Warte auf neue Kurse/.test(m.text)));
+    await new Promise((r) => setTimeout(r, 450)); // several refresh times, with no data yet
+    expect(t.app.session.isRunning(id)).toBe(true);
+
+    const sapCalls = t.log.slice(created).filter((c) => c.symbol === "SAP.DE");
+    expect(sapCalls.length).toBeGreaterThanOrEqual(2); // it does look again
+    for (let i = 1; i < sapCalls.length; i++) expect(sapCalls[i].at - sapCalls[i - 1].at).toBeGreaterThanOrEqual(90); // never oftener than 100 ms
+
+    t.all["SAP.DE"] = t.whole.filter((b) => b.t < at(40)); // the bars up to 07:40 arrive
+    await until(() => msgs.some((m) => m.type === "tick" && m.simulationTime >= at(35)));
+    expect(msgs.filter((m) => m.type === "notice" && /Warte/.test(m.text))).toHaveLength(1);
+    expect(t.app.session.isRunning(id)).toBe(true);
+  });
+
+  it("keeps its refresh time across a pause and a new start: a press on Start does not ask the source again", async () => {
+    const t = makeLive({ now: D0 + 5 * 86400, liveRefreshS: 5 });
+    const id = await sim(t.app, { startAt: D1 + 9 * H }); // a replay at the end of its data, far from the present
+    const { msgs, send } = await connect(t.app, id);
+    send({ type: "run" });
+    await until(() => msgs.filter((m) => m.type === "notice" && /Ende der Daten/.test(m.text)).length >= 1);
+    const asked = t.log.length;
+    expect(t.app.session.isRunning(id)).toBe(false);
+
+    send({ type: "run" });
+    await until(() => msgs.filter((m) => m.type === "notice" && /Ende der Daten/.test(m.text)).length >= 2);
+    expect(t.log.length).toBe(asked);
+    expect(t.app.session.isRunning(id)).toBe(false);
+  });
+
+  it("does not let the tempo be changed for a live simulation, and says why", async () => {
+    const t = makeLive({ now: at(45) + 900 });
+    const id = await sim(t.app, { live: true, startAt: T0700 });
+    const { msgs, send } = await connect(t.app, id);
+    await until(() => msgs.length >= 1);
+    send({ type: "tempo", tempo: 60 });
+    await until(() => msgs.some((m) => m.type === "notice" && /Livebetrieb/.test(m.text)));
+    expect(t.app.session.snapshot(id).simulation.tempo).toBe(1);
+  });
+
+  it("still lets the tempo of a replay be changed", async () => {
+    const t = makeLive({ now: D0 + 5 * 86400 });
+    const id = await sim(t.app, { startAt: T0700 });
+    const { msgs, send } = await connect(t.app, id);
+    await until(() => msgs.length >= 1);
+    send({ type: "tempo", tempo: 30 });
+    await until(() => t.app.session.snapshot(id).simulation.tempo === 30);
   });
 });

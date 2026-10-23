@@ -28,6 +28,8 @@ export interface AppOptions {
   liveDelayS?: number;
   /** The tempo a live simulation catches up at. */
   catchUpTempo?: number;
+  /** The shortest time between two refreshes of today's prices, in seconds. */
+  liveRefreshS?: number;
 }
 
 declare module "fastify" {
@@ -48,7 +50,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
     store, archive, instruments: opts.instruments ?? WATCHLIST, fxSymbol: FX_SYMBOL, now: opts.now,
     delayS: opts.liveDelayS, catchUpTempo: opts.catchUpTempo,
   });
-  const hub = createHub(session, store, opts.tickMs ?? 250);
+  const hub = createHub(session, store, opts.tickMs ?? 250, opts.liveRefreshS ?? 60);
 
   const app = Fastify({ logger: process.env.NODE_ENV !== "test" });
   app.decorate("session", session);
