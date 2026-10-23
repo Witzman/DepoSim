@@ -16,7 +16,8 @@
     "test": "vitest run",
     "probe": "tsx server/scripts/probe.ts",
     "dev:fake": "tsx server/src/dev-fake.ts",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "acceptance": "tsx server/scripts/acceptance.ts"
   },
   "dependencies": {
     "@fastify/static": "^10.1.7",
