@@ -1,5 +1,7 @@
 // The acceptance run from issue #16, over HTTP and WebSocket only (no browser):
 //   npm run acceptance -- https://depo.witzman.de
+// Behind the login of the live site: ACCEPTANCE_AUTH=user:password npm run acceptance -- <url>
+// (an environment variable, so the password is not in the command line or in the code).
 // Starts a simulation at 10:00 Berlin time on the last trading day, plays an hour of it at
 // tempo 60, buys and places a limit order, pauses, reconnects and checks that nothing moved.
 import WebSocket from "ws";
@@ -12,6 +14,10 @@ if (!base) {
   process.exit(2);
 }
 
+const authHeader: Record<string, string> = process.env.ACCEPTANCE_AUTH
+  ? { authorization: `Basic ${Buffer.from(process.env.ACCEPTANCE_AUTH).toString("base64")}` }
+  : {};
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const step = (text: string) => console.log(`• ${text}`);
 const ok = (text: string) => console.log(`    ✓ ${text}`);
@@ -22,7 +28,7 @@ function check(cond: unknown, message: string): asserts cond {
 async function http(method: string, path: string, body?: unknown) {
   const res = await fetch(base + path, {
     method,
-    headers: body === undefined ? undefined : { "content-type": "application/json" },
+    headers: { ...authHeader, ...(body === undefined ? {} : { "content-type": "application/json" }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   let json: any;
@@ -39,7 +45,7 @@ class Conn {
   private readonly ws: WebSocket;
 
   constructor(id: number) {
-    this.ws = new WebSocket(`${base.replace(/^http/, "ws")}/ws/simulations/${id}`);
+    this.ws = new WebSocket(`${base.replace(/^http/, "ws")}/ws/simulations/${id}`, { headers: authHeader });
     this.ws.on("message", (d) => this.msgs.push(JSON.parse(String(d))));
   }
 
