@@ -49,5 +49,5 @@ export function makeSource(opts: SourceOpts = {}) {
       return bars;
     },
   };
-  return { source, calls };
+  return { source, calls, all };
 }

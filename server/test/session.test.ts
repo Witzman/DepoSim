@@ -5,6 +5,7 @@ import { openDb } from "../src/db.js";
 import { DEFAULT_FEES } from "../src/domain/fees.js";
 import { SessionService } from "../src/session.js";
 import { createStore } from "../src/store.js";
+import type { Instrument } from "../src/config.js";
 import { AAPL, D0, D1, FX, H, SAP, makeSource } from "./fakes.js";
 
 interface SetupOpts {
@@ -14,21 +15,30 @@ interface SetupOpts {
   fail?: MarketDataErrorKind;
   noDataFor?: string[];
   now?: number;
+  live?: boolean;
+  instruments?: Instrument[];
+  delayS?: number;
+  catchUpTempo?: number;
 }
 
 function setup(opts: SetupOpts = {}) {
-  const { source, calls } = makeSource(opts);
-  const now = opts.now ?? D0 + 5 * 86400;
+  const { source, calls, all } = makeSource(opts);
+  const clock = { now: opts.now ?? D0 + 5 * 86400 }; // a test can move it
   const db = openDb(":memory:");
   const store = createStore(db);
-  const archive = createArchive(db, source, { now: () => now, minGapMs: 0 });
-  const make = () => new SessionService({ store, archive, instruments: [SAP, AAPL], fxSymbol: FX, now: () => now });
+  const archive = createArchive(db, source, { now: () => clock.now, minGapMs: 0 });
+  const make = () =>
+    new SessionService({
+      store, archive, instruments: opts.instruments ?? [SAP, AAPL], fxSymbol: FX, now: () => clock.now,
+      delayS: opts.delayS, catchUpTempo: opts.catchUpTempo,
+    });
   const svc = make();
   const sim = store.createSimulation({
-    name: "T", startAt: opts.startAt ?? D0 + 7 * H + 600, startCash: opts.startCash ?? 1_000_000, fees: opts.fees ?? DEFAULT_FEES,
+    name: "T", startAt: opts.startAt ?? D0 + 7 * H + 600, startCash: opts.startCash ?? 1_000_000,
+    fees: opts.fees ?? DEFAULT_FEES, live: opts.live,
   });
   const depotId = store.listDepots(sim.id)[0].id;
-  return { db, store, archive, svc, make, sim, id: sim.id, depotId, calls };
+  return { db, store, archive, svc, make, sim, id: sim.id, depotId, calls, all, clock };
 }
 
 const orderOf = (t: ReturnType<typeof setup>, orderId: number) =>
@@ -349,5 +359,145 @@ describe("previewOrder", () => {
     const t = setup();
     await t.svc.start(t.id);
     expect(t.svc.previewOrder(t.id, { symbol: "NOPE", side: "buy", kind: "market", qty: 1 }).ok).toBe(false);
+  });
+});
+
+describe("the clock at low tempo", () => {
+  it.each([[1, 2], [5, 10], [30, 60]] as const)("moves tempo %i by %i s in 2 s of real time, in ticks of 250 ms", async (tempo, expected) => {
+    const t = setup();
+    await t.svc.start(t.id);
+    t.svc.setTempo(t.id, tempo);
+    for (let i = 0; i < 8; i++) t.svc.tick(t.id, 250);
+    expect(t.svc.snapshot(t.id).simulation.simulationTime - t.sim.startAt).toBe(expected);
+  });
+});
+
+describe("the live limit", () => {
+  const SEVEN_TEN = D0 + 7 * H + 600;
+
+  it("keeps the simulation time from running past now minus the delay", async () => {
+    const t = setup({ now: SEVEN_TEN + 900 + 30 });
+    await t.svc.start(t.id);
+    t.svc.setTempo(t.id, 60);
+    expect(t.svc.tick(t.id, 5000).simulationTime).toBe(SEVEN_TEN + 30);
+  });
+
+  it("leaves a replay far behind the limit at the tempo that was chosen", async () => {
+    const t = setup();
+    await t.svc.start(t.id);
+    t.svc.setTempo(t.id, 60);
+    expect(t.svc.tick(t.id, 1000).simulationTime).toBe(SEVEN_TEN + 60);
+  });
+
+  it("never runs the time backwards, also when the limit is behind it (a clock that stepped back)", async () => {
+    const t = setup({ now: SEVEN_TEN + 900 - 500 });
+    await t.svc.start(t.id);
+    t.svc.setTempo(t.id, 60);
+    const r = t.svc.tick(t.id, 5000);
+    expect(r.simulationTime).toBe(SEVEN_TEN);
+    expect(r.newBars).toEqual({});
+  });
+});
+
+describe("a live simulation", () => {
+  const SEVEN_TEN = D0 + 7 * H + 600;
+
+  it("catches up at the catch-up tempo, whatever tempo is stored", async () => {
+    const t = setup({ live: true, catchUpTempo: 300 });
+    await t.svc.start(t.id);
+    expect(t.svc.tick(t.id, 1000).simulationTime).toBe(SEVEN_TEN + 300);
+  });
+
+  it("snaps to the limit once it is within the threshold of it", async () => {
+    const t = setup({ live: true, now: SEVEN_TEN + 900 + 100 });
+    await t.svc.start(t.id);
+    t.svc.setTempo(t.id, 60);
+    expect(t.svc.tick(t.id, 250).simulationTime).toBe(SEVEN_TEN + 100);
+  });
+
+  it("reports the phase: catching up, then live; and a replay as replay, then as reached the present", async () => {
+    const live = setup({ live: true, now: SEVEN_TEN + 900 + 3600 });
+    await live.svc.start(live.id);
+    expect(live.svc.snapshot(live.id)).toMatchObject({ phase: "catchup", liveLimit: SEVEN_TEN + 3600, delayS: 900 });
+    live.clock.now = SEVEN_TEN + 900 + 100;
+    expect(live.svc.snapshot(live.id).phase).toBe("live");
+
+    const replay = setup({ now: SEVEN_TEN + 900 + 3600 });
+    await replay.svc.start(replay.id);
+    expect(replay.svc.snapshot(replay.id).phase).toBe("replay");
+    replay.clock.now = SEVEN_TEN + 900 + 100;
+    expect(replay.svc.snapshot(replay.id).phase).toBe("live");
+  });
+});
+
+describe("the data horizon", () => {
+  const T0725 = D0 + 7 * H + 25 * 60;
+  const T0730 = D0 + 7 * H + 30 * 60;
+
+  /** SAP only, with bars that stop at 07:30 (the last one starts at 07:29). */
+  function atTheEdge(opts: SetupOpts = {}) {
+    const t = setup({ instruments: [SAP], startAt: T0725, ...opts });
+    t.all["SAP.DE"] = t.all["SAP.DE"].filter((b) => b.t < T0730);
+    return t;
+  }
+
+  it("stops the clock at the newest known bar, and says it is waiting for data", async () => {
+    const t = atTheEdge();
+    await t.svc.start(t.id);
+    t.svc.setTempo(t.id, 60);
+    // 07:25 plus 360 s would be 07:31, one minute past the last bar (it ends at 07:30).
+    const r = t.svc.tick(t.id, 6000);
+    expect(r).toMatchObject({ simulationTime: T0730, waitingForData: true, endOfData: false, liveEdge: false });
+    // Reaching the horizon exactly is not waiting yet.
+    const exact = atTheEdge();
+    await exact.svc.start(exact.id);
+    exact.svc.setTempo(exact.id, 60);
+    expect(exact.svc.tick(exact.id, 5000)).toMatchObject({ simulationTime: T0730, waitingForData: false });
+  });
+
+  it("stays a minute behind the newest bar at the edge of the present, where the bars of other instruments may still be missing", async () => {
+    const t = atTheEdge({ now: T0730 + 600 + 900 }); // L is 10 minutes after the newest bar
+    await t.svc.start(t.id);
+    t.svc.setTempo(t.id, 60);
+    const r = t.svc.tick(t.id, 5000);
+    expect(r).toMatchObject({ simulationTime: T0730 - 60, waitingForData: true, liveEdge: true });
+  });
+
+  it("does not skip bars that arrive late: each is evaluated once, and a limit order they trigger fills once", async () => {
+    const t = atTheEdge({ now: T0730 + 600 + 900 });
+    const full = t.all["SAP.DE"].slice(); // bars up to 07:30
+    const everything = setup({ instruments: [SAP] }).all["SAP.DE"]; // the whole of D0 and D1
+    await t.svc.start(t.id);
+    // Placed at 07:25, the price is 96. Bar 35 (07:35) is the first with a low at or below 85.
+    const placed = t.svc.placeOrder(t.id, t.depotId, { symbol: "SAP.DE", side: "buy", kind: "limit", qty: 1, limitPrice: 85 });
+    expect(placed.ok).toBe(true);
+    t.svc.setTempo(t.id, 60);
+    expect(t.svc.tick(t.id, 5000).waitingForData).toBe(true);
+    expect(orderOf(t, (placed as { orderId: number }).orderId).status).toBe("open");
+
+    // The bars up to 07:40 now arrive, and the present moves on.
+    t.all["SAP.DE"] = everything.filter((b) => b.t < D0 + 7 * H + 40 * 60);
+    expect(full.length).toBeLessThan(t.all["SAP.DE"].length);
+    t.clock.now = D0 + 7 * H + 40 * 60 + 900;
+    await expect(t.svc.loadMore(t.id)).resolves.toBe(true);
+    for (let i = 0; i < 6; i++) t.svc.tick(t.id, 5000);
+
+    const order = orderOf(t, (placed as { orderId: number }).orderId);
+    expect(order).toMatchObject({ status: "filled", fillPrice: 85, filledSim: D0 + 7 * H + 36 * 60 });
+    expect(t.svc.snapshot(t.id).depot.positions).toEqual([expect.objectContaining({ symbol: "SAP.DE", qty: 1 })]);
+  });
+
+  it("has no horizon, and so no live edge, before any bar is known", () => {
+    const t = setup();
+    t.svc.setTempo(t.id, 60);
+    const r = t.svc.tick(t.id, 5000);
+    expect(r).toMatchObject({ simulationTime: t.sim.startAt, liveEdge: false });
+  });
+
+  it("an ended simulation reports no waiting and no live edge", async () => {
+    const t = setup();
+    await t.svc.start(t.id);
+    t.store.endSimulation(t.id);
+    expect(t.svc.tick(t.id, 5000)).toMatchObject({ endOfData: true, waitingForData: false, liveEdge: false });
   });
 });

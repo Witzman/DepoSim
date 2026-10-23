@@ -14,6 +14,8 @@ export interface Simulation {
   fees: FeeConfig;
   createdAt: number;
   endedAt: number | null;
+  /** A live simulation catches up to the present by itself and then follows real time. */
+  live: boolean;
 }
 
 export interface Depot {
@@ -28,6 +30,7 @@ export interface NewSimulation {
   startAt: number;
   startCash: Cent;
   fees: FeeConfig;
+  live?: boolean;
 }
 
 /** An order as stored: the order itself plus when it was placed and how it filled. */
@@ -110,6 +113,7 @@ interface SimulationRow {
   fees_json: string;
   created_at: number;
   ended_at: number | null;
+  live: number;
 }
 
 const toSimulation = (r: SimulationRow): Simulation => ({
@@ -122,21 +126,23 @@ const toSimulation = (r: SimulationRow): Simulation => ({
   fees: JSON.parse(r.fees_json) as FeeConfig,
   createdAt: r.created_at,
   endedAt: r.ended_at,
+  live: r.live === 1,
 });
 
 export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
   const now = opts.now ?? (() => Math.floor(Date.now() / 1000));
 
   const insertSimulation = db.prepare(
-    "insert into simulations (name, start_at, simulation_time, tempo, start_cash, fees_json, created_at) " +
-      "values (?, ?, ?, 1, ?, ?, ?)",
+    "insert into simulations (name, start_at, simulation_time, tempo, start_cash, fees_json, created_at, live) " +
+      "values (?, ?, ?, 1, ?, ?, ?, ?)",
   );
   const insertDepot = db.prepare("insert into depots (simulation_id, name, cash) values (?, 'Depot 1', ?)");
   const selectOne = db.prepare("select * from simulations where id = ?");
   const create = db.transaction((input: NewSimulation) => {
     const id = Number(
-      insertSimulation.run(input.name, input.startAt, input.startAt, input.startCash, JSON.stringify(input.fees), now())
-        .lastInsertRowid,
+      insertSimulation.run(
+        input.name, input.startAt, input.startAt, input.startCash, JSON.stringify(input.fees), now(), input.live ? 1 : 0,
+      ).lastInsertRowid,
     );
     insertDepot.run(id, input.startCash);
     return id;

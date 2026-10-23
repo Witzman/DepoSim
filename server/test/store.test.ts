@@ -1,3 +1,7 @@
+import Database from "better-sqlite3";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openDb } from "../src/db.js";
 import { DEFAULT_FEES } from "../src/domain/fees.js";
@@ -114,5 +118,36 @@ describe("store, depot and orders", () => {
     ).toThrow("boom");
     expect(store.getSimulation(sim.id)?.simulationTime).toBe(5000);
     expect(store.loadDepot(depotId).cash).toBe(1_000_000);
+  });
+});
+
+describe("store, live simulations", () => {
+  it("a simulation is not live unless it is created as one", () => {
+    const store = createStore(openDb(":memory:"));
+    expect(store.createSimulation(input).live).toBe(false);
+    expect(store.createSimulation({ ...input, live: true }).live).toBe(true);
+    expect(store.listSimulations().map((s) => s.live)).toEqual([false, true]);
+  });
+
+  it("opens a database made before the `live` column existed, adds the column and keeps the old rows", () => {
+    const dir = mkdtempSync(join(tmpdir(), "deposim-old-"));
+    try {
+      const path = join(dir, "old.sqlite");
+      const old = new Database(path);
+      old.exec(`create table simulations (
+        id integer primary key, name text not null, start_at integer not null, simulation_time integer not null,
+        tempo integer not null, start_cash integer not null, fees_json text not null, created_at integer not null, ended_at integer);
+        insert into simulations values (1, 'alt', 100, 100, 1, 1000000, '{}', 1, null);`);
+      old.close();
+
+      const db = openDb(path);
+      const columns = (db.prepare("pragma table_info(simulations)").all() as { name: string }[]).map((c) => c.name);
+      expect(columns).toContain("live");
+      expect(createStore(db).getSimulation(1)).toMatchObject({ name: "alt", live: false });
+      db.close();
+      openDb(path).close(); // opening it again does not fail on the column that is there now
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

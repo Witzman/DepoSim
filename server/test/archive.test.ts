@@ -121,6 +121,28 @@ describe("archive.ensureDay, a day the source says has no data", () => {
   });
 });
 
+describe("archive.ensureDay, a bar whose minute is not over", () => {
+  it("is not stored, and is stored with its final values once the minute is over", async () => {
+    let now = 1030; // the bar at t = 1000 ends at 1060
+    const all: Record<string, Bar[]> = { A: [bar(1000, 5)] };
+    const archive = createArchive(openDb(":memory:"), fakeSource(all).source, { now: () => now, minGapMs: 0 });
+    await archive.ensureDay("A", 0);
+    expect(archive.barsBetween("A", 0, DAY)).toEqual([]);
+
+    all.A = [bar(1000, 7)]; // the source now has the finished minute
+    now = 1061;
+    await archive.ensureDay("A", 0);
+    expect(archive.barsBetween("A", 0, DAY)).toEqual([bar(1000, 7)]);
+  });
+
+  it("keeps every bar of a day that is over", async () => {
+    const all: Record<string, Bar[]> = { A: [bar(DAY - 60, 5)] }; // the last minute of the day ends exactly at the end
+    const archive = createArchive(openDb(":memory:"), fakeSource(all).source, { now: () => DAY, minGapMs: 0 });
+    await archive.ensureDay("A", 0);
+    expect(archive.barsBetween("A", 0, DAY)).toHaveLength(1);
+  });
+});
+
 describe("archive lookups", () => {
   async function seeded() {
     const { source } = fakeSource({ A: [bar(1000, 10), bar(1060, 11), bar(1300, 12)] });

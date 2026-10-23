@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { openDb } from "../src/db.js";
 import { createArchive } from "../src/data/archive.js";
 import type { Bar, MarketData } from "../src/data/marketdata.js";
-import { OPEN_WINDOW_S, advance, skipClosed } from "../src/domain/clock.js";
+import {
+  CATCH_UP_LAG_S, LIVE_EDGE_S, LIVE_MARGIN_S, OPEN_WINDOW_S, advance, advanceCarry, effectiveTempo, liveLimit, skipClosed,
+} from "../src/domain/clock.js";
 
 const bar = (t: number): Bar => ({ t, o: 1, h: 1, l: 1, c: 1, v: 1 });
 
@@ -69,5 +71,60 @@ describe("skipClosed", () => {
   it("jumps from before the first bar of the data", async () => {
     const archive = await archiveWith(bars);
     expect(skipClosed(10, ["A", "B"], archive)).toBe(1000 + 60);
+  });
+});
+
+describe("liveLimit", () => {
+  it("is now minus the delay, in whole seconds", () => {
+    expect(liveLimit(1000, 900)).toBe(100);
+    expect(liveLimit(1000.9, 900)).toBe(100);
+  });
+});
+
+describe("effectiveTempo", () => {
+  it("is the chosen tempo for a replay, however far behind", () => {
+    expect(effectiveTempo(false, 30, 99999, 300)).toBe(30);
+  });
+
+  it("is the catch-up tempo for a live simulation that is more than the threshold behind, and real time otherwise", () => {
+    expect(CATCH_UP_LAG_S).toBe(120);
+    expect(effectiveTempo(true, 30, 121, 300)).toBe(300);
+    expect(effectiveTempo(true, 30, 120, 300)).toBe(1);
+    expect(effectiveTempo(true, 60, 0, 300)).toBe(1);
+  });
+
+  it("keeps the constants the spec names", () => {
+    expect(LIVE_EDGE_S).toBe(1800);
+    expect(LIVE_MARGIN_S).toBe(60);
+  });
+});
+
+describe("advance with a wide tempo", () => {
+  it("takes a tempo that is not one of the buttons", () => {
+    expect(advance(1000, 300, 250)).toBe(1075);
+  });
+});
+
+describe("advanceCarry", () => {
+  it("carries the part of a second that a short tick leaves over", () => {
+    expect(advanceCarry(1000, 1, 250, 0)).toEqual({ s: 1000, carry: 0.25 });
+    let s = 1000;
+    let carry = 0;
+    for (let i = 0; i < 4; i++) ({ s, carry } = advanceCarry(s, 1, 250, carry));
+    expect(s).toBe(1001);
+    expect(carry).toBe(0);
+  });
+
+  it("keeps tempo 5 and 30 exact over eight ticks of 250 ms (2 s of real time)", () => {
+    for (const [tempo, expected] of [[5, 10], [30, 60], [60, 120]] as const) {
+      let s = 1000;
+      let carry = 0;
+      for (let i = 0; i < 8; i++) ({ s, carry } = advanceCarry(s, tempo, 250, carry));
+      expect(s - 1000).toBe(expected);
+    }
+  });
+
+  it("leaves nothing over when the tick is a whole number of simulated seconds", () => {
+    expect(advanceCarry(1000, 60, 250, 0)).toEqual({ s: 1015, carry: 0 });
   });
 });

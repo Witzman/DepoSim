@@ -2,13 +2,17 @@ import type { Instrument, Venue } from "./config.js";
 import type { Archive } from "./data/archive.js";
 import { type Bar, MarketDataError } from "./data/marketdata.js";
 import { type DepotState, type NewOrder, depotValue, fillOrder, positionValue, triggersLimit, validateOrder } from "./domain/broker.js";
-import { OPEN_WINDOW_S, type Tempo, advance, skipClosed } from "./domain/clock.js";
+import {
+  CATCH_UP_LAG_S, LIVE_EDGE_S, LIVE_MARGIN_S, OPEN_WINDOW_S, type Tempo, advanceCarry, effectiveTempo, liveLimit, skipClosed,
+} from "./domain/clock.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
 import type { Cent } from "./domain/money.js";
 import type { OrderRecord, Simulation, Store } from "./store.js";
 
 const DAY = 86400;
 const LOOKAHEAD_DAYS = 7;
+const DEFAULT_DELAY_S = 900;
+const DEFAULT_CATCH_UP_TEMPO = 300;
 const dayOf = (t: number) => Math.floor(t / DAY) * DAY;
 
 export interface SessionDeps {
@@ -19,6 +23,10 @@ export interface SessionDeps {
   fxSymbol: string;
   /** Current time in UTC seconds. */
   now?: () => number;
+  /** How far behind the present the price source is. */
+  delayS?: number;
+  /** The tempo a live simulation catches up at. */
+  catchUpTempo?: number;
 }
 
 export interface TickResult {
@@ -27,6 +35,10 @@ export interface TickResult {
   newBars: Record<string, Bar[]>;
   /** No later bar is in the archive. The caller may try `loadMore`. */
   endOfData: boolean;
+  /** The clock was held back at the newest known bar, and the present is further on. */
+  waitingForData: boolean;
+  /** The newest known bar is close to the live limit, so the market is running now. */
+  liveEdge: boolean;
 }
 
 export interface PositionView {
@@ -43,6 +55,11 @@ export interface Snapshot {
   prices: Record<string, { price: number; barT: number }>;
   fx: number | null;
   venues: Record<Venue, boolean>;
+  /** The latest simulation time that may be shown: now minus the delay. */
+  liveLimit: number;
+  delayS: number;
+  /** Replay, catching up to the present, or at the present. */
+  phase: "replay" | "catchup" | "live";
 }
 
 export type PlaceResult = { ok: true; orderId: number } | { ok: false; reason: string };
@@ -57,7 +74,11 @@ export class SessionService {
   private readonly bySymbol: Map<string, Instrument>;
   private readonly fx: string;
   private readonly now: () => number;
+  private readonly delayS: number;
+  private readonly catchUpTempo: number;
   private readonly running = new Set<number>();
+  /** The part of a simulated second a short tick left over, per simulation. Lost on a restart, which costs under a second. */
+  private readonly carry = new Map<number, number>();
 
   constructor(deps: SessionDeps) {
     this.store = deps.store;
@@ -66,6 +87,8 @@ export class SessionService {
     this.bySymbol = new Map(deps.instruments.map((i) => [i.symbol, i]));
     this.fx = deps.fxSymbol;
     this.now = deps.now ?? (() => Date.now() / 1000);
+    this.delayS = deps.delayS ?? DEFAULT_DELAY_S;
+    this.catchUpTempo = deps.catchUpTempo ?? DEFAULT_CATCH_UP_TEMPO;
   }
 
   /** Loads the start day of every instrument. Throws, and starts nothing, if there are no prices. */
@@ -112,14 +135,40 @@ export class SessionService {
    */
   tick(id: number, realMs: number): TickResult {
     const sim = this.sim(id);
-    if (sim.endedAt !== null) return { simulationTime: sim.simulationTime, newBars: {}, endOfData: true };
+    if (sim.endedAt !== null) {
+      return { simulationTime: sim.simulationTime, newBars: {}, endOfData: true, waitingForData: false, liveEdge: false };
+    }
 
     const sOld = sim.simulationTime;
-    let target = advance(sOld, sim.tempo, realMs);
     const symbols = this.instruments.map((i) => i.symbol);
-    const skipped = skipClosed(target, symbols, this.archive);
+
+    // The time may not pass now minus the delay (L), and may not pass the newest bar we know
+    // (H): a minute whose bar is fetched later would be skipped, and no order would see it.
+    const limitL = liveLimit(this.now(), this.delayS);
+    const lag = limitL - sOld;
+    const tempo = effectiveTempo(sim.live, sim.tempo, lag, this.catchUpTempo);
+    let raw: number;
+    let carryOut = 0;
+    let advanced = false;
+    if (sim.live && lag <= CATCH_UP_LAG_S) {
+      raw = limitL; // close enough: a live simulation sits on the limit
+    } else {
+      const step = advanceCarry(sOld, tempo, realMs, this.carry.get(id) ?? 0);
+      raw = step.s;
+      carryOut = step.carry;
+      advanced = true;
+    }
+    const capped = Math.min(raw, limitL);
+    const skipped = skipClosed(capped, symbols, this.archive);
     const endOfData = skipped === undefined;
-    if (skipped !== undefined) target = skipped;
+    const target0 = skipped === undefined ? capped : Math.min(skipped, limitL);
+
+    const horizon = this.horizon();
+    const liveEdge = horizon !== undefined && limitL - horizon <= LIVE_EDGE_S;
+    const ceiling = horizon === undefined ? sOld : Math.max(sOld, liveEdge ? horizon - LIVE_MARGIN_S : horizon);
+    const waitingForData = target0 > ceiling;
+    const target = Math.max(sOld, Math.min(target0, ceiling)); // never back, never past the horizon
+    this.carry.set(id, advanced && target === raw ? carryOut : 0);
 
     // A bar that begins at t is finished at t + 60, so the window is sOld < t + 60 <= target.
     const newBars: Record<string, Bar[]> = {};
@@ -141,7 +190,17 @@ export class SessionService {
       this.store.setSimulationTime(id, target);
     });
 
-    return { simulationTime: target, newBars, endOfData };
+    return { simulationTime: target, newBars, endOfData, waitingForData, liveEdge };
+  }
+
+  /** The end of the newest bar of any instrument (the exchange rate is left out), if there is one. */
+  private horizon(): number | undefined {
+    let h: number | undefined;
+    for (const inst of this.instruments) {
+      const bar = this.archive.lastCompleteBar(inst.symbol, Number.MAX_SAFE_INTEGER);
+      if (bar && (h === undefined || bar.t + 60 > h)) h = bar.t + 60;
+    }
+    return h;
   }
 
   placeOrder(id: number, depotId: number, o: NewOrder): PlaceResult {
@@ -226,6 +285,10 @@ export class SessionService {
       if (ref) refs.set(inst.symbol, ref);
     }
 
+    const limitL = liveLimit(this.now(), this.delayS);
+    const lag = limitL - s;
+    const phase: Snapshot["phase"] = lag <= CATCH_UP_LAG_S ? "live" : simulation.live ? "catchup" : "replay";
+
     return {
       simulation,
       running: this.isRunning(id),
@@ -242,6 +305,9 @@ export class SessionService {
       prices,
       fx: this.archive.lastCompleteBar(this.fx, s)?.c ?? null,
       venues: { XETRA: this.venueOpen("XETRA", s), US: this.venueOpen("US", s) },
+      liveLimit: limitL,
+      delayS: this.delayS,
+      phase,
     };
   }
 

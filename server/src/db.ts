@@ -28,7 +28,8 @@ create table if not exists simulations (
   start_cash integer not null,
   fees_json text not null,
   created_at integer not null,
-  ended_at integer
+  ended_at integer,
+  live integer not null default 0
 );
 create table if not exists depots (
   id integer primary key,
@@ -66,5 +67,11 @@ export function openDb(path: string): Db {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
+  // A database made before live simulations has no `live` column. `create table if not exists`
+  // leaves it as it was, so the column is added here, and the old rows become replays.
+  const columns = db.prepare("pragma table_info(simulations)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "live")) {
+    db.exec("alter table simulations add column live integer not null default 0");
+  }
   return db;
 }

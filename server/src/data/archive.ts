@@ -75,7 +75,11 @@ export function createArchive(db: Db, source: MarketData, opts: ArchiveOptions =
           if (!(err instanceof MarketDataError && err.kind === "no_data")) throw err;
           bars = [];
         }
-        store(symbol, dayStartT, bars, now() >= dayEnd ? 1 : 0);
+        // The source also sends the minute that is still running, with incomplete values, and
+        // `insert or ignore` would keep them for good. Only finished minutes are stored; the
+        // rest is fetched again, because a day that is not over is fetched again.
+        const finished = bars.filter((b) => b.t + 60 <= now());
+        store(symbol, dayStartT, finished, now() >= dayEnd ? 1 : 0);
       })().finally(() => inflight.delete(key));
       inflight.set(key, p);
       return p;
