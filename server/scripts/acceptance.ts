@@ -162,6 +162,81 @@ async function main() {
     simId = undefined;
     ok("gelöscht");
 
+    step("Nachspielen bei Tempo 1: die Uhr bewegt sich (sie stand früher still)");
+    {
+      const r = await http("POST", "/api/simulations", { name: "Abnahme Tempo 1", startAt });
+      check(r.status === 201, `Anlegen: HTTP ${r.status} ${r.json?.error ?? ""}`);
+      simId = r.json.id as number;
+      const c = new Conn(simId);
+      conns.push(c);
+      const snap = await c.waitFor((m) => m.type === "snapshot", 10_000, "Snapshot");
+      check(snap.simulation.tempo === 1 && snap.simulation.live === false, "ein neues Nachspielen ist nicht live und läuft mit 1x");
+      c.send({ type: "run" });
+      await sleep(5000);
+      const mark = c.msgs.length;
+      c.send({ type: "pause" });
+      const stopped = await c.waitFor((m) => m.type === "snapshot" && m.running === false, 5000, "Pause", mark);
+      const moved = stopped.simulation.simulationTime - startAt;
+      check(moved >= 4 && moved <= 8, `bei 1x sind in 5 s ${moved} s Simulationszeit vergangen (erwartet etwa 5)`);
+      ok(`in 5 s Echtzeit ${moved} s Simulationszeit`);
+      c.close();
+      await http("DELETE", `/api/simulations/${simId}`);
+      simId = undefined;
+    }
+
+    step("Live-Simulation: ab jetzt, die Uhr läuft nie über die Live-Grenze");
+    {
+      const t0 = Math.floor(Date.now() / 1000);
+      const r = await http("POST", "/api/simulations", { name: "Abnahme Live", live: true });
+      check(r.status === 201, `Live anlegen: HTTP ${r.status} ${r.json?.error ?? ""}`);
+      check(r.json.live === true, "die Simulation ist nicht als live angelegt");
+      simId = r.json.id as number;
+      const c = new Conn(simId);
+      conns.push(c);
+      const first = await c.waitFor((m) => m.type === "snapshot", 10_000, "Snapshot der Live-Simulation");
+      check(first.phase === "live" || first.phase === "catchup", `Phase ${first.phase}`);
+      const t1 = Math.floor(Date.now() / 1000);
+      check(first.delayS === 900, `Zeitversatz ${first.delayS} s statt 900 s`);
+      check(first.liveLimit >= t0 - 900 - 5 && first.liveLimit <= t1 - 900 + 5, "die Live-Grenze liegt nicht bei jetzt minus 15 Minuten");
+      check(first.simulation.simulationTime <= first.liveLimit, "der Start liegt hinter der Live-Grenze");
+      ok(`Phase ${first.phase}, Start ${new Date(first.simulation.simulationTime * 1000).toISOString()}, Grenze ${new Date(first.liveLimit * 1000).toISOString()}`);
+
+      const mark = c.msgs.length;
+      c.send({ type: "tempo", tempo: 60 });
+      await c.waitFor((m) => m.type === "notice" && /Livebetrieb/.test(m.text), 5000, "Hinweis zum Tempo", mark);
+      ok("das Tempo lässt sich im Livebetrieb nicht ändern");
+
+      const runMark = c.msgs.length;
+      c.send({ type: "run" });
+      // Either the server says why it stops or waits, or the clock ticks on. Looking again at a day
+      // that is not over yet takes about ten seconds (19 calls), so allow thirty.
+      const end = Date.now() + 30_000;
+      while (Date.now() < end) {
+        const now = c.msgs.slice(runMark);
+        if (now.some((m) => m.type === "notice") || now.filter((m) => m.type === "tick").length >= 5) break;
+        await sleep(100);
+      }
+      const seen = c.msgs.slice(runMark);
+      check(!seen.some((m) => m.type === "error"), "der Server meldet einen Fehler");
+      const ticks = seen.filter((m) => m.type === "tick");
+      for (const m of ticks) check(m.simulationTime <= m.liveLimit, "ein Tick liegt hinter der Live-Grenze");
+      const note = seen.find((m) => m.type === "notice")?.text;
+      check(note !== undefined || ticks.length >= 5, "nach 30 s weder ein Hinweis noch laufende Ticks: die Uhr steht ohne Erklärung");
+      ok(`${ticks.length} Ticks, alle bis zur Live-Grenze${note ? `; Hinweis: "${note}"` : ""}`);
+      console.log(
+        note?.startsWith("Warte")
+          ? "    (am Rand der Gegenwart: wartet auf neue Kurse)"
+          : note?.startsWith("Ende")
+            ? "    (Markt geschlossen: pausiert mit \"Ende der Daten\")"
+            : "    (Markt läuft: die Uhr folgt der Grenze)",
+      );
+      c.send({ type: "pause" });
+      c.close();
+      const del2 = await http("DELETE", `/api/simulations/${simId}`);
+      check(del2.status === 204, `Löschen: HTTP ${del2.status}`);
+      simId = undefined;
+    }
+
     console.log("\nABNAHME BESTANDEN");
   } finally {
     conns.forEach((c) => c.close());

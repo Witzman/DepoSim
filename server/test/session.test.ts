@@ -430,6 +430,28 @@ describe("a live simulation", () => {
   });
 });
 
+describe("the phase of a live simulation when the market is shut", () => {
+  it("is live, not catching up, when no bar lies ahead of the clock: there is nothing to catch up on", async () => {
+    // The clock stands where the newest bar ends (AAPL, 14:30), the live limit is days ahead.
+    const t = setup({ live: true, startAt: D0 + 14 * H + 1800 });
+    await t.svc.start(t.id);
+    expect(t.svc.snapshot(t.id)).toMatchObject({ phase: "live" });
+    expect(t.svc.snapshot(t.id).liveLimit - t.svc.snapshot(t.id).simulation.simulationTime).toBeGreaterThan(3600);
+  });
+
+  it("is catching up while bars lie ahead of the clock", async () => {
+    const t = setup({ live: true, startAt: D0 + 7 * H + 600 });
+    await t.svc.start(t.id);
+    expect(t.svc.snapshot(t.id).phase).toBe("catchup");
+  });
+
+  it("a replay at the end of its data stays a replay", async () => {
+    const t = setup({ startAt: D0 + 14 * H + 1800 });
+    await t.svc.start(t.id);
+    expect(t.svc.snapshot(t.id).phase).toBe("replay");
+  });
+});
+
 describe("the data horizon", () => {
   const T0725 = D0 + 7 * H + 25 * 60;
   const T0730 = D0 + 7 * H + 30 * 60;

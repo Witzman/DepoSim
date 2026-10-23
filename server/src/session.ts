@@ -317,7 +317,12 @@ export class SessionService {
 
     const limitL = liveLimit(this.now(), this.delayS);
     const lag = limitL - s;
-    const phase: Snapshot["phase"] = lag <= CATCH_UP_LAG_S ? "live" : simulation.live ? "catchup" : "replay";
+    // "Catching up" means there is something ahead to catch up on: a known bar after the clock.
+    // A live simulation at the end of the data (the market is shut) has nothing to catch up on.
+    const horizon = this.horizon();
+    const barsAhead = horizon !== undefined && s < horizon;
+    const phase: Snapshot["phase"] =
+      lag <= CATCH_UP_LAG_S ? "live" : simulation.live ? (barsAhead ? "catchup" : "live") : "replay";
 
     return {
       simulation,
