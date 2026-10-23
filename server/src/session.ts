@@ -286,7 +286,11 @@ export class SessionService {
       }
       const exec = previewCost(o.side, o.qty, ref, o.kind, o.limitPrice, sim.fees);
 
-      const affordable = o.side === "buy" ? exec.total <= state.cash : (state.positions.get(symbol)?.qty ?? 0) >= o.qty;
+      // A buy needs the cash; a sell needs the shares, and its fees may exceed its proceeds.
+      const affordable =
+        o.side === "buy"
+          ? exec.total <= state.cash
+          : (state.positions.get(symbol)?.qty ?? 0) >= o.qty && state.cash + exec.total >= 0;
       if (!affordable) {
         o.status = "rejected";
         this.store.setOrderStatus(o.id, "rejected");

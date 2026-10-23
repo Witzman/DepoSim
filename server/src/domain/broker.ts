@@ -59,6 +59,18 @@ export function validateOrder(state: DepotState, o: NewOrder, ref: Ref | undefin
     const note = reserved > 0 ? ` (${reserved} davon in offenen Verkaufsorders)` : "";
     return { ok: false, reason: `Du hältst nur ${held} Stück ${o.symbol}${note}.` };
   }
+  // With a minimum commission a cheap position can sell for less than the fees. The difference
+  // comes out of the cash, which must not go below zero.
+  const priceable = ref !== undefined && !(ref.currency === "USD" && ref.eurUsd === undefined);
+  if (priceable) {
+    const after = state.cash + previewCost("sell", o.qty, ref, o.kind, o.limitPrice, fees).total;
+    if (after < 0) {
+      return {
+        ok: false,
+        reason: `Der Erlös deckt die Gebühren nicht, und das Guthaben reicht für die Differenz nicht (es fehlen ${eur(-after)}).`,
+      };
+    }
+  }
   return { ok: true };
 }
 
@@ -74,6 +86,7 @@ export function fillOrder(state: DepotState, o: Order, execution: CostPreview): 
     });
   } else {
     if (!pos || pos.qty < o.qty) throw new Error("selling more than is held");
+    if (state.cash + execution.total < 0) throw new Error("the fees of this sale exceed its proceeds and the cash cannot cover it");
     state.cash += execution.total;
     if (pos.qty === o.qty) {
       state.positions.delete(o.symbol);

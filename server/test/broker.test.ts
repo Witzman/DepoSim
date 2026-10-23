@@ -61,6 +61,46 @@ describe("fillOrder", () => {
   });
 });
 
+describe("a sell whose fees are higher than its proceeds", () => {
+  // 1 share at 0.10 EUR: gross 10 cents, the minimum commission of 490 cents makes the total -480.
+  const cheap = () => previewCost("sell", 1, eur(0.1), "market", undefined, DEFAULT_FEES);
+
+  it("is the case in point: the cash in is negative", () => {
+    expect(cheap().total).toBe(-480);
+  });
+
+  it("is refused by fillOrder when the cash cannot cover the difference, and nothing changes", () => {
+    const s = depot(100, { "SAP.DE": { qty: 1, cost: 100 } });
+    const o = order({ side: "sell", qty: 1 });
+    expect(() => fillOrder(s, o, cheap())).toThrow();
+    expect(s.cash).toBe(100);
+    expect(s.positions.get("SAP.DE")).toEqual({ qty: 1, cost: 100 });
+    expect(o.status).toBe("open");
+  });
+
+  it("goes through when the cash covers the difference, and then pays it", () => {
+    const s = depot(1000, { "SAP.DE": { qty: 1, cost: 100 } });
+    fillOrder(s, order({ side: "sell", qty: 1 }), cheap());
+    expect(s.cash).toBe(520);
+    expect(s.positions.has("SAP.DE")).toBe(false);
+  });
+
+  it("is rejected by validateOrder with the reason, and accepted when the cash covers it", () => {
+    const sell = { symbol: "SAP.DE", side: "sell", kind: "market", qty: 1 } as const;
+    const poor = depot(100, { "SAP.DE": { qty: 1, cost: 100 } });
+    const r = validateOrder(poor, sell, eur(0.1), DEFAULT_FEES);
+    expect(r).toMatchObject({ ok: false, reason: expect.stringMatching(/Gebühren/) });
+    const rich = depot(1000, { "SAP.DE": { qty: 1, cost: 100 } });
+    expect(validateOrder(rich, sell, eur(0.1), DEFAULT_FEES)).toEqual({ ok: true });
+  });
+
+  it("is judged at the limit price for a limit order", () => {
+    const poor = depot(100, { "SAP.DE": { qty: 1, cost: 100 } });
+    const r = validateOrder(poor, { symbol: "SAP.DE", side: "sell", kind: "limit", qty: 1, limitPrice: 0.1 }, eur(500), DEFAULT_FEES);
+    expect(r.ok).toBe(false);
+  });
+});
+
 describe("validateOrder", () => {
   const market = (o: Partial<NewOrder> = {}): NewOrder => ({ symbol: "SAP.DE", side: "buy", kind: "market", qty: 1, ...o });
   const ok = (s: DepotState, o: NewOrder, ref = eur(214.4)) => validateOrder(s, o, ref, DEFAULT_FEES);

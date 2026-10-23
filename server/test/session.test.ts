@@ -10,6 +10,7 @@ import { AAPL, D0, D1, FX, H, SAP, makeSource } from "./fakes.js";
 interface SetupOpts {
   startAt?: number;
   startCash?: number;
+  fees?: typeof DEFAULT_FEES;
   fail?: MarketDataErrorKind;
   noDataFor?: string[];
   now?: number;
@@ -24,7 +25,7 @@ function setup(opts: SetupOpts = {}) {
   const make = () => new SessionService({ store, archive, instruments: [SAP, AAPL], fxSymbol: FX, now: () => now });
   const svc = make();
   const sim = store.createSimulation({
-    name: "T", startAt: opts.startAt ?? D0 + 7 * H + 600, startCash: opts.startCash ?? 1_000_000, fees: DEFAULT_FEES,
+    name: "T", startAt: opts.startAt ?? D0 + 7 * H + 600, startCash: opts.startCash ?? 1_000_000, fees: opts.fees ?? DEFAULT_FEES,
   });
   const depotId = store.listDepots(sim.id)[0].id;
   return { db, store, archive, svc, make, sim, id: sim.id, depotId, calls };
@@ -187,6 +188,20 @@ describe("tick", () => {
     expect(orderOf(t, (a as { orderId: number }).orderId).status).toBe("filled");
     expect(orderOf(t, (b as { orderId: number }).orderId).status).toBe("rejected");
     expect(t.svc.snapshot(t.id).depot.cash).toBe(30_000 - 10990);
+  });
+
+  it("rejects an open sell at fill time when its fees would take the cash below zero", async () => {
+    // A commission of exactly 200 EUR (min and max) makes selling one 105 EUR share cost 95 EUR net.
+    const t = setup({ fees: { ...DEFAULT_FEES, commissionMin: 20_000, commissionMax: 20_000 } });
+    await t.svc.start(t.id);
+    t.store.saveBalance(t.depotId, 1000, new Map([["SAP.DE", { qty: 1, cost: 100 }]]));
+    const id = t.store.insertOrder(t.depotId, { symbol: "SAP.DE", side: "sell", kind: "limit", qty: 1, limitPrice: 105 }, t.sim.startAt);
+    t.svc.setTempo(t.id, 60);
+    t.svc.tick(t.id, 7000); // bar 15 reaches the limit: gross 10,500 cents, commission 20,000 cents
+    expect(orderOf(t, id).status).toBe("rejected");
+    const snap = t.svc.snapshot(t.id);
+    expect(snap.depot.cash).toBe(1000);
+    expect(snap.depot.positions).toEqual([{ symbol: "SAP.DE", qty: 1, cost: 100, value: expect.any(Number) }]);
   });
 
   it("jumps over the hours when every market is closed to the next bar", async () => {
