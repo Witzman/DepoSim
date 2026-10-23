@@ -1,5 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 
+test.beforeEach(async ({ request }) => {
+  // The server keeps its simulations between tests, and the app opens the newest on load.
+  for (const s of await (await request.get("/api/simulations")).json()) await request.delete(`/api/simulations/${s.id}`);
+});
+
 async function createSimulation(page: Page, date = "2026-10-23") {
   await page.goto("/");
   await page.getByRole("button", { name: "Neue Simulation" }).click();

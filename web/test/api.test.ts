@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  ApiError, createSimulation, deleteSimulation, getBars, listSimulations, parseServerMessage, socketUrl,
+  ApiError, cancelOrder, createSimulation, deleteSimulation, getBars, listSimulations, parseServerMessage,
+  placeOrder, previewOrder, socketUrl,
 } from "../src/api.js";
 
 function stubFetch(status: number, body: unknown) {
@@ -86,5 +87,38 @@ describe("parseServerMessage", () => {
     expect(parseServerMessage('{"type":"surprise"}')).toBeNull();
     expect(parseServerMessage("42")).toBeNull();
     expect(parseServerMessage("null")).toBeNull();
+  });
+});
+
+describe("orders", () => {
+  const order = { symbol: "SAP.DE", side: "buy", kind: "market", qty: 1 } as const;
+
+  it("previewOrder posts the order and returns the cost and the problem", async () => {
+    const fn = stubFetch(200, { cost: { total: 11395 }, problem: "Das Guthaben reicht nicht." });
+    const r = await previewOrder(3, order);
+    expect(r).toEqual({ cost: { total: 11395 }, problem: "Das Guthaben reicht nicht." });
+    const [url, init] = fn.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/simulations/3/orders/preview");
+    expect(JSON.parse(String(init.body))).toEqual(order);
+  });
+
+  it("previewOrder raises the server's reason, for example when there is no price yet", async () => {
+    stubFetch(400, { error: "Für AAPL gibt es noch keinen Kurs." });
+    await expect(previewOrder(3, { ...order, symbol: "AAPL" })).rejects.toThrow("Für AAPL gibt es noch keinen Kurs.");
+  });
+
+  it("placeOrder returns the order id and raises the rejection", async () => {
+    stubFetch(201, { orderId: 12 });
+    await expect(placeOrder(3, order)).resolves.toBe(12);
+    stubFetch(400, { error: "Die Menge muss eine positive ganze Zahl sein." });
+    await expect(placeOrder(3, { ...order, qty: 0 })).rejects.toThrow(/Menge/);
+  });
+
+  it("cancelOrder deletes the order", async () => {
+    const fn = stubFetch(204, undefined);
+    await expect(cancelOrder(3, 12)).resolves.toBeUndefined();
+    const [url, init] = fn.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/simulations/3/orders/12");
+    expect(init.method).toBe("DELETE");
   });
 });

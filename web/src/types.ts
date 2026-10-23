@@ -63,6 +63,24 @@ export interface DepotView {
   orders: OrderRecord[];
 }
 
+/** What the server says an order would cost; `total` is cash out for a buy, cash in for a sell. */
+export interface CostPreview {
+  execPrice: number;
+  fxRateEff?: number;
+  gross: number;
+  commission: number;
+  foreign: number;
+  total: number;
+}
+
+export interface OrderInput {
+  symbol: string;
+  side: "buy" | "sell";
+  kind: "market" | "limit";
+  qty: number;
+  limitPrice?: number;
+}
+
 export interface Snapshot {
   simulation: Simulation;
   running: boolean;

@@ -1,4 +1,4 @@
-import type { Bar, ClientMessage, Instrument, ServerMessage, Simulation } from "./types.js";
+import type { Bar, ClientMessage, CostPreview, Instrument, OrderInput, ServerMessage, Simulation } from "./types.js";
 
 /** An error with a message that can be shown to the person as it is. */
 export class ApiError extends Error {
@@ -49,6 +49,13 @@ export async function getBars(id: number, symbol: string, limit: number): Promis
   const url = `/api/simulations/${id}/bars?symbol=${encodeURIComponent(symbol)}&limit=${limit}`;
   return (await request<{ bars: Bar[] }>(url)).bars;
 }
+
+export const previewOrder = (id: number, o: OrderInput) =>
+  request<{ cost: CostPreview; problem?: string }>(`/api/simulations/${id}/orders/preview`, json("POST", o));
+export const placeOrder = async (id: number, o: OrderInput) =>
+  (await request<{ orderId: number }>(`/api/simulations/${id}/orders`, json("POST", o))).orderId;
+export const cancelOrder = (id: number, orderId: number) =>
+  request<void>(`/api/simulations/${id}/orders/${orderId}`, { method: "DELETE" });
 
 /** The socket follows the page: ws for http, wss for https, the same host. */
 export function socketUrl(id: number, loc: { protocol: string; host: string }): string {

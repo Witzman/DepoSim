@@ -88,8 +88,9 @@ h2 { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-s
 
 input, select {
   font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
-  border-radius: 8px; padding: 6px 8px; max-width: 100%;
+  border-radius: 8px; padding: 6px 8px; max-width: 100%; min-width: 0;
 }
+.fields input, .fields select { width: 100%; }
 
 .clock { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap); justify-content: space-between; }
 .clock .time { font-size: 1.35rem; font-weight: 600; }
@@ -113,3 +114,35 @@ dialog::backdrop { background: rgb(0 0 0 / 0.45); }
 dialog form { display: grid; gap: 10px; }
 dialog label { display: grid; gap: 4px; font-size: 0.9rem; color: var(--muted); }
 dialog .actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+.row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.gap-top { margin-top: var(--gap); }
+
+.trade-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: var(--gap); align-items: start; }
+
+.ticket { display: grid; gap: 10px; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+.fields label { display: grid; gap: 4px; font-size: 0.85rem; color: var(--muted); }
+.cost, .totals { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; margin: 0; }
+.cost dt, .totals dt { color: var(--muted); }
+.cost dd, .totals dd { margin: 0; text-align: right; }
+.cost dt:last-of-type, .cost dd:last-of-type { border-top: 1px solid var(--border); padding-top: 4px; margin-top: 2px; color: var(--text); }
+
+.positions { width: 100%; border-collapse: collapse; margin-top: var(--gap); font-size: 0.9rem; }
+.positions th { text-align: right; font-weight: 500; color: var(--muted); padding: 4px 6px; }
+.positions td { text-align: right; padding: 4px 6px; border-top: 1px solid var(--border); }
+.positions th:first-child, .positions td:first-child { text-align: left; }
+@container (max-width: 560px) { .positions { font-size: 0.8rem; } }
+
+.orders { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.orders li { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.venue + .venue { margin-top: var(--gap); }
+.watch { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; }
+.watch-row {
+  font: inherit; color: inherit; background: transparent; border: 1px solid transparent; border-radius: 8px;
+  display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 4px 8px; cursor: pointer; text-align: left;
+}
+.watch-row:hover { border-color: var(--border); }
+.watch-row[aria-current="true"] { border-color: var(--accent); }
+.watch-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
