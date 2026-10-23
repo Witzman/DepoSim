@@ -1,7 +1,7 @@
 node_modules/
 server/dist/
 web/dist/
-data/
+/data/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
