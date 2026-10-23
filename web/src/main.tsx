@@ -1,3 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { App } from "./App.js";
+import "./theme.css";
 
-createRoot(document.getElementById("root")!).render(<h1>DepoSim</h1>);
+createRoot(document.getElementById("root")!).render(<App />);
