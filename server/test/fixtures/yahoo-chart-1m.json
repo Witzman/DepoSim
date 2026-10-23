@@ -1,0 +1,88 @@
+{
+ "chart": {
+  "result": [
+   {
+    "meta": {
+     "currency": "EUR",
+     "symbol": "EUNL.DE",
+     "exchangeName": "GER",
+     "fullExchangeName": "XETRA",
+     "instrumentType": "ETF",
+     "firstTradeDate": 1253862000,
+     "regularMarketTime": 1792769771,
+     "hasPrePostMarketData": false,
+     "gmtoffset": 7200,
+     "timezone": "CEST",
+     "exchangeTimezoneName": "Europe/Berlin",
+     "regularMarketPrice": 129.84,
+     "regularMarketChangePercent": -0.073,
+     "fulldayPrice": 129.84,
+     "fulldayChange": -0.095,
+     "fulldayChangePercent": -0.073,
+     "fiftyTwoWeekHigh": 132.41,
+     "fiftyTwoWeekLow": 106.97,
+     "regularMarketDayHigh": 130.18,
+     "regularMarketDayLow": 129.035,
+     "regularMarketVolume": 323805,
+     "longName": "iShares Core MSCI World UCITS ETF USD (Acc)",
+     "shortName": "iShsIII-Core MSCI World U.ETF R",
+     "chartPreviousClose": 129.935,
+     "previousClose": 129.935,
+     "scale": 3,
+     "priceHint": 2,
+     "dataGranularity": "1m",
+     "range": "1d"
+    },
+    "timestamp": [
+     1792739040,
+     1792739100,
+     1792739160,
+     1792739220,
+     1792739280
+    ],
+    "indicators": {
+     "quote": [
+      {
+       "high": [
+        129.8800048828125,
+        129.86000061035156,
+        129.86000061035156,
+        129.86000061035156,
+        129.85000610351562
+       ],
+       "volume": [
+        0,
+        13,
+        43,
+        36,
+        2
+       ],
+       "open": [
+        129.8800048828125,
+        129.86000061035156,
+        129.86000061035156,
+        129.86000061035156,
+        129.85000610351562
+       ],
+       "low": [
+        129.86500549316406,
+        129.85499572753906,
+        129.85499572753906,
+        129.85000610351562,
+        129.85000610351562
+       ],
+       "close": [
+        129.86500549316406,
+        129.85499572753906,
+        129.85499572753906,
+        129.85000610351562,
+        129.85000610351562
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "error": null
+ }
+}

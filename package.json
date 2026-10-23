@@ -13,7 +13,8 @@
     "build:web": "vite build --config web/vite.config.ts",
     "build:server": "tsc -p tsconfig.json",
     "start": "node server/dist/main.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "probe": "tsx server/scripts/probe.ts"
   },
   "dependencies": {
     "@fastify/static": "^10.1.7",
