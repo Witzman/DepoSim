@@ -99,6 +99,28 @@ describe("archive.ensureDay", () => {
   });
 });
 
+describe("archive.ensureDay, a day the source says has no data", () => {
+  const noData: MarketData = { async bars() { calls++; throw new MarketDataError("no_data", "holiday"); } };
+  let calls = 0;
+
+  it("is an empty day that is marked fetched, and is not asked again once it is over", async () => {
+    calls = 0;
+    const archive = createArchive(openDb(":memory:"), noData, { now: () => 10 * DAY, minGapMs: 0 });
+    await archive.ensureDay("A", 0);
+    await archive.ensureDay("A", 0);
+    expect(calls).toBe(1);
+    expect(archive.barsBetween("A", 0, DAY)).toEqual([]);
+  });
+
+  it("is not final while the day is not over, because trading may start later", async () => {
+    calls = 0;
+    const archive = createArchive(openDb(":memory:"), noData, { now: () => DAY / 2, minGapMs: 0 });
+    await archive.ensureDay("A", 0);
+    await archive.ensureDay("A", 0);
+    expect(calls).toBe(2);
+  });
+});
+
 describe("archive lookups", () => {
   async function seeded() {
     const { source } = fakeSource({ A: [bar(1000, 10), bar(1060, 11), bar(1300, 12)] });

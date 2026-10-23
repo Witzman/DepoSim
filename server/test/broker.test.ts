@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Bar } from "../src/data/marketdata.js";
 import {
   type DepotState, type NewOrder, type Order,
-  depotValue, fillOrder, triggersLimit, validateOrder,
+  depotValue, fillOrder, positionValue, triggersLimit, validateOrder,
 } from "../src/domain/broker.js";
 import { DEFAULT_FEES, previewCost } from "../src/domain/fees.js";
 
@@ -151,5 +151,13 @@ describe("depotValue", () => {
 
   it("is just the cash with no positions", () => {
     expect(depotValue(depot(1234), new Map())).toBe(1234);
+  });
+});
+
+describe("positionValue", () => {
+  it("is quantity times price in EUR, USD at the plain rate, and the cost when there is no price", () => {
+    expect(positionValue({ qty: 10, cost: 215043 }, eur(214.4))).toBe(214400);
+    expect(positionValue({ qty: 5, cost: 157989 }, usd(347.725, 1.1206))).toBe(155151);
+    expect(positionValue({ qty: 10, cost: 215043 }, undefined)).toBe(215043);
   });
 });

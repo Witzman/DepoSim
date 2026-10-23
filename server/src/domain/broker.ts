@@ -94,22 +94,22 @@ export function triggersLimit(o: Order, bar: Bar): boolean {
 }
 
 /**
- * Cash plus every position at its last price. USD converts at the plain rate, with no
- * markup and no spread: this is a value, not a trade. A position with no price yet counts
- * at its cost instead of dropping to zero.
+ * One position at its last price. USD converts at the plain rate, with no markup and no
+ * spread: this is a value, not a trade. With no price yet it counts at its cost instead of
+ * dropping to zero.
  */
+export function positionValue(pos: { qty: number; cost: Cent }, ref: Ref | undefined): Cent {
+  if (!ref) return pos.cost;
+  if (ref.currency === "USD") {
+    if (ref.eurUsd === undefined) throw new Error("no EUR/USD rate for a USD price");
+    return roundCent((pos.qty * ref.price) / ref.eurUsd * 100);
+  }
+  return roundCent(pos.qty * ref.price * 100);
+}
+
+/** Cash plus every position at its last price. */
 export function depotValue(state: DepotState, prices: Map<string, Ref>): Cent {
   let total = state.cash;
-  for (const [symbol, pos] of state.positions) {
-    const ref = prices.get(symbol);
-    if (!ref) {
-      total += pos.cost;
-    } else if (ref.currency === "USD") {
-      if (ref.eurUsd === undefined) throw new Error(`no EUR/USD rate for ${symbol}`);
-      total += roundCent((pos.qty * ref.price) / ref.eurUsd * 100);
-    } else {
-      total += roundCent(pos.qty * ref.price * 100);
-    }
-  }
+  for (const [symbol, pos] of state.positions) total += positionValue(pos, prices.get(symbol));
   return total;
 }
