@@ -19,6 +19,46 @@ create table if not exists fetched_days (
   complete integer not null,
   primary key (symbol, day_start)
 );
+create table if not exists simulations (
+  id integer primary key,
+  name text not null,
+  start_at integer not null,
+  simulation_time integer not null,
+  tempo integer not null,
+  start_cash integer not null,
+  fees_json text not null,
+  created_at integer not null,
+  ended_at integer
+);
+create table if not exists depots (
+  id integer primary key,
+  simulation_id integer not null references simulations (id) on delete cascade,
+  name text not null,
+  cash integer not null
+);
+create table if not exists positions (
+  depot_id integer not null references depots (id) on delete cascade,
+  symbol text not null,
+  qty integer not null,
+  cost integer not null,
+  primary key (depot_id, symbol)
+);
+create table if not exists orders (
+  id integer primary key,
+  depot_id integer not null references depots (id) on delete cascade,
+  symbol text not null,
+  side text not null,
+  kind text not null,
+  qty integer not null,
+  limit_price real,
+  status text not null,
+  created_sim integer not null,
+  filled_sim integer,
+  fill_price real,
+  gross integer,
+  commission integer,
+  foreign_fee integer
+);
 `;
 
 export function openDb(path: string): Db {
