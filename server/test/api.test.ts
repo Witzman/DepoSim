@@ -13,10 +13,10 @@ afterEach(async () => {
   while (open.length) await open.pop()!.close();
 });
 
-function make(opts: { fail?: MarketDataErrorKind } = {}) {
+function make(opts: { fail?: MarketDataErrorKind; now?: number } = {}) {
   const { source } = makeSource(opts);
   const app = buildApp({
-    dbPath: ":memory:", marketData: source, instruments: [SAP, AAPL], now: () => NOW, minGapMs: 0, tickMs: 20,
+    dbPath: ":memory:", marketData: source, instruments: [SAP, AAPL], now: () => opts.now ?? NOW, minGapMs: 0, tickMs: 20,
   });
   open.push(app);
   return app;
@@ -286,5 +286,50 @@ describe("websocket", () => {
     await until(() => msgs.some((m) => m.type === "notice"));
     expect(msgs.find((m) => m.type === "notice").text).toMatch(/nicht erreichbar/);
     expect(app.session.isRunning(id)).toBe(false);
+  });
+});
+
+describe("live simulations over the API", () => {
+  const FRIDAY_NOON = D1 + 12 * H; // the live limit is 11:45, SAP's bars on D1 end at 07:10
+
+  it("starts from now when no start is given: at the newest bar, with the live flag", async () => {
+    const app = make({ now: FRIDAY_NOON });
+    const res = await post(app, "/api/simulations", { name: "Live", live: true });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ live: true, startAt: D1 + 7 * H + 600, simulationTime: D1 + 7 * H + 600 });
+  });
+
+  it("takes an earlier start when one is given", async () => {
+    const app = make({ now: FRIDAY_NOON });
+    const res = await post(app, "/api/simulations", { name: "Live", live: true, startAt: D1 + 7 * H + 120 });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ live: true, startAt: D1 + 7 * H + 120 });
+  });
+
+  it("a replay is not live", async () => {
+    const res = await post(make(), "/api/simulations", { name: "Replay", startAt: START });
+    expect(res.json().live).toBe(false);
+  });
+
+  it.each([[true], [false]])("refuses a start after the live limit (live: %s) with a message", async (live) => {
+    const app = make({ now: FRIDAY_NOON });
+    const res = await post(app, "/api/simulations", { name: "x", live, startAt: FRIDAY_NOON - 600 }); // L is 11:45
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/Live-Grenze/);
+    expect((await app.inject({ url: "/api/simulations" })).json()).toEqual([]);
+  });
+
+  it("wants a start unless the simulation is live", async () => {
+    const app = make({ now: FRIDAY_NOON });
+    expect((await post(app, "/api/simulations", { name: "x" })).statusCode).toBe(400);
+    expect((await post(app, "/api/simulations", { name: "x", live: false })).statusCode).toBe(400);
+  });
+
+  it("answers 502 and leaves nothing behind when the prices cannot be had", async () => {
+    const app = make({ now: FRIDAY_NOON, fail: "rate_limited" });
+    const res = await post(app, "/api/simulations", { name: "x", live: true });
+    expect(res.statusCode).toBe(502);
+    expect(res.json().error).toMatch(/drosselt/);
+    expect((await app.inject({ url: "/api/simulations" })).json()).toEqual([]);
   });
 });

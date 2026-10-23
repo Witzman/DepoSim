@@ -1,6 +1,31 @@
 export const PORT = Number(process.env.PORT ?? 3000);
 export const DB_PATH = process.env.DB_PATH ?? "./data/deposim.sqlite";
 
+/** A positive number from the environment, or the default: a typo must not stop the clock. */
+function positive(value: string | undefined, fallback: number): number {
+  const n = Number(value);
+  return value !== undefined && Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+export interface Settings {
+  /** How far behind the present the price source is, in seconds. Not measured yet. */
+  liveDelayS: number;
+  /** The tempo a live simulation catches up at. */
+  catchUpTempo: number;
+  /** The shortest time between two refreshes of today's prices, in seconds. */
+  liveRefreshS: number;
+}
+
+export function readSettings(env: Record<string, string | undefined>): Settings {
+  return {
+    liveDelayS: positive(env.LIVE_DELAY_S, 900),
+    catchUpTempo: positive(env.CATCH_UP_TEMPO, 300),
+    liveRefreshS: positive(env.LIVE_REFRESH_S, 60),
+  };
+}
+
+export const SETTINGS = readSettings(process.env);
+
 export type Venue = "XETRA" | "US";
 
 export interface Instrument {

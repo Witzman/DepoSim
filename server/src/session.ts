@@ -99,14 +99,44 @@ export class SessionService {
     if (!traded) throw new MarketDataError("no_data", "Für diesen Tag liegen keine Kurse vor.");
   }
 
-  /** Looks for later bars, a day at a time, never past today. True if it found some. */
+  /** The latest simulation time that may be shown now: the present minus the delay of the source. */
+  currentLiveLimit(): number {
+    return liveLimit(this.now(), this.delayS);
+  }
+
+  /**
+   * Where a live simulation starts when none is asked for: the present (the live limit), or, when
+   * the market is shut, the end of the newest bar, which can be days back. Walks back from the
+   * day of the live limit, at most eight days, loading each.
+   */
+  async resolveLiveStart(): Promise<number> {
+    const limit = this.currentLiveLimit();
+    for (let d = 0; d <= LOOKAHEAD_DAYS; d++) {
+      const day = dayOf(limit) - d * DAY;
+      await this.loadDay(day);
+      const bound = d === 0 ? limit : day + DAY;
+      let newest: number | undefined;
+      for (const inst of this.instruments) {
+        const bar = this.archive.lastCompleteBar(inst.symbol, bound);
+        if (bar && bar.t >= day && (newest === undefined || bar.t + 60 > newest)) newest = bar.t + 60;
+      }
+      if (newest !== undefined) return Math.min(limit, newest);
+    }
+    throw new MarketDataError("no_data", "Für die letzten Handelstage liegen keine Kurse vor.");
+  }
+
+  /**
+   * Looks for later bars, a day at a time, never past today. True if it found some: a bar that
+   * is not finished at `s` yet (`t + 60 > s`). Counting only bars that start after `s` missed
+   * the first new minute when the clock stands exactly at the end of the last bar.
+   */
   async loadMore(id: number): Promise<boolean> {
     const s = this.sim(id).simulationTime;
     for (let d = 0; d <= LOOKAHEAD_DAYS; d++) {
       const day = dayOf(s) + d * DAY;
       if (day > this.now()) break;
       await this.loadDay(day);
-      if (this.instruments.some((i) => this.archive.nextBarAfter(i.symbol, s))) return true;
+      if (this.instruments.some((i) => this.archive.nextBarAfter(i.symbol, s - 60))) return true;
     }
     return false;
   }

@@ -24,6 +24,10 @@ export interface AppOptions {
   minGapMs?: number;
   /** How often a running simulation ticks. */
   tickMs?: number;
+  /** How far behind the present the price source is, in seconds. */
+  liveDelayS?: number;
+  /** The tempo a live simulation catches up at. */
+  catchUpTempo?: number;
 }
 
 declare module "fastify" {
@@ -42,6 +46,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   const archive = createArchive(db, opts.marketData ?? createYahoo(), { minGapMs: opts.minGapMs, now: opts.now });
   const session = new SessionService({
     store, archive, instruments: opts.instruments ?? WATCHLIST, fxSymbol: FX_SYMBOL, now: opts.now,
+    delayS: opts.liveDelayS, catchUpTempo: opts.catchUpTempo,
   });
   const hub = createHub(session, store, opts.tickMs ?? 250);
 

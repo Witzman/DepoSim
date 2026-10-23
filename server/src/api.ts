@@ -10,11 +10,17 @@ import type { Hub } from "./ws.js";
 
 const DEFAULT_START_CASH = 1_000_000;
 
-const createBody = z.object({
-  name: z.string().trim().min(1).max(80),
-  startAt: z.number().int().positive(),
-  startCash: z.number().int().positive().optional(),
-});
+const createBody = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    startAt: z.number().int().positive().optional(),
+    live: z.boolean().optional(),
+    startCash: z.number().int().positive().optional(),
+  })
+  .refine((b) => b.live === true || b.startAt !== undefined, {
+    message: "Ohne Livebetrieb braucht die Simulation einen Startzeitpunkt.",
+    path: ["startAt"],
+  });
 
 const orderBody = z.object({
   symbol: z.string().min(1),
@@ -59,11 +65,23 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
   app.post("/api/simulations", async (req, reply) => {
     const body = createBody.safeParse(req.body);
     if (!body.success) return invalid(reply, body.error);
+    let startAt = body.data.startAt;
+    if (startAt !== undefined && startAt > session.currentLiveLimit()) {
+      return reply.code(400).send({ error: "Der Startzeitpunkt liegt nach der Live-Grenze (jetzt minus Zeitversatz)." });
+    }
+    if (startAt === undefined) {
+      try {
+        startAt = await session.resolveLiveStart();
+      } catch (err) {
+        return reply.code(502).send({ error: describeError(err) });
+      }
+    }
     const sim = store.createSimulation({
       name: body.data.name,
-      startAt: body.data.startAt,
+      startAt,
       startCash: body.data.startCash ?? DEFAULT_START_CASH,
       fees: DEFAULT_FEES,
+      live: body.data.live === true,
     });
     try {
       await session.start(sim.id);

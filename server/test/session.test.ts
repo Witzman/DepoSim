@@ -501,3 +501,52 @@ describe("the data horizon", () => {
     expect(t.svc.tick(t.id, 5000)).toMatchObject({ endOfData: true, waitingForData: false, liveEdge: false });
   });
 });
+
+describe("resolveLiveStart", () => {
+  const SEVEN_TEN = D1 + 7 * H + 600; // SAP's bars on D1 end at 07:10
+
+  it("is the end of the newest bar of the day of the live limit when that is before the limit", async () => {
+    const t = setup({ instruments: [SAP], now: D1 + 12 * H });
+    await expect(t.svc.resolveLiveStart()).resolves.toBe(SEVEN_TEN);
+  });
+
+  it("is the live limit itself when the bars reach it", async () => {
+    const t = setup({ instruments: [SAP], now: D1 + 7 * H + 1000 + 900 }); // L = 07:16:40, bars to 07:10
+    await expect(t.svc.resolveLiveStart()).resolves.toBe(SEVEN_TEN);
+    const t2 = setup({ instruments: [SAP], now: D0 + 7 * H + 1800 + 900 }); // L = 07:30 on D0, bars run to 08:00
+    await expect(t2.svc.resolveLiveStart()).resolves.toBe(D0 + 7 * H + 1800);
+  });
+
+  it("goes back over days without bars, a Saturday for instance", async () => {
+    const t = setup({ instruments: [SAP], now: D1 + 2 * 86400 }); // L is Saturday night
+    await expect(t.svc.resolveLiveStart()).resolves.toBe(SEVEN_TEN);
+  });
+
+  it("says no_data when none of the last eight days has a bar, and asks for no more days than that", async () => {
+    const t = setup({ instruments: [SAP], now: D1 + 12 * H, noDataFor: ["SAP.DE", FX] });
+    await expect(t.svc.resolveLiveStart()).rejects.toMatchObject({ kind: "no_data", message: expect.stringMatching(/keine Kurse/) });
+    expect(t.calls.length).toBeLessThanOrEqual(16); // 8 days, SAP and the exchange rate
+  });
+
+  it("passes a rate limit on instead of walking back", async () => {
+    const t = setup({ instruments: [SAP], now: D1 + 12 * H, fail: "rate_limited" });
+    await expect(t.svc.resolveLiveStart()).rejects.toMatchObject({ kind: "rate_limited" });
+    expect(t.calls.length).toBe(1);
+  });
+});
+
+describe("loadMore at the data horizon", () => {
+  it("finds the first new minute: a bar that starts exactly where the clock stands", async () => {
+    const T0730 = D0 + 7 * H + 30 * 60;
+    // The present is inside the day from the start: a day that is over is fetched once and never again.
+    const t = setup({ instruments: [SAP], startAt: T0730, now: T0730 + 60 });
+    const whole = t.all["SAP.DE"].slice();
+    t.all["SAP.DE"] = whole.filter((b) => b.t < T0730); // the last bar starts at 07:29 and ends at 07:30
+    await t.svc.start(t.id);
+    await expect(t.svc.loadMore(t.id)).resolves.toBe(false);
+
+    t.all["SAP.DE"] = whole.filter((b) => b.t < T0730 + 60); // the bar of 07:30 has arrived
+    t.clock.now = T0730 + 120;
+    await expect(t.svc.loadMore(t.id)).resolves.toBe(true);
+  });
+});
