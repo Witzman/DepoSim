@@ -1,9 +1,19 @@
-# Placeholder, see Dockerfile. Dokploy attaches Traefik labels and the network
-# when the domain is set on the service, so no ports are published here.
+# Dokploy attaches Traefik labels and the network when the domain is set on the
+# service, so no ports are published here. The service name `web` stays: the
+# Dokploy domain points at it.
 services:
   web:
     build: .
     restart: unless-stopped
     # The host has no swap and also holds the owner's mail: a spike is killed,
     # not paged.
-    mem_limit: 64m
+    mem_limit: 256m
+    # Lets the non-root `node` user listen on port 80, so the Dokploy domain
+    # port does not have to change.
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: 0
+    volumes:
+      - deposim-data:/data
+
+volumes:
+  deposim-data:

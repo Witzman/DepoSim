@@ -1,0 +1,10 @@
+node_modules/
+server/dist/
+web/dist/
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.superpowers/
+playwright-report/
+test-results/
