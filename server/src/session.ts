@@ -3,7 +3,7 @@ import type { Archive } from "./data/archive.js";
 import { type Bar, MarketDataError } from "./data/marketdata.js";
 import { type DepotState, type NewOrder, depotValue, fillOrder, positionValue, triggersLimit, validateOrder } from "./domain/broker.js";
 import { OPEN_WINDOW_S, type Tempo, advance, skipClosed } from "./domain/clock.js";
-import { type Ref, previewCost } from "./domain/fees.js";
+import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
 import type { Cent } from "./domain/money.js";
 import type { OrderRecord, Simulation, Store } from "./store.js";
 
@@ -46,6 +46,9 @@ export interface Snapshot {
 }
 
 export type PlaceResult = { ok: true; orderId: number } | { ok: false; reason: string };
+
+/** `problem` is why the order would be rejected; the cost is shown anyway. */
+export type PreviewResult = { ok: true; cost: CostPreview; problem?: string } | { ok: false; reason: string };
 
 export class SessionService {
   private readonly store: Store;
@@ -168,6 +171,22 @@ export class SessionService {
       }
       return { ok: true, orderId };
     });
+  }
+
+  /** What the order would cost at the current price, with the same numbers a fill would use. */
+  previewOrder(id: number, o: NewOrder): PreviewResult {
+    const sim = this.sim(id);
+    const inst = this.bySymbol.get(o.symbol);
+    if (!inst) return { ok: false, reason: `Unbekanntes Wertpapier ${o.symbol}.` };
+    const ref = this.refAt(inst, sim.simulationTime);
+    if (!ref) return { ok: false, reason: `Für ${o.symbol} gibt es noch keinen Kurs.` };
+
+    const state = this.store.loadDepot(this.store.listDepots(id)[0].id);
+    const checked = validateOrder(state, o, ref, sim.fees);
+    const priceable = Number.isInteger(o.qty) && o.qty > 0 && (o.kind === "market" || (o.limitPrice ?? 0) > 0);
+    if (!priceable) return { ok: false, reason: checked.ok ? "Ungültiger Auftrag." : checked.reason };
+    const cost = previewCost(o.side, o.qty, ref, o.kind, o.limitPrice, sim.fees);
+    return checked.ok ? { ok: true, cost } : { ok: true, cost, problem: checked.reason };
   }
 
   cancelOrder(id: number, orderId: number): { ok: true } | { ok: false; reason: string } {

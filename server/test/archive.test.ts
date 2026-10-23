@@ -155,6 +155,15 @@ describe("archive lookups", () => {
     expect(archive.barsBetween("A", 1000, 1300).map((b) => b.t)).toEqual([1000, 1060]);
   });
 
+  it("barsBefore returns the newest complete bars, oldest first", async () => {
+    const archive = await seeded();
+    expect(archive.barsBefore("A", 1300, 2).map((b) => b.t)).toEqual([1000, 1060]);
+    expect(archive.barsBefore("A", 1300, 1).map((b) => b.t)).toEqual([1060]);
+    expect(archive.barsBefore("A", 1060, 5).map((b) => b.t)).toEqual([1000]);
+    expect(archive.barsBefore("A", 1059, 5)).toEqual([]);
+    expect(archive.barsBefore("Z", 5000, 5)).toEqual([]);
+  });
+
   it("an unknown symbol has no bars", async () => {
     const archive = await seeded();
     expect(archive.lastCompleteBar("Z", 5000)).toBeUndefined();

@@ -1,36 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Instrument } from "../src/config.js";
 import { createArchive } from "../src/data/archive.js";
-import { type Bar, type MarketData, MarketDataError, type MarketDataErrorKind } from "../src/data/marketdata.js";
+import type { MarketDataErrorKind } from "../src/data/marketdata.js";
 import { openDb } from "../src/db.js";
 import { DEFAULT_FEES } from "../src/domain/fees.js";
 import { SessionService } from "../src/session.js";
 import { createStore } from "../src/store.js";
-
-const DAY = 86400;
-const D0 = 1792627200; // 2026-10-22 00:00 UTC
-const D1 = D0 + DAY;
-const H = 3600;
-
-const SAP: Instrument = { symbol: "SAP.DE", name: "SAP", currency: "EUR", venue: "XETRA" };
-const AAPL: Instrument = { symbol: "AAPL", name: "Apple", currency: "USD", venue: "US" };
-const FX = "EURUSD=X";
-
-const bar = (t: number, c: number): Bar => ({ t, o: c - 0.25, h: c + 0.5, l: c - 0.5, c, v: 10 });
-/** Rises 100..110 over ten minutes, then falls one point a minute. */
-const sapClose = (i: number) => (i <= 10 ? 100 + i : 110 - (i - 10));
-
-function data(): Record<string, Bar[]> {
-  const out: Record<string, Bar[]> = { [SAP.symbol]: [], [AAPL.symbol]: [], [FX]: [] };
-  for (let i = 0; i < 60; i++) out[SAP.symbol].push(bar(D0 + 7 * H + i * 60, sapClose(i)));
-  for (let i = 0; i < 10; i++) out[SAP.symbol].push(bar(D1 + 7 * H + i * 60, 200 + i));
-  for (let i = 0; i < 60; i++) out[AAPL.symbol].push(bar(D0 + 13 * H + 1800 + i * 60, 300 + i));
-  for (let k = 0; k < 1440; k++) {
-    out[FX].push(bar(D0 + k * 60, 1.1));
-    out[FX].push(bar(D1 + k * 60, 1.1));
-  }
-  return out;
-}
+import { AAPL, D0, D1, FX, H, SAP, makeSource } from "./fakes.js";
 
 interface SetupOpts {
   startAt?: number;
@@ -41,19 +16,8 @@ interface SetupOpts {
 }
 
 function setup(opts: SetupOpts = {}) {
-  const all = data();
-  const calls: string[] = [];
-  const source: MarketData = {
-    async bars(symbol, fromT, toT) {
-      calls.push(symbol);
-      if (opts.fail) throw new MarketDataError(opts.fail, "fake");
-      if (opts.noDataFor?.includes(symbol)) throw new MarketDataError("no_data", "fake");
-      const bars = (all[symbol] ?? []).filter((b) => b.t >= fromT && b.t < toT);
-      if (bars.length === 0) throw new MarketDataError("no_data", "fake: nothing in that period");
-      return bars;
-    },
-  };
-  const now = opts.now ?? D0 + 5 * DAY;
+  const { source, calls } = makeSource(opts);
+  const now = opts.now ?? D0 + 5 * 86400;
   const db = openDb(":memory:");
   const store = createStore(db);
   const archive = createArchive(db, source, { now: () => now, minGapMs: 0 });
@@ -331,5 +295,44 @@ describe("snapshot", () => {
     await t.svc.start(t.id);
     expect(t.svc.venueOpen("US", D0 + 20 * H)).toBe(false);
     expect(t.svc.venueOpen("XETRA", D0 + 20 * H)).toBe(false);
+  });
+});
+
+describe("previewOrder", () => {
+  it("prices a market order with the numbers a fill would use", async () => {
+    const t = setup();
+    await t.svc.start(t.id);
+    const r = t.svc.previewOrder(t.id, { symbol: "SAP.DE", side: "buy", kind: "market", qty: 1 });
+    expect(r).toMatchObject({ ok: true, cost: { gross: 10905, commission: 490, foreign: 0, total: 11395 } });
+    expect((r as { problem?: string }).problem).toBeUndefined();
+  });
+
+  it("prices a limit order at its limit price", async () => {
+    const t = setup();
+    await t.svc.start(t.id);
+    const r = t.svc.previewOrder(t.id, { symbol: "SAP.DE", side: "buy", kind: "limit", qty: 1, limitPrice: 100 });
+    expect(r).toMatchObject({ ok: true, cost: { execPrice: 100, gross: 10000, total: 10490 } });
+  });
+
+  it("shows the cost and the problem together when the order would be rejected", async () => {
+    const t = setup();
+    await t.svc.start(t.id);
+    const r = t.svc.previewOrder(t.id, { symbol: "SAP.DE", side: "buy", kind: "market", qty: 10000 });
+    expect(r).toMatchObject({ ok: true, problem: expect.stringMatching(/Guthaben/) });
+    expect((r as { cost: { total: number } }).cost.total).toBeGreaterThan(1_000_000);
+  });
+
+  it("says there is no price yet for an instrument that has not traded", async () => {
+    const t = setup();
+    await t.svc.start(t.id);
+    expect(t.svc.previewOrder(t.id, { symbol: "AAPL", side: "buy", kind: "market", qty: 1 })).toMatchObject({
+      ok: false, reason: expect.stringMatching(/Kurs/),
+    });
+  });
+
+  it("rejects an unknown symbol", async () => {
+    const t = setup();
+    await t.svc.start(t.id);
+    expect(t.svc.previewOrder(t.id, { symbol: "NOPE", side: "buy", kind: "market", qty: 1 }).ok).toBe(false);
   });
 });
