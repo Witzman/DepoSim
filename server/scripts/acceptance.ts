@@ -61,7 +61,12 @@ class Conn {
       if (m) return m;
       const notice = this.msgs.slice(since).find((x) => x.type === "notice" || x.type === "error");
       if (notice) throw new Error(`${what}: der Server meldet "${notice.text}"`);
-      if (Date.now() > end) throw new Error(`${what}: nach ${ms / 1000} s nichts erhalten`);
+      if (Date.now() > end) {
+        // All clients of a simulation share one clock, so another client's Pause stops this run too.
+        const last = [...this.msgs].reverse().find((x) => x.type === "snapshot" || x.type === "tick");
+        const hint = last && last.running === false ? " (letzte Nachricht: die Simulation ist pausiert, hat ein anderer Client sie angehalten?)" : "";
+        throw new Error(`${what}: nach ${ms / 1000} s nichts erhalten${hint}`);
+      }
       await sleep(50);
     }
   }
