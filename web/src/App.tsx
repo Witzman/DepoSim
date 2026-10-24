@@ -5,6 +5,7 @@ import {
 } from "./api.js";
 import { AllocationDialog } from "./components/AllocationDialog.js";
 import { Chart } from "./components/Chart.js";
+import { Collapsible } from "./components/Collapsible.js";
 import { ClockBar } from "./components/ClockBar.js";
 import { Curves } from "./components/Curves.js";
 import { Evaluation } from "./components/Evaluation.js";
@@ -12,6 +13,7 @@ import { DepotPanel } from "./components/DepotPanel.js";
 import { DepotSwitch } from "./components/DepotSwitch.js";
 import { OrderTicket } from "./components/OrderTicket.js";
 import { OrdersPanel } from "./components/OrdersPanel.js";
+import { MobileBar } from "./components/MobileBar.js";
 import { Palette } from "./components/Palette.js";
 import { ShortcutHelp } from "./components/ShortcutHelp.js";
 import { SimulationPicker } from "./components/SimulationPicker.js";
@@ -19,6 +21,7 @@ import { Watchlist } from "./components/Watchlist.js";
 import { formatPrice } from "./format.js";
 import { pickInitial } from "./select.js";
 import { pickDepot } from "./view.js";
+import { useNarrow } from "./useNarrow.js";
 import { useTheme } from "./theme.js";
 import type { Bar, Instrument, ServerMessage, Simulation, Snapshot, Tempo } from "./types.js";
 
@@ -60,6 +63,7 @@ export function App() {
   const [activeDepotId, setActiveDepotId] = useState<number | null>(null);
   const [allocationOpen, setAllocationOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const narrow = useNarrow();
   const socket = useRef<Socket | null>(null);
   const runningRef = useRef(false);
   const symbolRef = useRef(symbol);
@@ -270,7 +274,7 @@ export function App() {
   const locked = live === null || live.endedAt !== null || snapshot === null;
 
   return (
-    <div className="app">
+    <div className={`app${narrow && live ? " with-bar" : ""}`}>
       <header className="topbar">
         <h1>DepoSim</h1>
         <button className="btn small" data-testid="palette-open" onClick={() => setPaletteOpen(true)}
@@ -281,14 +285,18 @@ export function App() {
       </header>
 
       <div className="layout">
-        <div className="stack">
-          <SimulationPicker
-            simulations={simulations} selectedId={selectedId} onSelect={setSelectedId}
-            onCreate={create} onEnd={end} onDelete={remove}
-          />
+        <div className="stack side">
+          <Collapsible narrow={narrow} title="Simulationen" openByDefault={selectedId === null}>
+            <SimulationPicker
+              simulations={simulations} selectedId={selectedId} onSelect={setSelectedId}
+              onCreate={create} onEnd={end} onDelete={remove}
+            />
+          </Collapsible>
           {live && (
-            <Watchlist instruments={watchlist} prices={snapshot?.prices ?? {}} venues={snapshot?.venues}
-              selected={symbol} onSelect={setSymbol} onRemove={removeTitle} />
+            <Collapsible narrow={narrow} title="Watchlist">
+              <Watchlist instruments={watchlist} prices={snapshot?.prices ?? {}} venues={snapshot?.venues}
+                selected={symbol} onSelect={setSymbol} onRemove={removeTitle} />
+            </Collapsible>
           )}
         </div>
 
@@ -367,6 +375,12 @@ export function App() {
       {live && depot && (
         <AllocationDialog open={allocationOpen} simulationId={live.id} depotId={depot.id} depotName={depot.name}
           instruments={watchlist} onClose={() => setAllocationOpen(false)} />
+      )}
+      {narrow && live && (
+        <MobileBar disabled={locked} running={snapshot?.running ?? false}
+          onBuy={() => { setView("trade"); setTicketCommand((c) => ({ side: "buy", n: c.n + 1 })); }}
+          onSell={() => { setView("trade"); setTicketCommand((c) => ({ side: "sell", n: c.n + 1 })); }}
+          onToggleRun={() => socket.current?.send({ type: runningRef.current ? "pause" : "run" })} />
       )}
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
       <Palette

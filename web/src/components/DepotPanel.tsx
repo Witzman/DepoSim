@@ -29,6 +29,7 @@ export function DepotPanel({ depot, startCash }: Props) {
       {depot.positions.length === 0 ? (
         <p className="muted">Noch keine Positionen.</p>
       ) : (
+        <div className="scroll">
         <table className="positions num">
           <thead><tr><th>Wertpapier</th><th>Stück</th><th>Kosten</th><th>Wert</th><th>G/V</th></tr></thead>
           <tbody>
@@ -40,6 +41,7 @@ export function DepotPanel({ depot, startCash }: Props) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </section>
   );

@@ -202,3 +202,32 @@ h3 { margin: var(--gap) 0 4px; font-size: 0.85rem; font-weight: 600; }
 .keys div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; align-items: baseline; }
 .keys dt, .keys dd { margin: 0; }
 kbd { font: inherit; font-size: 0.85rem; padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 6px; background: var(--bg); }
+
+.fold > summary { cursor: pointer; padding: 10px 12px; font-weight: 600; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); min-height: 44px; display: flex; align-items: center; }
+.fold[open] > summary { margin-bottom: var(--gap); }
+.mobile-bar { display: none; }
+
+@media (max-width: 600px) {
+  html, body { overflow-x: hidden; }
+  .topbar { padding: 8px 12px; }
+  .layout { padding: var(--gap) 12px; }
+  .layout > .side { order: 2; }
+  .chart, .chart.curves { height: 280px; }
+  .btn, .btn.small { min-height: 44px; min-width: 44px; padding: 8px 14px; font-size: 1rem; }
+  input, select { min-height: 44px; font-size: 16px; }
+  .fold > summary { min-height: 44px; }
+  .sim-item { padding: 10px; }
+  .watch-row { min-height: 44px; align-items: center; }
+  .scroll, .card { overflow-x: auto; }
+  .trade-grid { grid-template-columns: minmax(0, 1fr); }
+  .app.with-bar { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+  .mobile-bar {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    background: var(--surface); border-top: 1px solid var(--border);
+  }
+  .mobile-bar .btn { min-height: 48px; font-weight: 600; }
+  .mobile-bar .btn.buy { border-color: var(--up); color: var(--up); }
+  .mobile-bar .btn.sell { border-color: var(--down); color: var(--down); }
+}

@@ -24,10 +24,12 @@ export function OrderTicket({ simulationId, depotId, instrument, priceKey, disab
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const qtyInput = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     if (command.n === 0) return;
     setSide(command.side);
+    formRef.current?.scrollIntoView?.({ block: "nearest" });
     qtyInput.current?.focus();
     qtyInput.current?.select();
   }, [command]);
@@ -86,7 +88,7 @@ export function OrderTicket({ simulationId, depotId, instrument, priceKey, disab
   const word = side === "buy" ? "Kaufen" : "Verkaufen";
 
   return (
-    <form className="card ticket" onSubmit={submit} aria-label="Orderticket">
+    <form ref={formRef} className="card ticket" onSubmit={submit} aria-label="Orderticket">
       <h2>Order {instrument ? `· ${instrument.symbol}` : ""}</h2>
       <div className="group" role="group" aria-label="Seite">
         <button type="button" className="btn" aria-pressed={side === "buy"} onClick={() => setSide("buy")}>Kauf</button>
