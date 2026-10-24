@@ -95,6 +95,16 @@ describe("instruments added while the service runs", () => {
     expect(r.newBars["NOBAR.DE"]).toBeUndefined();
   });
 
+  it("refuses to place an order for an added instrument that has no price, so none stays open for good", async () => {
+    const t = setup({ instruments: [SAP], startAt: D0 + 7 * H + 600 });
+    await t.svc.start(t.id);
+    t.registry.add(NOBAR);
+    const res = t.svc.placeOrder(t.id, t.depotId, { symbol: "NOBAR.DE", side: "buy", kind: "market", qty: 1 });
+    expect(res).toEqual({ ok: false, reason: expect.stringMatching(/keinen Kurs/) });
+    expect(t.svc.snapshot(t.id).depot.orders).toEqual([]);
+    expect(t.store.symbolInUse("NOBAR.DE")).toBe(false);
+  });
+
   it("rejects an order for an added instrument that has no price yet, with a reason", async () => {
     const t = setup({ instruments: [SAP], startAt: D0 + 7 * H + 600 });
     await t.svc.start(t.id);

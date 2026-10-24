@@ -260,6 +260,12 @@ export class SessionService {
 
     const s = sim.simulationTime;
     const ref = this.refAt(inst, s);
+    // No price now and no bar to come in the archive (an instrument added later, or one the source
+    // does not know): the order would wait for good, and an open order blocks removing the
+    // instrument. An order before the first bar of the day is different: that bar is known.
+    if (!ref && !this.archive.nextBarAfter(o.symbol, s - 60)) {
+      return { ok: false, reason: `Für ${o.symbol} gibt es noch keinen Kurs.` };
+    }
     return this.store.transaction((): PlaceResult => {
       const state = this.store.loadDepot(depotId);
       const checked = validateOrder(state, o, ref, sim.fees);
