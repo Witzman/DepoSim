@@ -712,3 +712,62 @@ describe("depots", () => {
     expect((await app.inject({ url: `/api/simulations/9999/curves` })).statusCode).toBe(404);
   });
 });
+
+describe("benchmark and evaluation", () => {
+  it("sets, shows and clears the benchmark", async () => {
+    const app = make();
+    const id = await createSim(app);
+    const set = await app.inject({ method: "PATCH", url: `/api/simulations/${id}`, payload: { benchmark: "SAP.DE" } });
+    expect(set.statusCode).toBe(200);
+    expect(set.json().benchmark).toBe("SAP.DE");
+    const curves = (await app.inject({ url: `/api/simulations/${id}/curves` })).json();
+    expect(curves.benchmark).toMatchObject({ symbol: "SAP.DE", currency: "EUR" });
+    const cleared = await app.inject({ method: "PATCH", url: `/api/simulations/${id}`, payload: { benchmark: null } });
+    expect(cleared.json().benchmark).toBeNull();
+    expect((await app.inject({ url: `/api/simulations/${id}/curves` })).json().benchmark).toBeNull();
+  });
+
+  it("answers 400 for a symbol that is not in the list, 400 for a bad body and 404 for an unknown simulation", async () => {
+    const app = make();
+    const id = await createSim(app);
+    const patch = (url: string, payload: unknown) => app.inject({ method: "PATCH", url, payload: payload as object });
+    expect((await patch(`/api/simulations/${id}`, { benchmark: "NOPE" })).statusCode).toBe(400);
+    expect((await patch(`/api/simulations/${id}`, { benchmark: 5 })).statusCode).toBe(400);
+    expect((await patch(`/api/simulations/${id}`, {})).statusCode).toBe(400);
+    expect((await patch(`/api/simulations/9999`, { benchmark: null })).statusCode).toBe(404);
+  });
+
+  it("keeps an added title in the list while it is the benchmark of a simulation", async () => {
+    const hit: SearchHit = { symbol: "BMW.DE", name: "BMW", currency: "EUR", venue: "XETRA", kind: "EQUITY" };
+    const { source } = makeSource();
+    const app = buildApp({
+      dbPath: ":memory:", marketData: source, instruments: [SAP, AAPL], now: () => NOW, minGapMs: 0, tickMs: 20,
+      search: { search: async () => [hit] },
+    });
+    open.push(app);
+    const id = await createSim(app);
+    await post(app, "/api/watchlist", { symbol: "BMW.DE" });
+    await app.inject({ method: "PATCH", url: `/api/simulations/${id}`, payload: { benchmark: "BMW.DE" } });
+    const refused = await app.inject({ method: "DELETE", url: "/api/watchlist/BMW.DE" });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error).toMatch(/Maßstab/);
+    await app.inject({ method: "PATCH", url: `/api/simulations/${id}`, payload: { benchmark: null } });
+    expect((await app.inject({ method: "DELETE", url: "/api/watchlist/BMW.DE" })).statusCode).toBe(204);
+  });
+
+  it("serves the evaluation, without NaN, and 404 for an unknown simulation", async () => {
+    const app = make();
+    const id = await createSim(app);
+    await post(app, `/api/simulations/${id}/depots`, {});
+    const res = await app.inject({ url: `/api/simulations/${id}/evaluation` });
+    expect(res.statusCode).toBe(200);
+    const ev = res.json();
+    expect(ev.depots).toHaveLength(2);
+    expect(ev.depots[0]).toMatchObject({ name: "Depot 1", startedAt: START });
+    expect(ev.depots[0].metrics.unavailable).toMatch(/zu wenige/);
+    expect(ev.correlation.matrix).toEqual([[1, null], [null, 1]]);
+    expect(ev.benchmark).toBeNull();
+    expect(typeof ev.note).toBe("string");
+    expect((await app.inject({ url: `/api/simulations/9999/evaluation` })).statusCode).toBe(404);
+  });
+});

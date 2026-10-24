@@ -237,4 +237,33 @@ describe("store, live simulations", () => {
       expect(curve.every((p, i) => i === 0 || p.t > curve[i - 1].t)).toBe(true);
     });
   });
+
+  it("keeps a benchmark per simulation, none at first, and clears it", () => {
+    const store = createStore(openDb(":memory:"));
+    const sim = store.createSimulation(input);
+    expect(sim.benchmark).toBeNull();
+    store.setBenchmark(sim.id, "EUNL.DE");
+    expect(store.getSimulation(sim.id)?.benchmark).toBe("EUNL.DE");
+    store.setBenchmark(sim.id, null);
+    expect(store.getSimulation(sim.id)?.benchmark).toBeNull();
+  });
+
+  it("opens a database whose simulations have no benchmark column", () => {
+    const dir = mkdtempSync(join(tmpdir(), "deposim-"));
+    try {
+      const path = join(dir, "old.sqlite");
+      const old = new Database(path);
+      old.exec(
+        "create table simulations (id integer primary key, name text not null, start_at integer not null, simulation_time integer not null, " +
+          "tempo integer not null, start_cash integer not null, fees_json text not null, created_at integer not null, ended_at integer, live integer not null default 0);" +
+          `insert into simulations (name, start_at, simulation_time, tempo, start_cash, fees_json, created_at) values ('Alt', 1, 1, 1, 100, '${JSON.stringify(DEFAULT_FEES)}', 1);`,
+      );
+      old.close();
+      const db = openDb(path);
+      expect(createStore(db).listSimulations()[0]).toMatchObject({ name: "Alt", benchmark: null });
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

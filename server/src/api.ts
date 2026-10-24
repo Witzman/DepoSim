@@ -34,6 +34,7 @@ const orderBody = z.object({
   depotId: z.number().int().optional(),
 });
 
+const patchBody = z.object({ benchmark: z.string().min(1).nullable() });
 const depotName = z.string().trim().min(1).max(40);
 const depotBody = z.object({ name: depotName.optional() });
 const renameBody = z.object({ name: depotName });
@@ -144,6 +145,9 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     if (!instruments.isAdded(inst.symbol)) {
       return reply.code(409).send({ error: "Dieses Wertpapier gehört zum Startbestand." });
     }
+    if (store.listSimulations().some((s) => s.benchmark === inst.symbol)) {
+      return reply.code(409).send({ error: "Das Wertpapier ist als Maßstab gewählt." });
+    }
     if (store.symbolInUse(inst.symbol)) {
       return reply.code(409).send({ error: "Das Wertpapier wird gehalten oder hat offene Orders." });
     }
@@ -249,7 +253,26 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
   app.get("/api/simulations/:id/curves", async (req, reply) => {
     const sim = simulationOf(req.params);
     if (!sim) return notFound(reply);
-    return { depots: store.listDepots(sim.id).map((d) => ({ id: d.id, name: d.name, points: store.valueCurve(d.id) })) };
+    return session.curves(sim.id);
+  });
+
+  app.get("/api/simulations/:id/evaluation", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    return session.evaluation(sim.id);
+  });
+
+  app.patch("/api/simulations/:id", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    const body = patchBody.safeParse(req.body);
+    if (!body.success) return invalid(reply, body.error);
+    const symbol = body.data.benchmark;
+    if (symbol !== null && !instruments.get(symbol)) {
+      return reply.code(400).send({ error: `Unbekanntes Wertpapier ${symbol}.` });
+    }
+    store.setBenchmark(sim.id, symbol);
+    return store.getSimulation(sim.id);
   });
 
   app.post("/api/simulations/:id/depots", async (req, reply) => {

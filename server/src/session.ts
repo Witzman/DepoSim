@@ -7,6 +7,8 @@ import {
   CATCH_UP_LAG_S, LIVE_EDGE_S, LIVE_MARGIN_S, OPEN_WINDOW_S, type Tempo, advanceCarry, effectiveTempo, liveLimit, skipClosed,
 } from "./domain/clock.js";
 import { type AllocationLine, planAllocation } from "./domain/allocation.js";
+import { type Breakdown, type FeeLedger, breakdown, feeLedger } from "./domain/breakdown.js";
+import { type Correlation, type Metrics, type Point, computeMetrics, correlationMatrix } from "./domain/metrics.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
 import type { Cent } from "./domain/money.js";
 import type { Depot, OrderRecord, Simulation, Store } from "./store.js";
@@ -73,6 +75,32 @@ export interface Snapshot {
   /** Replay, catching up to the present, or at the present. */
   phase: "replay" | "catchup" | "live";
 }
+
+export interface BenchmarkCurve {
+  symbol: string;
+  name: string;
+  currency: Instrument["currency"];
+  /** The instrument's price in its own currency at the times of the first depot's curve. */
+  points: Point[];
+}
+
+export interface Curves {
+  depots: { id: number; name: string; points: Point[] }[];
+  benchmark: BenchmarkCurve | null;
+}
+
+export interface Evaluation {
+  depots: { id: number; name: string; startedAt: number; metrics: Metrics; fees: FeeLedger; breakdown: Breakdown }[];
+  correlation: Correlation;
+  benchmark: { symbol: string; name: string; metrics: Metrics } | null;
+  note: string;
+}
+
+const EVALUATION_POINTS = 5000;
+const EVALUATION_NOTE =
+  "Volatilität, Sharpe-Ratio und Korrelation sind aus der Kurve geschätzt, ohne risikofreien Zins. " +
+  "Spread und Devisenaufschlag stecken im Ausführungspreis und fehlen in der Gebührenbilanz. " +
+  "Der Maßstab ist der Kurs in seiner eigenen Währung, ohne Wechselkurs.";
 
 export type PlaceResult = { ok: true; orderId: number } | { ok: false; reason: string };
 
@@ -383,6 +411,53 @@ export class SessionService {
       }
     }
     return { ok: true, lines };
+  }
+
+  /** The value curve of every depot, thinned for a chart, and the benchmark at the same times. */
+  curves(id: number): Curves {
+    const sim = this.sim(id);
+    const depots = this.store.listDepots(id).map((d) => ({ id: d.id, name: d.name, points: this.store.valueCurve(d.id) }));
+    const inst = sim.benchmark ? this.registry.get(sim.benchmark) : undefined;
+    if (!inst) return { depots, benchmark: null };
+    const points: Point[] = [];
+    for (const p of depots[0]?.points ?? []) {
+      const bar = this.archive.lastCompleteBar(inst.symbol, p.t);
+      if (bar) points.push({ t: p.t, value: bar.c });
+    }
+    return { depots, benchmark: { symbol: inst.symbol, name: inst.name, currency: inst.currency, points } };
+  }
+
+  /** Figures per depot, how the depots move together, and the benchmark measured the same way. */
+  evaluation(id: number): Evaluation {
+    const sim = this.sim(id);
+    const refs = this.refsAt(sim.simulationTime);
+    const curves = this.store.listDepots(id).map((d) => ({ depot: d, points: this.store.valueCurve(d.id, EVALUATION_POINTS) }));
+    const depots = curves.map(({ depot, points }) => {
+      const state = this.store.loadDepot(depot.id);
+      const held = [...state.positions].map(([symbol, pos]) => ({ symbol, value: positionValue(pos, refs.get(symbol)) }));
+      return {
+        id: depot.id,
+        name: depot.name,
+        startedAt: points[0]?.t ?? sim.startAt,
+        metrics: computeMetrics(points),
+        fees: feeLedger(state.orders, sim.startCash),
+        breakdown: breakdown(held, state.cash, this.instruments),
+      };
+    });
+    const inst = sim.benchmark ? this.registry.get(sim.benchmark) : undefined;
+    let benchmark: Evaluation["benchmark"] = null;
+    if (inst) {
+      const series: Point[] = this.archive
+        .barsBetween(inst.symbol, sim.startAt - 59, sim.simulationTime - 59)
+        .map((b) => ({ t: b.t + 60, value: b.c }));
+      benchmark = { symbol: inst.symbol, name: inst.name, metrics: computeMetrics(series) };
+    }
+    return {
+      depots,
+      correlation: correlationMatrix(curves.map(({ depot, points }) => ({ id: depot.id, points }))),
+      benchmark,
+      note: EVALUATION_NOTE,
+    };
   }
 
   cancelOrder(id: number, orderId: number): { ok: true } | { ok: false; reason: string } {

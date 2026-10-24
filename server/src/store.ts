@@ -16,6 +16,8 @@ export interface Simulation {
   endedAt: number | null;
   /** A live simulation catches up to the present by itself and then follows real time. */
   live: boolean;
+  /** The symbol its curves are measured against, if the person chose one. */
+  benchmark: string | null;
 }
 
 export interface Depot {
@@ -69,6 +71,7 @@ export interface Store {
   valueCurve(depotId: number, maxPoints?: number): { t: number; value: Cent }[];
   setSimulationTime(id: number, simulationTime: number): void;
   setTempo(id: number, tempo: Tempo): void;
+  setBenchmark(id: number, symbol: string | null): void;
   /** Cash, positions and every order of one depot. */
   loadDepot(depotId: number): DepotState & { orders: OrderRecord[] };
   /** Writes the cash and replaces the positions. */
@@ -125,6 +128,7 @@ interface SimulationRow {
   created_at: number;
   ended_at: number | null;
   live: number;
+  benchmark: string | null;
 }
 
 const toSimulation = (r: SimulationRow): Simulation => ({
@@ -138,6 +142,7 @@ const toSimulation = (r: SimulationRow): Simulation => ({
   createdAt: r.created_at,
   endedAt: r.ended_at,
   live: r.live === 1,
+  benchmark: r.benchmark,
 });
 
 export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
@@ -179,6 +184,9 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
     },
     setSimulationTime: (id, simulationTime) => {
       db.prepare("update simulations set simulation_time = ? where id = ?").run(simulationTime, id);
+    },
+    setBenchmark: (id, symbol) => {
+      db.prepare("update simulations set benchmark = ? where id = ?").run(symbol, id);
     },
     setTempo: (id, tempo) => {
       db.prepare("update simulations set tempo = ? where id = ?").run(tempo, id);

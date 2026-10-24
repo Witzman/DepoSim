@@ -29,7 +29,8 @@ create table if not exists simulations (
   fees_json text not null,
   created_at integer not null,
   ended_at integer,
-  live integer not null default 0
+  live integer not null default 0,
+  benchmark text
 );
 create table if not exists instruments (
   symbol text primary key,
@@ -88,6 +89,7 @@ export function openDb(path: string): Db {
   if (!columns.some((c) => c.name === "live")) {
     db.exec("alter table simulations add column live integer not null default 0");
   }
+  if (!columns.some((c) => c.name === "benchmark")) db.exec("alter table simulations add column benchmark text");
   // The same for the instruments table: sector and kind came later.
   const instrumentColumns = db.prepare("pragma table_info(instruments)").all() as { name: string }[];
   for (const column of ["sector", "kind"]) {

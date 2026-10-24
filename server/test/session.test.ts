@@ -769,5 +769,56 @@ describe("default depot names", () => {
     expect(again.ok && again.depot.name).toBe("Depot 4");
     const names = t.svc.snapshot(t.id).depots.map((d) => d.name);
     expect(new Set(names).size).toBe(names.length);
+
+describe("curves and evaluation", () => {
+  const minutes = (t: ReturnType<typeof setup>, n: number) => {
+    for (let k = 0; k < n; k++) t.svc.tick(t.id, 60_000);
+  };
+
+  it("has no benchmark until one is chosen, then gives its price at the times of the depot curve", async () => {
+    const t = setup();
+    await t.svc.start(t.id);
+    minutes(t, 5);
+    expect(t.svc.curves(t.id).benchmark).toBeNull();
+    t.store.setBenchmark(t.id, "SAP.DE");
+    const { depots, benchmark } = t.svc.curves(t.id);
+    expect(benchmark).toMatchObject({ symbol: "SAP.DE", name: "SAP", currency: "EUR" });
+    const times = new Set(depots[0].points.map((p) => p.t));
+    expect(benchmark!.points.length).toBeGreaterThan(0);
+    for (const p of benchmark!.points) {
+      expect(times.has(p.t)).toBe(true);
+      expect(p.value).toBe(t.archive.lastCompleteBar("SAP.DE", p.t)!.c);
+    }
+  });
+
+  it("leaves out benchmark points where the instrument has no bar yet", async () => {
+    const t = setup({ startAt: D0 + 3 * H }); // before the first SAP bar of the day
+    await t.svc.start(t.id);
+    t.store.setBenchmark(t.id, "SAP.DE");
+    expect(t.svc.curves(t.id).benchmark!.points).toEqual([]);
+  });
+
+  it("evaluates every depot with its own start, fees and breakdown, and the benchmark with the same metrics", async () => {
+    const t = setup();
+    await t.svc.start(t.id);
+    t.svc.placeOrder(t.id, t.depotId, { symbol: "SAP.DE", side: "buy", kind: "market", qty: 1 });
+    minutes(t, 3);
+    const second = t.store.createDepot(t.id, "Zweit");
+    minutes(t, 3);
+    t.store.setBenchmark(t.id, "SAP.DE");
+
+    const ev = t.svc.evaluation(t.id);
+    expect(ev.depots.map((d) => d.name)).toEqual(["Depot 1", "Zweit"]);
+    expect(ev.depots[0].startedAt).toBe(t.sim.startAt);
+    expect(ev.depots[1].startedAt).toBe(t.sim.startAt + 180);
+    expect(ev.depots[0].fees).toMatchObject({ orders: 1, commission: 490, foreign: 0, total: 490 });
+    expect(ev.depots[1].fees.orders).toBe(0);
+    expect(ev.depots[0].breakdown.sector.map((s) => s.label)).toContain("Unbekannt");
+    expect(ev.depots[1].breakdown.sector).toEqual([{ label: "Guthaben", value: 1_000_000, share: 1 }]);
+    expect(ev.benchmark).toMatchObject({ symbol: "SAP.DE" });
+    expect(ev.benchmark!.metrics.totalReturn).not.toBeNull();
+    expect(ev.correlation.ids).toEqual([t.depotId, second.id]);
+    expect(JSON.parse(JSON.stringify(ev))).toBeTruthy();
+    expect(ev.note).toMatch(/Spread/);
   });
 });
