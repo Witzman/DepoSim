@@ -58,10 +58,10 @@ export function Palette({
       d.showModal();
       input.current?.focus();
     }
-    if (!open && d.open) {
-      d.close();
-      // Emptied on closing too: an input that is shown with the old text would take the first
-      // keys of the next query before the reset on opening has been drawn.
+    if (!open) {
+      if (d.open) d.close();
+      // Emptied on closing too, also when Esc closed the dialog before React heard of it: an input
+      // shown with the old text would take the first keys of the next query.
       setQuery("");
     }
   }, [open]);

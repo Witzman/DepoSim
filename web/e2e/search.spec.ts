@@ -103,3 +103,13 @@ test("the palette names the highlighted option for screen readers, and fills a p
   const box = (await page.getByTestId("palette").boundingBox())!;
   expect(box.width).toBeGreaterThanOrEqual(388);
 });
+
+test("the palette is empty again after Esc, so the next query starts clean", async ({ page }) => {
+  await createSimulation(page);
+  await page.keyboard.press("Control+k");
+  await expect(page.getByTestId("palette")).toBeVisible();
+  await page.getByTestId("palette-input").pressSequentially("sap");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("palette")).toBeHidden();
+  await expect(page.getByTestId("palette-input")).toHaveValue("");
+});
