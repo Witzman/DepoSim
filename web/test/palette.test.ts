@@ -15,7 +15,7 @@ const kinds = (es: ReturnType<typeof buildEntries>) => es.map((e) => e.kind);
 describe("buildEntries", () => {
   it("lists every instrument, then the simulations, then the theme command, for an empty query", () => {
     const es = buildEntries("  ", [SAP, SIE], [sim(1, "Alt"), sim(2, "Neu")], []);
-    expect(kinds(es)).toEqual(["instrument", "instrument", "simulation", "simulation", "theme"]);
+    expect(kinds(es)).toEqual(["instrument", "instrument", "simulation", "simulation", "theme", "help"]);
   });
 
   it("puts a symbol that starts with the query before one that only contains it", () => {
@@ -36,6 +36,10 @@ describe("buildEntries", () => {
   it("offers the theme command for 'dunkel', 'hell', 'farbe' and 'theme', and not for other words", () => {
     for (const q of ["dunkel", "hell", "farbe", "theme"]) expect(kinds(buildEntries(q, [], [], [])), q).toEqual(["theme"]);
     expect(buildEntries("sap", [], [], [])).toEqual([]);
+  });
+
+  it("offers the shortcut help for 'kürzel', 'tasten' and 'hilfe'", () => {
+    for (const q of ["kürzel", "tasten", "hilfe"]) expect(kinds(buildEntries(q, [], [], [])), q).toEqual(["help"]);
   });
 
   it("adds hits that are not in the list at the end, and never one that is", () => {

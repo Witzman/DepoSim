@@ -12,6 +12,7 @@ interface Props {
   onPickInstrument: (symbol: string) => void;
   onPickSimulation: (id: number) => void;
   onToggleTheme: () => void;
+  onShowHelp: () => void;
   /** Resolves when the instrument is in the list; rejects with a message that is shown here. */
   onAdd: (symbol: string) => Promise<void>;
 }
@@ -28,13 +29,15 @@ function describe(e: Entry, selectedId: number | null): { text: string; tag: str
       return { text: e.simulation.name + (e.simulation.id === selectedId ? " (offen)" : ""), tag: "Simulation" };
     case "theme":
       return { text: "Hell oder Dunkel umschalten", tag: "Ansicht" };
+    case "help":
+      return { text: "Tastenkürzel anzeigen", tag: "Hilfe" };
     case "hit":
       return { text: `${e.hit.symbol} · ${e.hit.name} (${PLACE[e.hit.venue]})`, tag: "Neu hinzufügen" };
   }
 }
 
 export function Palette({
-  open, instruments, simulations, selectedId, onClose, onPickInstrument, onPickSimulation, onToggleTheme, onAdd,
+  open, instruments, simulations, selectedId, onClose, onPickInstrument, onPickSimulation, onToggleTheme, onShowHelp, onAdd,
 }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -83,6 +86,7 @@ export function Palette({
     if (e.kind === "instrument") onPickInstrument(e.instrument.symbol);
     else if (e.kind === "simulation") onPickSimulation(e.simulation.id);
     else if (e.kind === "theme") onToggleTheme();
+    else if (e.kind === "help") onShowHelp();
     else {
       setBusy(true);
       setProblem(null);

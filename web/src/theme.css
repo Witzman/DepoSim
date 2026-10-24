@@ -197,3 +197,8 @@ h3 { margin: var(--gap) 0 4px; font-size: 0.85rem; font-weight: 600; }
 .slices { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; font-size: 0.9rem; }
 .slices li { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; }
 .slices .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+.keys { display: grid; gap: 6px; margin: 10px 0; }
+.keys div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.keys dt, .keys dd { margin: 0; }
+kbd { font: inherit; font-size: 0.85rem; padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 6px; background: var(--bg); }

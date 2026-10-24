@@ -36,10 +36,10 @@ export function ClockBar({ simulationTime, tempo, running, disabled, live, phase
         {status && <div className={`status ${phase === "catchup" ? "" : "up"}`} data-testid="clock-status">{status}</div>}
       </div>
       <div className="group" role="group" aria-label="Tempo">
-        {TEMPOS.map((t) => (
+        {TEMPOS.map((t, n) => (
           <button
             key={t} className="btn" aria-pressed={t === tempo} disabled={disabled || live} onClick={() => onTempo(t)}
-            title={live ? "Im Livebetrieb bestimmt die Uhr das Tempo" : undefined}
+            title={live ? "Im Livebetrieb bestimmt die Uhr das Tempo" : `Taste ${n + 1}`}
           >
             {t}x
           </button>

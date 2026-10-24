@@ -13,6 +13,7 @@ import { DepotSwitch } from "./components/DepotSwitch.js";
 import { OrderTicket } from "./components/OrderTicket.js";
 import { OrdersPanel } from "./components/OrdersPanel.js";
 import { Palette } from "./components/Palette.js";
+import { ShortcutHelp } from "./components/ShortcutHelp.js";
 import { SimulationPicker } from "./components/SimulationPicker.js";
 import { Watchlist } from "./components/Watchlist.js";
 import { formatPrice } from "./format.js";
@@ -58,6 +59,7 @@ export function App() {
   const [view, setView] = useState<"trade" | "evaluation">("trade");
   const [activeDepotId, setActiveDepotId] = useState<number | null>(null);
   const [allocationOpen, setAllocationOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const socket = useRef<Socket | null>(null);
   const runningRef = useRef(false);
   const symbolRef = useRef(symbol);
@@ -129,6 +131,12 @@ export function App() {
       if (e.key === "b" || e.key === "s") {
         e.preventDefault();
         setTicketCommand((c) => ({ side: e.key === "b" ? "buy" : "sell", n: c.n + 1 }));
+      } else if (e.key === "?") {
+        e.preventDefault();
+        setHelpOpen(true);
+      } else if (/^[1-4]$/.test(e.key) && socket.current) {
+        e.preventDefault();
+        socket.current.send({ type: "tempo", tempo: ([1, 5, 30, 60] as const)[Number(e.key) - 1] });
       } else if (e.key === " " && socket.current) {
         e.preventDefault();
         socket.current.send({ type: runningRef.current ? "pause" : "run" });
@@ -360,10 +368,11 @@ export function App() {
         <AllocationDialog open={allocationOpen} simulationId={live.id} depotId={depot.id} depotName={depot.name}
           instruments={watchlist} onClose={() => setAllocationOpen(false)} />
       )}
+      <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
       <Palette
         open={paletteOpen} instruments={watchlist} simulations={simulations} selectedId={selectedId}
         onClose={() => setPaletteOpen(false)} onPickInstrument={setSymbol} onPickSimulation={setSelectedId}
-        onToggleTheme={toggle} onAdd={addTitle}
+        onToggleTheme={toggle} onShowHelp={() => setHelpOpen(true)} onAdd={addTitle}
       />
     </div>
   );

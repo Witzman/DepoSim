@@ -4,9 +4,11 @@ export type Entry =
   | { kind: "instrument"; instrument: Instrument }
   | { kind: "simulation"; simulation: Simulation }
   | { kind: "theme" }
+  | { kind: "help" }
   | { kind: "hit"; hit: SearchHit };
 
 const THEME_WORDS = ["hell", "dunkel", "farbe", "theme"];
+const HELP_WORDS = ["kürzel", "tastenkürzel", "tasten", "hilfe"];
 
 /**
  * What the palette shows for a query: the instruments of the list (symbols that start with the
@@ -25,6 +27,7 @@ export function buildEntries(
       ...instruments.map((instrument): Entry => ({ kind: "instrument", instrument })),
       ...simulations.map((simulation): Entry => ({ kind: "simulation", simulation })),
       { kind: "theme" },
+      { kind: "help" },
     ];
   }
   const matching = instruments.filter((i) => i.symbol.toLowerCase().includes(q) || i.name.toLowerCase().includes(q));
@@ -36,6 +39,7 @@ export function buildEntries(
     if (simulation.name.toLowerCase().includes(q)) out.push({ kind: "simulation", simulation });
   }
   if (THEME_WORDS.some((w) => w.includes(q))) out.push({ kind: "theme" });
+  if (HELP_WORDS.some((w) => w.includes(q))) out.push({ kind: "help" });
   const listed = new Set(instruments.map((i) => i.symbol));
   for (const hit of hits) {
     if (!hit.known && !listed.has(hit.symbol)) out.push({ kind: "hit", hit });

@@ -21,6 +21,7 @@ test("Ctrl+K opens the palette with the focus in its field, also from inside ano
   await createSimulation(page);
   await page.keyboard.press("Control+k");
   await expect(page.getByTestId("palette")).toBeVisible();
+  await expect(page.getByTestId("palette")).toBeVisible();
   await expect(page.getByTestId("palette-input")).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("palette")).toBeHidden();
@@ -28,12 +29,14 @@ test("Ctrl+K opens the palette with the focus in its field, also from inside ano
   await page.getByLabel("Menge").focus();
   await page.keyboard.press("Control+k");
   await expect(page.getByTestId("palette")).toBeVisible();
+  await expect(page.getByTestId("palette")).toBeVisible();
 });
 
 test("B, S and Space do not act while the palette is open", async ({ page }) => {
   await createSimulation(page);
   const before = await page.getByTestId("sim-time").textContent();
   await page.keyboard.press("Control+k");
+  await expect(page.getByTestId("palette")).toBeVisible();
   await page.keyboard.type("b s ");
   await expect(page.getByTestId("palette-input")).toHaveValue("b s ");
   await page.waitForTimeout(1500);
@@ -44,6 +47,7 @@ test("B, S and Space do not act while the palette is open", async ({ page }) => 
 test("a title is found, added, traded, and then cannot be removed while it is held", async ({ page }) => {
   await createSimulation(page);
   await page.keyboard.press("Control+k");
+  await expect(page.getByTestId("palette")).toBeVisible();
   await page.getByTestId("palette-input").pressSequentially("bmw");
   const hit = page.getByRole("option", { name: /BMW\.DE/ });
   await expect(hit).toContainText("Neu hinzufügen");
@@ -66,6 +70,7 @@ test("a title is found, added, traded, and then cannot be removed while it is he
 test("an added title that nobody holds can be removed, and a title in the list is selected from the palette", async ({ page }) => {
   await createSimulation(page);
   await page.keyboard.press("Control+k");
+  await expect(page.getByTestId("palette")).toBeVisible();
   await page.getByTestId("palette-input").pressSequentially("amzn");
   await expect(page.getByRole("option", { name: /AMZN/ })).toContainText("Neu hinzufügen");
   await page.keyboard.press("Enter");
@@ -76,6 +81,7 @@ test("an added title that nobody holds can be removed, and a title in the list i
   await expect(page.getByTestId("watchlist").getByText("AMZN")).toHaveCount(0);
 
   await page.keyboard.press("Control+k");
+  await expect(page.getByTestId("palette")).toBeVisible();
   await page.getByTestId("palette-input").pressSequentially("siemens");
   await page.keyboard.press("Enter");
   await expect(page.getByLabel("Wertpapier", { exact: true })).toHaveValue("SIE.DE");
@@ -85,6 +91,7 @@ test("the palette names the highlighted option for screen readers, and fills a p
   await page.setViewportSize({ width: 390, height: 800 });
   await createSimulation(page);
   await page.keyboard.press("Control+k");
+  await expect(page.getByTestId("palette")).toBeVisible();
   const field = page.getByTestId("palette-input");
   const options = page.getByTestId("palette").getByRole("option");
   const first = options.first();
