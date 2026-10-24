@@ -58,7 +58,12 @@ export function Palette({
       d.showModal();
       input.current?.focus();
     }
-    if (!open && d.open) d.close();
+    if (!open && d.open) {
+      d.close();
+      // Emptied on closing too: an input that is shown with the old text would take the first
+      // keys of the next query before the reset on opening has been drawn.
+      setQuery("");
+    }
   }, [open]);
 
   // The search waits until typing pauses and never answers for an old query.
