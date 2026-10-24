@@ -104,6 +104,37 @@ describe("instruments added while the service runs", () => {
   });
 });
 
+describe("prepareInstrument", () => {
+  const NOBAR = { symbol: "NOBAR.DE", name: "Ohne Kerzen", currency: "EUR", venue: "XETRA" } as const;
+
+  it("loads the day of every open simulation and the days before for the new instrument", async () => {
+    const t = setup({ instruments: [SAP], startAt: D1 + 7 * H + 600 });
+    await t.svc.start(t.id);
+    await t.svc.prepareInstrument(AAPL);
+    expect(t.archive.barsBetween("AAPL", D0, D1)).toHaveLength(60); // D1 itself has none, D0 is one day before
+  });
+
+  it("does not throw for an instrument that has no bars at all", async () => {
+    const t = setup({ instruments: [SAP] });
+    await t.svc.start(t.id);
+    await expect(t.svc.prepareInstrument(NOBAR)).resolves.toBeUndefined();
+  });
+
+  it("passes on a rate limit of the source", async () => {
+    const t = setup({ instruments: [SAP] });
+    await t.svc.start(t.id);
+    const limited = setup({ instruments: [SAP], fail: "rate_limited" });
+    await expect(limited.svc.prepareInstrument(AAPL)).rejects.toMatchObject({ kind: "rate_limited" });
+  });
+
+  it("skips ended simulations", async () => {
+    const t = setup({ instruments: [SAP], startAt: D0 + 13 * H + 1800 + 600 });
+    t.store.endSimulation(t.id);
+    await t.svc.prepareInstrument(AAPL);
+    expect(t.calls.filter((c) => c === "AAPL")).toHaveLength(0);
+  });
+});
+
 describe("placeOrder", () => {
   it("fills a market buy at once at the last close plus spread while the market is open", async () => {
     const t = setup();

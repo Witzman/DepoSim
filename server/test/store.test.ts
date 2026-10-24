@@ -150,4 +150,22 @@ describe("store, live simulations", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("knows whether any simulation holds a symbol or has an open order in it", () => {
+    const store = createStore(openDb(":memory:"));
+    const sim = store.createSimulation(input);
+    const depot = store.listDepots(sim.id)[0];
+    expect(store.symbolInUse("AAPL")).toBe(false);
+
+    store.saveBalance(depot.id, depot.cash, new Map([["AAPL", { qty: 3, cost: 900 }]]));
+    expect(store.symbolInUse("AAPL")).toBe(true);
+    expect(store.symbolInUse("SAP.DE")).toBe(false);
+    store.saveBalance(depot.id, depot.cash, new Map());
+    expect(store.symbolInUse("AAPL")).toBe(false);
+
+    const orderId = store.insertOrder(depot.id, { symbol: "SAP.DE", side: "buy", kind: "limit", qty: 1, limitPrice: 10 }, 5000);
+    expect(store.symbolInUse("SAP.DE")).toBe(true);
+    store.setOrderStatus(orderId, "cancelled");
+    expect(store.symbolInUse("SAP.DE")).toBe(false);
+  });
 });

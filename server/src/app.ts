@@ -7,6 +7,7 @@ import { registerApi } from "./api.js";
 import { FX_SYMBOL, type Instrument, WATCHLIST } from "./config.js";
 import { createArchive } from "./data/archive.js";
 import type { MarketData } from "./data/marketdata.js";
+import { type InstrumentSearch, createYahooSearch } from "./data/search.js";
 import { createYahoo } from "./data/yahoo.js";
 import { openDb } from "./db.js";
 import { InstrumentRegistry } from "./instruments.js";
@@ -19,6 +20,8 @@ export interface AppOptions {
   /** The price source. Defaults to Yahoo. */
   marketData?: MarketData;
   instruments?: Instrument[];
+  /** The instrument search. Defaults to Yahoo. */
+  search?: InstrumentSearch;
   /** Current time in UTC seconds. */
   now?: () => number;
   /** Pause between two calls to the price source. */
@@ -69,7 +72,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   });
 
   app.get("/healthz", async (_req, reply) => reply.type("text/plain").send("ok"));
-  registerApi(app, { store, session, archive, instruments, hub });
+  registerApi(app, { store, session, archive, instruments, search: opts.search ?? createYahooSearch(), hub });
 
   if (existsSync(WEB_DIST)) {
     app.register(fastifyStatic, { root: WEB_DIST });

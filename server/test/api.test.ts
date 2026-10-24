@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { buildApp } from "../src/app.js";
 import { type MarketData, MarketDataError, type MarketDataErrorKind } from "../src/data/marketdata.js";
+import type { InstrumentSearch, SearchHit } from "../src/data/search.js";
 import { AAPL, D0, D1, H, SAP, makeSource } from "./fakes.js";
 
 const NOW = D0 + 5 * 86400;
@@ -436,5 +437,134 @@ describe("the clock of a live simulation (websocket)", () => {
     await until(() => msgs.length >= 1);
     send({ type: "tempo", tempo: 30 });
     await until(() => t.app.session.snapshot(id).simulation.tempo === 30);
+  });
+});
+
+describe("search and the watchlist", () => {
+  const NEW_DE: SearchHit = { symbol: "NEW.DE", name: "Neu AG", currency: "EUR", venue: "XETRA", kind: "EQUITY" };
+  const AAPL_HIT: SearchHit = { ...AAPL, kind: "EQUITY" };
+
+  function withSearch(hits: SearchHit[] | MarketDataErrorKind = [NEW_DE, AAPL_HIT]) {
+    const queries: string[] = [];
+    const search: InstrumentSearch = {
+      async search(q) {
+        queries.push(q);
+        if (typeof hits === "string") throw new MarketDataError(hits, "fake");
+        return hits.filter((h) => h.symbol.toLowerCase().includes(q.toLowerCase()) || h.name.toLowerCase().includes(q.toLowerCase()));
+      },
+    };
+    const { source } = makeSource();
+    const app = buildApp({
+      dbPath: ":memory:", marketData: source, instruments: [SAP], search, now: () => NOW, minGapMs: 0, tickMs: 20,
+    });
+    open.push(app);
+    return { app, queries };
+  }
+  const del = (app: FastifyInstance, url: string) => app.inject({ method: "DELETE", url });
+  const symbols = async (app: FastifyInstance) => (await app.inject({ url: "/api/watchlist" })).json().map((i: any) => i.symbol);
+
+  it("rejects a query that is too short or too long", async () => {
+    const { app, queries } = withSearch();
+    expect((await app.inject({ url: "/api/search?q=a" })).statusCode).toBe(400);
+    expect((await app.inject({ url: "/api/search?q=" })).statusCode).toBe(400);
+    expect((await app.inject({ url: `/api/search?q=${"x".repeat(41)}` })).statusCode).toBe(400);
+    expect(queries).toEqual([]);
+  });
+
+  it("returns hits and marks the ones already in the list as known", async () => {
+    const { app } = withSearch([{ ...AAPL, kind: "EQUITY", symbol: "SAP.DE", name: "SAP" }, NEW_DE]);
+    const res = await app.inject({ url: "/api/search?q=%20de%20" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([
+      expect.objectContaining({ symbol: "SAP.DE", known: true }),
+      expect.objectContaining({ symbol: "NEW.DE", known: false, name: "Neu AG" }),
+    ]);
+  });
+
+  it("answers a rate limit of the search with 429 and other failures with 502", async () => {
+    expect((await withSearch("rate_limited").app.inject({ url: "/api/search?q=abc" })).statusCode).toBe(429);
+    expect((await withSearch("network").app.inject({ url: "/api/search?q=abc" })).statusCode).toBe(502);
+  });
+
+  it("refuses symbols that are not plain, and the exchange rate, and leaves the list alone", async () => {
+    const { app, queries } = withSearch();
+    for (const symbol of ["../x", "a b", "", "EURUSD=X", "x".repeat(16), "^GSPC;"]) {
+      const res = await post(app, "/api/watchlist", { symbol });
+      expect(res.statusCode, symbol).toBe(400);
+    }
+    expect((await post(app, "/api/watchlist", {})).statusCode).toBe(400);
+    expect(queries).toEqual([]);
+    expect(await symbols(app)).toEqual(["SAP.DE"]);
+  });
+
+  it("answers 404 for a symbol that the search does not return as an exact hit", async () => {
+    const { app } = withSearch();
+    expect((await post(app, "/api/watchlist", { symbol: "NE" })).statusCode).toBe(404); // a part of NEW.DE
+    expect((await post(app, "/api/watchlist", { symbol: "ZZZ" })).statusCode).toBe(404);
+    expect(await symbols(app)).toEqual(["SAP.DE"]);
+  });
+
+  it("adds a found instrument with name, currency and venue from the search, and a second add changes nothing", async () => {
+    const { app } = withSearch();
+    const first = await post(app, "/api/watchlist", { symbol: "new.de" });
+    expect(first.statusCode).toBe(201);
+    expect(first.json()).toEqual({ symbol: "NEW.DE", name: "Neu AG", currency: "EUR", venue: "XETRA", added: true });
+    const again = await post(app, "/api/watchlist", { symbol: "NEW.DE" });
+    expect(again.statusCode).toBe(200);
+    expect(await symbols(app)).toEqual(["SAP.DE", "NEW.DE"]);
+    const list = (await app.inject({ url: "/api/watchlist" })).json();
+    expect(list.map((i: any) => i.added)).toEqual([false, true]);
+  });
+
+  it("refuses the 13th added instrument with 409 and a clear message", async () => {
+    const hits = Array.from({ length: 13 }, (_, n): SearchHit => ({ ...NEW_DE, symbol: `N${n}.DE`, name: `N${n}` }));
+    const { app } = withSearch(hits);
+    for (let n = 0; n < 12; n++) expect((await post(app, "/api/watchlist", { symbol: `N${n}.DE` })).statusCode).toBe(201);
+    const res = await post(app, "/api/watchlist", { symbol: "N12.DE" });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toMatch(/höchstens 12/);
+    expect(await symbols(app)).toHaveLength(13);
+  });
+
+  it("does not add the instrument when the price source is rate limited, and says 502 or 429", async () => {
+    const { source } = makeSource();
+    let fail = false;
+    const app = buildApp({
+      dbPath: ":memory:", instruments: [SAP], now: () => NOW, minGapMs: 0, tickMs: 20,
+      search: { search: async () => [AAPL_HIT] },
+      marketData: { bars: (...a) => (fail ? Promise.reject(new MarketDataError("rate_limited", "x")) : source.bars(...a)) },
+    });
+    open.push(app);
+    await createSim(app);
+    fail = true;
+    const res = await post(app, "/api/watchlist", { symbol: "AAPL" });
+    expect(res.statusCode).toBe(429);
+    expect(await symbols(app)).toEqual(["SAP.DE"]);
+  });
+
+  it("removes an added instrument that nobody holds, and refuses the starting list and unknown symbols", async () => {
+    const { app } = withSearch();
+    await post(app, "/api/watchlist", { symbol: "NEW.DE" });
+    expect((await del(app, "/api/watchlist/NEW.DE")).statusCode).toBe(204);
+    expect(await symbols(app)).toEqual(["SAP.DE"]);
+    expect((await del(app, "/api/watchlist/SAP.DE")).statusCode).toBe(409);
+    expect((await del(app, "/api/watchlist/NOPE")).statusCode).toBe(404);
+    expect(await symbols(app)).toEqual(["SAP.DE"]);
+  });
+
+  it("refuses to remove an instrument that a simulation holds, or has an open order in", async () => {
+    const { app } = withSearch();
+    await post(app, "/api/watchlist", { symbol: "AAPL" });
+    const id = await createSim(app, D0 + 13 * H + 1800 + 600); // AAPL is trading
+    const buy = await post(app, `/api/simulations/${id}/orders`, { symbol: "AAPL", side: "buy", kind: "market", qty: 1 });
+    expect(buy.statusCode).toBe(201);
+    const held = await del(app, "/api/watchlist/AAPL");
+    expect(held.statusCode).toBe(409);
+    expect(held.json().error).toMatch(/gehalten/);
+    expect(await symbols(app)).toEqual(["SAP.DE", "AAPL"]);
+
+    await post(app, `/api/simulations/${id}/orders`, { symbol: "AAPL", side: "sell", kind: "market", qty: 1 });
+    await post(app, `/api/simulations/${id}/orders`, { symbol: "AAPL", side: "buy", kind: "limit", qty: 1, limitPrice: 1 });
+    expect((await del(app, "/api/watchlist/AAPL")).statusCode).toBe(409); // the limit order is still open
   });
 });

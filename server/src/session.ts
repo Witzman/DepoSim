@@ -103,6 +103,20 @@ export class SessionService {
     if (!traded) throw new MarketDataError("no_data", "Für diesen Tag liegen keine Kurse vor.");
   }
 
+  /**
+   * Fetches what a new instrument needs to show up: for every simulation that has not ended, the day
+   * of its clock and the three days before it (three calendar days reach back over a weekend). A day
+   * without trading is not an error. A rate limit or a network failure is passed on.
+   */
+  async prepareInstrument(inst: Instrument): Promise<void> {
+    const days = new Set<number>();
+    for (const sim of this.store.listSimulations()) {
+      if (sim.endedAt !== null) continue;
+      for (let k = 0; k <= 3; k++) days.add(dayOf(sim.simulationTime) - k * DAY);
+    }
+    for (const day of [...days].sort((a, b) => b - a)) await this.archive.ensureDay(inst.symbol, day);
+  }
+
   /** The latest simulation time that may be shown now: the present minus the delay of the source. */
   currentLiveLimit(): number {
     return liveLimit(this.now(), this.delayS);

@@ -1,9 +1,12 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
+import { FX_SYMBOL, type Instrument } from "./config.js";
 import type { Archive } from "./data/archive.js";
+import { MarketDataError } from "./data/marketdata.js";
+import type { InstrumentSearch } from "./data/search.js";
 import { DEFAULT_FEES } from "./domain/fees.js";
 import { describeError } from "./errors.js";
-import type { InstrumentRegistry } from "./instruments.js";
+import { type InstrumentRegistry, RegistryError } from "./instruments.js";
 import type { SessionService } from "./session.js";
 import type { Store } from "./store.js";
 import type { Hub } from "./ws.js";
@@ -35,11 +38,16 @@ const barsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(2000).default(500),
 });
 
+const searchQuery = z.object({ q: z.string().trim().min(2).max(40) });
+const SYMBOL = /^[A-Za-z0-9.^=-]{1,15}$/;
+const addBody = z.object({ symbol: z.string() });
+
 interface Deps {
   store: Store;
   session: SessionService;
   archive: Archive;
   instruments: InstrumentRegistry;
+  search: InstrumentSearch;
   hub: Hub;
 }
 
@@ -49,18 +57,79 @@ const invalid = (reply: FastifyReply, err: z.ZodError) => {
   return reply.code(400).send({ error: `Ungültige Eingabe (${where}): ${issue.message}` });
 };
 
-export function registerApi(app: FastifyInstance, { store, session, archive, instruments, hub }: Deps) {
+export function registerApi(app: FastifyInstance, { store, session, archive, instruments, search, hub }: Deps) {
   const simulationOf = (params: unknown) => {
     const id = Number((params as { id?: string }).id);
     return Number.isInteger(id) ? store.getSimulation(id) : undefined;
   };
   const notFound = (reply: FastifyReply) => reply.code(404).send({ error: "Unbekannte Simulation." });
 
-  app.get("/api/watchlist", async () =>
-    instruments.list().map(({ symbol, name, currency, venue }) => ({
-      symbol, name, currency, venue, added: instruments.isAdded(symbol),
-    })),
-  );
+  app.get("/api/watchlist", async () => instruments.list().map(shown));
+
+  /** A rate limit of a source is 429, any other failure of it is 502. */
+  const sourceFailed = (reply: FastifyReply, err: unknown) =>
+    reply.code(err instanceof MarketDataError && err.kind === "rate_limited" ? 429 : 502).send({ error: describeError(err) });
+  const shown = (i: Instrument) => ({
+    symbol: i.symbol, name: i.name, currency: i.currency, venue: i.venue, added: instruments.isAdded(i.symbol),
+  });
+
+  app.get("/api/search", async (req, reply) => {
+    const query = searchQuery.safeParse(req.query);
+    if (!query.success) return invalid(reply, query.error);
+    try {
+      const hits = await search.search(query.data.q);
+      return hits.map((h) => ({ ...h, known: instruments.get(h.symbol) !== undefined }));
+    } catch (err) {
+      return sourceFailed(reply, err);
+    }
+  });
+
+  app.post("/api/watchlist", async (req, reply) => {
+    const body = addBody.safeParse(req.body);
+    if (!body.success) return invalid(reply, body.error);
+    const wanted = body.data.symbol;
+    if (!SYMBOL.test(wanted) || wanted.toUpperCase() === FX_SYMBOL) {
+      return reply.code(400).send({ error: "Ungültiges Kürzel." });
+    }
+    let hit;
+    try {
+      hit = (await search.search(wanted)).find((h) => h.symbol.toUpperCase() === wanted.toUpperCase());
+    } catch (err) {
+      return sourceFailed(reply, err);
+    }
+    if (!hit) return reply.code(404).send({ error: `Unbekanntes Wertpapier ${wanted}.` });
+
+    const known = instruments.get(hit.symbol);
+    if (known) return reply.code(200).send(shown(known));
+
+    const inst: Instrument = { symbol: hit.symbol, name: hit.name, currency: hit.currency, venue: hit.venue };
+    try {
+      instruments.add(inst);
+    } catch (err) {
+      if (err instanceof RegistryError) return reply.code(err.kind === "full" ? 409 : 400).send({ error: err.message });
+      throw err;
+    }
+    try {
+      await session.prepareInstrument(inst);
+    } catch (err) {
+      instruments.remove(inst.symbol); // nothing was shown yet, so it is as if it had not been added
+      return sourceFailed(reply, err);
+    }
+    return reply.code(201).send(shown(inst));
+  });
+
+  app.delete("/api/watchlist/:symbol", async (req, reply) => {
+    const symbol = (req.params as { symbol: string }).symbol;
+    if (!instruments.get(symbol)) return reply.code(404).send({ error: `Unbekanntes Wertpapier ${symbol}.` });
+    if (!instruments.isAdded(symbol)) {
+      return reply.code(409).send({ error: "Dieses Wertpapier gehört zum Startbestand." });
+    }
+    if (store.symbolInUse(symbol)) {
+      return reply.code(409).send({ error: "Das Wertpapier wird gehalten oder hat offene Orders." });
+    }
+    instruments.remove(symbol);
+    return reply.code(204).send();
+  });
 
   app.get("/api/simulations", async () => store.listSimulations());
 
