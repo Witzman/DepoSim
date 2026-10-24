@@ -155,3 +155,17 @@ dialog .actions { display: flex; gap: 8px; justify-content: flex-end; }
 }
 dialog label.check { display: flex; align-items: center; gap: 8px; color: var(--text); }
 dialog label.check input { width: auto; }
+
+.watch-item { display: flex; gap: 4px; align-items: stretch; }
+.watch-item .watch-row { flex: 1; min-width: 0; }
+
+dialog.palette { width: min(92vw, 520px); padding: 12px; margin-top: 12vh; }
+dialog.palette input { width: 100%; box-sizing: border-box; }
+dialog.palette ul { list-style: none; margin: 8px 0 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+dialog.palette li {
+  display: flex; justify-content: space-between; gap: var(--gap); padding: 8px; border-radius: 8px; cursor: pointer;
+  border: 1px solid transparent;
+}
+dialog.palette li[aria-selected="true"] { border-color: var(--accent); background: var(--bg); }
+dialog.palette li .muted { font-size: 0.8rem; white-space: nowrap; }
+dialog.palette p { margin: 8px 0 0; font-size: 0.9rem; }

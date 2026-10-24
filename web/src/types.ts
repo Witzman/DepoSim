@@ -18,7 +18,11 @@ export interface Instrument {
   name: string;
   currency: "EUR" | "USD";
   venue: Venue;
+  /** True for the ones the person added; only those can be removed. */
+  added?: boolean;
 }
+
+export type SearchHit = Instrument & { known: boolean };
 
 export interface Simulation {
   id: number;

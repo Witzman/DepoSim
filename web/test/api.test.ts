@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  ApiError, cancelOrder, createSimulation, deleteSimulation, getBars, listSimulations, parseServerMessage,
-  placeOrder, previewOrder, socketUrl,
+  ApiError, addInstrument, cancelOrder, createSimulation, deleteSimulation, getBars, listSimulations, parseServerMessage,
+  placeOrder, previewOrder, removeInstrument, searchInstruments, socketUrl,
 } from "../src/api.js";
 
 function stubFetch(status: number, body: unknown) {
@@ -129,5 +129,34 @@ describe("createSimulation, live", () => {
     await createSimulation({ name: "Live", live: true });
     const [, init] = fn.mock.calls[0] as unknown as [string, RequestInit];
     expect(JSON.parse(String(init.body))).toEqual({ name: "Live", live: true });
+  });
+});
+
+describe("instrument search and watchlist", () => {
+  it("encodes the query of a search and returns the hits", async () => {
+    const fn = stubFetch(200, [{ symbol: "X", known: false }]);
+    expect(await searchInstruments("a b&c")).toEqual([{ symbol: "X", known: false }]);
+    expect(fn.mock.calls[0][0]).toBe("/api/search?q=a%20b%26c");
+  });
+
+  it("posts the symbol as JSON to add an instrument", async () => {
+    const fn = stubFetch(201, { symbol: "BMW.DE" });
+    expect(await addInstrument("BMW.DE")).toMatchObject({ symbol: "BMW.DE" });
+    const [url, init] = fn.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/watchlist");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ symbol: "BMW.DE" });
+  });
+
+  it("deletes the encoded symbol and raises the server's text on a 409", async () => {
+    const fn = stubFetch(204, undefined);
+    await removeInstrument("A^B");
+    expect(fn.mock.calls[0][0]).toBe("/api/watchlist/A%5EB");
+    expect((fn.mock.calls[0][1] as RequestInit).method).toBe("DELETE");
+
+    stubFetch(409, { error: "Das Wertpapier wird gehalten oder hat offene Orders." });
+    const err = await removeInstrument("AAPL").catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.message).toMatch(/gehalten/);
   });
 });

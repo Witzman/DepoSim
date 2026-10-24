@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  type Socket, cancelOrder, createSimulation, deleteSimulation, endSimulation, getBars, getWatchlist, listSimulations,
-  openSocket,
+  type Socket, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, getBars, getWatchlist, listSimulations,
+  openSocket, removeInstrument,
 } from "./api.js";
 import { Chart } from "./components/Chart.js";
 import { ClockBar } from "./components/ClockBar.js";
 import { DepotPanel } from "./components/DepotPanel.js";
 import { OrderTicket } from "./components/OrderTicket.js";
 import { OrdersPanel } from "./components/OrdersPanel.js";
+import { Palette } from "./components/Palette.js";
 import { SimulationPicker } from "./components/SimulationPicker.js";
 import { Watchlist } from "./components/Watchlist.js";
 import { formatPrice } from "./format.js";
@@ -48,6 +49,7 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ticketCommand, setTicketCommand] = useState<{ side: "buy" | "sell"; n: number }>({ side: "buy", n: 0 });
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const socket = useRef<Socket | null>(null);
   const runningRef = useRef(false);
   const symbolRef = useRef(symbol);
@@ -94,6 +96,18 @@ export function App() {
   }, []);
 
   useEffect(() => rememberSelection(selectedId), [selectedId]);
+
+  // Ctrl+K (Cmd+K) opens and closes the palette, from anywhere, also from inside a field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "k" || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      if (document.querySelector("dialog[open]:not([data-testid='palette'])")) return;
+      e.preventDefault();
+      setPaletteOpen((o) => !o);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // B and S pick the side, Space starts and pauses. Typing in a field is left alone.
   useEffect(() => {
@@ -144,6 +158,24 @@ export function App() {
     setSelectedId(sim.id);
   }
 
+  async function addTitle(symbol: string) {
+    const added = await addInstrument(symbol);
+    setWatchlist(await getWatchlist());
+    setSymbol(added.symbol);
+  }
+
+  async function removeTitle(sym: string) {
+    try {
+      await removeInstrument(sym);
+      const list = await getWatchlist();
+      setWatchlist(list);
+      if (sym === symbol) setSymbol((list.find((i) => i.venue === "XETRA") ?? list[0])?.symbol ?? "");
+      setNotice(null);
+    } catch (e) {
+      setNotice((e as Error).message);
+    }
+  }
+
   async function remove(id: number) {
     try {
       await deleteSimulation(id);
@@ -183,6 +215,8 @@ export function App() {
     <div className="app">
       <header className="topbar">
         <h1>DepoSim</h1>
+        <button className="btn small" data-testid="palette-open" onClick={() => setPaletteOpen(true)}
+          aria-label="Suche und Befehle öffnen (Strg+K)" title="Strg+K">Suche</button>
         <button className="btn small" data-testid="theme-toggle" onClick={toggle} aria-label="Hell oder Dunkel umschalten">
           {theme === "dark" ? "Hell" : "Dunkel"}
         </button>
@@ -196,7 +230,7 @@ export function App() {
           />
           {live && (
             <Watchlist instruments={watchlist} prices={snapshot?.prices ?? {}} venues={snapshot?.venues}
-              selected={symbol} onSelect={setSymbol} />
+              selected={symbol} onSelect={setSymbol} onRemove={removeTitle} />
           )}
         </div>
 
@@ -246,6 +280,11 @@ export function App() {
           )}
         </main>
       </div>
+      <Palette
+        open={paletteOpen} instruments={watchlist} simulations={simulations} selectedId={selectedId}
+        onClose={() => setPaletteOpen(false)} onPickInstrument={setSymbol} onPickSimulation={setSelectedId}
+        onToggleTheme={toggle} onAdd={addTitle}
+      />
     </div>
   );
 }

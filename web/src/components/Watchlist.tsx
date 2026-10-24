@@ -7,6 +7,7 @@ interface Props {
   venues: Snapshot["venues"] | undefined;
   selected: string;
   onSelect: (symbol: string) => void;
+  onRemove: (symbol: string) => void;
 }
 
 const VENUES: { venue: Venue; label: string }[] = [
@@ -14,7 +15,7 @@ const VENUES: { venue: Venue; label: string }[] = [
   { venue: "US", label: "US-Börsen" },
 ];
 
-export function Watchlist({ instruments, prices, venues, selected, onSelect }: Props) {
+export function Watchlist({ instruments, prices, venues, selected, onSelect, onRemove }: Props) {
   return (
     <section className="card" aria-label="Watchlist" data-testid="watchlist">
       {VENUES.map(({ venue, label }) => {
@@ -31,11 +32,15 @@ export function Watchlist({ instruments, prices, venues, selected, onSelect }: P
             </div>
             <ul className="watch">
               {list.map((i) => (
-                <li key={i.symbol}>
+                <li key={i.symbol} className="watch-item">
                   <button className="watch-row" aria-current={i.symbol === selected} onClick={() => onSelect(i.symbol)}>
                     <span>{i.symbol}<span className="muted"> {i.name}</span></span>
                     <span className="num">{prices[i.symbol] ? formatPrice(prices[i.symbol].price, i.currency) : "–"}</span>
                   </button>
+                  {i.added && (
+                    <button className="btn small" aria-label={`${i.symbol} entfernen`} title="Aus der Liste entfernen"
+                      onClick={() => onRemove(i.symbol)}>×</button>
+                  )}
                 </li>
               ))}
             </ul>

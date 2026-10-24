@@ -1,4 +1,4 @@
-import type { Bar, ClientMessage, CostPreview, Instrument, OrderInput, ServerMessage, Simulation } from "./types.js";
+import type { Bar, ClientMessage, CostPreview, Instrument, OrderInput, SearchHit, ServerMessage, Simulation } from "./types.js";
 
 /** An error with a message that can be shown to the person as it is. */
 export class ApiError extends Error {
@@ -39,6 +39,11 @@ const json = (method: string, body: unknown): RequestInit => ({
 });
 
 export const getWatchlist = () => request<Instrument[]>("/api/watchlist");
+export const searchInstruments = (q: string) =>
+  request<SearchHit[]>(`/api/search?q=${encodeURIComponent(q)}`);
+export const addInstrument = (symbol: string) => request<Instrument>("/api/watchlist", json("POST", { symbol }));
+export const removeInstrument = (symbol: string) =>
+  request<void>(`/api/watchlist/${encodeURIComponent(symbol)}`, { method: "DELETE" });
 export const listSimulations = () => request<Simulation[]>("/api/simulations");
 export const createSimulation = (body: { name: string; startAt?: number; live?: boolean; startCash?: number }) =>
   request<Simulation>("/api/simulations", json("POST", body));
