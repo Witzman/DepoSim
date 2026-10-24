@@ -174,7 +174,7 @@ describe("websocket", () => {
     const { msgs } = await connect(app, id);
     await until(() => msgs.length >= 1);
     expect(msgs[0]).toMatchObject({
-      type: "snapshot", running: false, simulation: { id, simulationTime: START }, depot: { cash: 1_000_000 },
+      type: "snapshot", running: false, simulation: { id, simulationTime: START }, depots: [{ cash: 1_000_000 }],
     });
   });
 
@@ -195,7 +195,7 @@ describe("websocket", () => {
     const ticks = () => msgs.filter((m) => m.type === "tick");
     await until(() => ticks().length >= 5);
     expect(ticks()[ticks().length - 1].simulationTime).toBeGreaterThan(ticks()[0].simulationTime);
-    expect(ticks()[0]).toMatchObject({ running: true, depot: { cash: 1_000_000 } });
+    expect(ticks()[0]).toMatchObject({ running: true, depots: [{ cash: 1_000_000 }] });
     expect(app.session.snapshot(id).simulation.tempo).toBe(60);
 
     send({ type: "pause" });
