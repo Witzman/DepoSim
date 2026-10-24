@@ -31,6 +31,15 @@ const orderBody = z.object({
   kind: z.enum(["market", "limit"]),
   qty: z.number(),
   limitPrice: z.number().optional(),
+  depotId: z.number().int().optional(),
+});
+
+const depotName = z.string().trim().min(1).max(40);
+const depotBody = z.object({ name: depotName.optional() });
+const renameBody = z.object({ name: depotName });
+const allocateBody = z.object({
+  weights: z.array(z.object({ symbol: z.string().min(1), percent: z.number().positive().max(100) })).min(1).max(20),
+  dryRun: z.boolean().optional(),
 });
 
 const barsQuery = z.object({
@@ -207,7 +216,11 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     if (!sim) return notFound(reply);
     const body = orderBody.safeParse(req.body);
     if (!body.success) return invalid(reply, body.error);
-    const result = session.previewOrder(sim.id, body.data);
+    const { depotId, ...order } = body.data;
+    if (depotId !== undefined && !store.listDepots(sim.id).some((d) => d.id === depotId)) {
+      return reply.code(400).send({ error: "Unbekanntes Depot." });
+    }
+    const result = session.previewOrder(sim.id, order, depotId);
     if (!result.ok) return reply.code(400).send({ error: result.reason });
     return { cost: result.cost, problem: result.problem };
   });
@@ -217,10 +230,71 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     if (!sim) return notFound(reply);
     const body = orderBody.safeParse(req.body);
     if (!body.success) return invalid(reply, body.error);
-    const result = session.placeOrder(sim.id, store.listDepots(sim.id)[0].id, body.data);
+    const { depotId, ...order } = body.data;
+    const result = session.placeOrder(sim.id, depotId ?? store.listDepots(sim.id)[0].id, order);
     if (!result.ok) return reply.code(400).send({ error: result.reason });
     hub.broadcastSnapshot(sim.id);
     return reply.code(201).send({ orderId: result.orderId });
+  });
+
+  const depotOf = (sim: { id: number }, params: unknown) => {
+    const depotId = Number((params as { depotId?: string }).depotId);
+    return store.listDepots(sim.id).find((d) => d.id === depotId);
+  };
+  const unknownDepot = (reply: FastifyReply) => reply.code(404).send({ error: "Unbekanntes Depot." });
+
+  app.get("/api/simulations/:id/curves", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    return { depots: store.listDepots(sim.id).map((d) => ({ id: d.id, name: d.name, points: store.valueCurve(d.id) })) };
+  });
+
+  app.post("/api/simulations/:id/depots", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    const body = depotBody.safeParse(req.body ?? {});
+    if (!body.success) return invalid(reply, body.error);
+    const result = session.addDepot(sim.id, body.data.name);
+    if (!result.ok) return reply.code(409).send({ error: result.reason });
+    hub.broadcastSnapshot(sim.id);
+    return reply.code(201).send(result.depot);
+  });
+
+  app.patch("/api/simulations/:id/depots/:depotId", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    const depot = depotOf(sim, req.params);
+    if (!depot) return unknownDepot(reply);
+    const body = renameBody.safeParse(req.body);
+    if (!body.success) return invalid(reply, body.error);
+    store.renameDepot(depot.id, body.data.name);
+    hub.broadcastSnapshot(sim.id);
+    return { ...depot, name: body.data.name };
+  });
+
+  app.delete("/api/simulations/:id/depots/:depotId", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    const depot = depotOf(sim, req.params);
+    if (!depot) return unknownDepot(reply);
+    const result = session.removeDepot(sim.id, depot.id);
+    if (!result.ok) return reply.code(409).send({ error: result.reason });
+    hub.broadcastSnapshot(sim.id);
+    return reply.code(204).send();
+  });
+
+  app.post("/api/simulations/:id/depots/:depotId/allocate", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    const depot = depotOf(sim, req.params);
+    if (!depot) return unknownDepot(reply);
+    const body = allocateBody.safeParse(req.body);
+    if (!body.success) return invalid(reply, body.error);
+    const dryRun = body.data.dryRun === true;
+    const result = session.allocate(sim.id, depot.id, body.data.weights, dryRun);
+    if (!result.ok) return reply.code(400).send({ error: result.reason });
+    if (!dryRun) hub.broadcastSnapshot(sim.id);
+    return { lines: result.lines };
   });
 
   app.delete("/api/simulations/:id/orders/:orderId", async (req, reply) => {

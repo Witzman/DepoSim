@@ -602,3 +602,113 @@ describe("search and the watchlist", () => {
     expect((await del(app, "/api/watchlist/AAPL")).statusCode).toBe(409); // the limit order is still open
   });
 });
+
+describe("depots", () => {
+  const depots = async (app: FastifyInstance, id: number) =>
+    (await app.inject({ url: `/api/simulations/${id}/curves` })).json().depots as { id: number; name: string; points: { t: number; value: number }[] }[];
+
+  it("adds, renames and deletes a depot, and refuses to delete the last one", async () => {
+    const app = make();
+    const id = await createSim(app);
+    const added = await post(app, `/api/simulations/${id}/depots`, { name: "Zweit" });
+    expect(added.statusCode).toBe(201);
+    expect(added.json()).toMatchObject({ name: "Zweit", cash: 1_000_000 });
+    const second = added.json().id;
+
+    const renamed = await app.inject({ method: "PATCH", url: `/api/simulations/${id}/depots/${second}`, payload: { name: "Wachstum" } });
+    expect(renamed.json().name).toBe("Wachstum");
+
+    expect((await app.inject({ method: "DELETE", url: `/api/simulations/${id}/depots/${second}` })).statusCode).toBe(204);
+    const first = (await depots(app, id))[0].id;
+    const last = await app.inject({ method: "DELETE", url: `/api/simulations/${id}/depots/${first}` });
+    expect(last.statusCode).toBe(409);
+    expect(last.json().error).toMatch(/letzte Depot/);
+  });
+
+  it("answers 404 for an unknown depot or simulation and 400 for a bad name", async () => {
+    const app = make();
+    const id = await createSim(app);
+    expect((await app.inject({ method: "DELETE", url: `/api/simulations/${id}/depots/9999` })).statusCode).toBe(404);
+    expect((await app.inject({ method: "PATCH", url: `/api/simulations/${id}/depots/9999`, payload: { name: "x" } })).statusCode).toBe(404);
+    expect((await post(app, `/api/simulations/9999/depots`, {})).statusCode).toBe(404);
+    expect((await post(app, `/api/simulations/${id}/depots`, { name: "" })).statusCode).toBe(400);
+  });
+
+  it("answers 409 at the eighth depot and for an ended simulation", async () => {
+    const app = make();
+    const id = await createSim(app);
+    for (let n = 2; n <= 8; n++) expect((await post(app, `/api/simulations/${id}/depots`, {})).statusCode).toBe(201);
+    expect((await post(app, `/api/simulations/${id}/depots`, {})).statusCode).toBe(409);
+    const other = await createSim(app);
+    await post(app, `/api/simulations/${other}/end`, {});
+    expect((await post(app, `/api/simulations/${other}/depots`, {})).statusCode).toBe(409);
+  });
+
+  it("places an order in the chosen depot only, and refuses a depot of another simulation", async () => {
+    const app = make();
+    const id = await createSim(app);
+    const other = await createSim(app);
+    const second = (await post(app, `/api/simulations/${id}/depots`, {})).json().id;
+    const order = { symbol: "SAP.DE", side: "buy", kind: "market", qty: 1 };
+    expect((await post(app, `/api/simulations/${id}/orders`, { ...order, depotId: second })).statusCode).toBe(201);
+    await app.ready();
+    const snap = await connect(app, id);
+    await until(() => snap.msgs.length > 0);
+    const [d1, d2] = snap.msgs[0].depots;
+    expect(d1.positions).toEqual([]);
+    expect(d2.positions).toHaveLength(1);
+    const foreign = (await app.inject({ url: `/api/simulations/${other}/curves` })).json().depots[0].id;
+    const res = await post(app, `/api/simulations/${id}/orders`, { ...order, depotId: foreign });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/Unbekanntes Depot/);
+  });
+
+  it("previews against the chosen depot", async () => {
+    const app = make();
+    const id = await createSim(app);
+    const second = (await post(app, `/api/simulations/${id}/depots`, {})).json().id;
+    const res = await post(app, `/api/simulations/${id}/orders/preview`, {
+      symbol: "SAP.DE", side: "sell", kind: "market", qty: 1, depotId: second,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().problem).toEqual(expect.any(String)); // nothing to sell in that depot
+  });
+
+  it("plans and then places an allocation", async () => {
+    const app = make();
+    const id = await createSim(app);
+    const depotId = (await depots(app, id))[0].id;
+    const url = `/api/simulations/${id}/depots/${depotId}/allocate`;
+    const dry = await post(app, url, { weights: [{ symbol: "SAP.DE", percent: 50 }], dryRun: true });
+    expect(dry.statusCode).toBe(200);
+    expect(dry.json().lines[0]).toMatchObject({ symbol: "SAP.DE", percent: 50 });
+    expect(dry.json().lines[0].qty).toBeGreaterThan(0);
+    const real = await post(app, url, { weights: [{ symbol: "SAP.DE", percent: 50 }] });
+    expect(real.statusCode).toBe(200);
+    const snap = await connect(app, id);
+    await until(() => snap.msgs.length > 0);
+    expect(snap.msgs[0].depots[0].positions[0]).toMatchObject({ symbol: "SAP.DE", qty: real.json().lines[0].qty });
+  });
+
+  it("answers 400 for weights above 100 percent or a bad body, and 404 for a unknown depot", async () => {
+    const app = make();
+    const id = await createSim(app);
+    const depotId = (await depots(app, id))[0].id;
+    const url = `/api/simulations/${id}/depots/${depotId}/allocate`;
+    expect((await post(app, url, { weights: [{ symbol: "SAP.DE", percent: 120 }] })).statusCode).toBe(400);
+    expect((await post(app, url, { weights: [{ symbol: "SAP.DE", percent: 0 }] })).statusCode).toBe(400);
+    expect((await post(app, url, { weights: [] })).statusCode).toBe(400);
+    expect((await post(app, url, { nope: 1 })).statusCode).toBe(400);
+    expect((await post(app, `/api/simulations/${id}/depots/9999/allocate`, { weights: [{ symbol: "SAP.DE", percent: 10 }] })).statusCode).toBe(404);
+  });
+
+  it("serves the curves of every depot with their start point", async () => {
+    const app = make();
+    const id = await createSim(app);
+    await post(app, `/api/simulations/${id}/depots`, { name: "Zweit" });
+    const list = await depots(app, id);
+    expect(list.map((d) => d.name)).toEqual(["Depot 1", "Zweit"]);
+    expect(list[0].points).toEqual([{ t: START, value: 1_000_000 }]);
+    expect((await app.inject({ url: `/api/simulations/9999/curves` })).statusCode).toBe(404);
+  });
+});
