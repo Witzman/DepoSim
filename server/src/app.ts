@@ -4,6 +4,7 @@ import fastifyStatic from "@fastify/static";
 import fastifyWebsocket from "@fastify/websocket";
 import Fastify, { type FastifyInstance } from "fastify";
 import { registerApi } from "./api.js";
+import { createBackfill } from "./backfill.js";
 import { FX_SYMBOL, type Instrument, WATCHLIST } from "./config.js";
 import { createArchive } from "./data/archive.js";
 import type { MarketData } from "./data/marketdata.js";
@@ -55,6 +56,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
     store, archive, instruments, fxSymbol: FX_SYMBOL, now: opts.now,
     delayS: opts.liveDelayS, catchUpTempo: opts.catchUpTempo,
   });
+  const backfill = createBackfill({ archive, store, session, instruments, now: opts.now ?? (() => Date.now() / 1000) });
   const hub = createHub(session, store, opts.tickMs ?? 250, opts.liveRefreshS ?? 60);
 
   const app = Fastify({ logger: process.env.NODE_ENV !== "test" });
@@ -72,7 +74,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   });
 
   app.get("/healthz", async (_req, reply) => reply.type("text/plain").send("ok"));
-  registerApi(app, { store, session, archive, instruments, search: opts.search ?? createYahooSearch(), hub });
+  registerApi(app, { store, session, archive, instruments, search: opts.search ?? createYahooSearch(), hub, backfill });
 
   if (existsSync(WEB_DIST)) {
     app.register(fastifyStatic, { root: WEB_DIST });

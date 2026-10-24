@@ -4,6 +4,37 @@
 export type Tempo = 1 | 5 | 30 | 60;
 export type Venue = "XETRA" | "US";
 
+/** A market the app knows, from GET /api/venues. Only those with `hasSource` can be traded on. */
+export interface VenueInfo {
+  id: Venue | "FRANKFURT" | "TRADEGATE" | "GETTEX";
+  name: string;
+  timeZone: string;
+  opens: string;
+  closes: string;
+  hasSource: boolean;
+  note: string;
+}
+
+export type BackfillStatus = "loaded" | "empty" | "error" | "skipped" | "out_of_range";
+
+/** GET /api/archive/missing */
+export interface MissingList {
+  days: number;
+  daysIsAssumption: boolean;
+  reachDays: number;
+  blocked: string | null;
+  items: { symbol: string; day: string; dayStart: number; state: "never" | "incomplete"; inReach: boolean }[];
+}
+
+/** POST /api/archive/backfill, body { days?: number } */
+export interface BackfillReport {
+  days: number;
+  daysIsAssumption: boolean;
+  stoppedByRateLimit: boolean;
+  counts: { loaded: number; empty: number; error: number; skipped: number; outOfRange: number };
+  items: { symbol: string; day: string; dayStart: number; status: BackfillStatus; label: string; bars?: number; reason?: string }[];
+}
+
 export interface Bar {
   t: number;
   o: number;

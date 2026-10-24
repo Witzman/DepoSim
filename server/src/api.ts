@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
-import { FX_SYMBOL, type Instrument } from "./config.js";
+import { DEFAULT_DAYS, MAX_DAYS, type Backfill } from "./backfill.js";
+import { FX_SYMBOL, type Instrument, SOURCELESS_SUFFIXES, VENUES } from "./config.js";
 import type { Archive } from "./data/archive.js";
 import { MarketDataError } from "./data/marketdata.js";
 import type { InstrumentSearch } from "./data/search.js";
@@ -50,6 +51,7 @@ const barsQuery = z.object({
 
 const searchQuery = z.object({ q: z.string().trim().min(2).max(40) });
 const SYMBOL = /^[A-Za-z0-9.^=-]{1,15}$/;
+const daysQuery = z.object({ days: z.coerce.number().int().min(1).max(MAX_DAYS).default(DEFAULT_DAYS) });
 const addBody = z.object({ symbol: z.string() });
 
 interface Deps {
@@ -59,6 +61,7 @@ interface Deps {
   instruments: InstrumentRegistry;
   search: InstrumentSearch;
   hub: Hub;
+  backfill: Backfill;
 }
 
 const invalid = (reply: FastifyReply, err: z.ZodError) => {
@@ -67,12 +70,32 @@ const invalid = (reply: FastifyReply, err: z.ZodError) => {
   return reply.code(400).send({ error: `Ungültige Eingabe (${where}): ${issue.message}` });
 };
 
-export function registerApi(app: FastifyInstance, { store, session, archive, instruments, search, hub }: Deps) {
+export function registerApi(app: FastifyInstance, { store, session, archive, instruments, search, hub, backfill }: Deps) {
   const simulationOf = (params: unknown) => {
     const id = Number((params as { id?: string }).id);
     return Number.isInteger(id) ? store.getSimulation(id) : undefined;
   };
   const notFound = (reply: FastifyReply) => reply.code(404).send({ error: "Unbekannte Simulation." });
+
+  app.get("/api/venues", async () =>
+    VENUES.map((v) => ({
+      id: v.id, name: v.name, timeZone: v.timeZone, opens: v.opens, closes: v.closes, hasSource: v.hasSource, note: v.note,
+    })));
+
+  app.get("/api/archive/missing", async (req, reply) => {
+    const query = daysQuery.safeParse(req.query);
+    if (!query.success) return invalid(reply, query.error);
+    return backfill.missing(query.data.days);
+  });
+
+  // Runs until every missing day is tried, so the answer can take a while (one call every 500 ms).
+  app.post("/api/archive/backfill", async (req, reply) => {
+    const body = daysQuery.safeParse(req.body ?? {});
+    if (!body.success) return invalid(reply, body.error);
+    const result = await backfill.run(body.data.days);
+    if (!result.ok) return reply.code(409).send({ error: result.reason });
+    return result.report;
+  });
 
   app.get("/api/watchlist", async () => instruments.list().map(shown));
 
@@ -106,6 +129,11 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     // The registry refuses the exchange rate too; asking here first saves a call to the search.
     if (!SYMBOL.test(wanted) || wanted.toUpperCase() === FX_SYMBOL) {
       return reply.code(400).send({ error: "Ungültiges Kürzel." });
+    }
+    const sourceless = Object.keys(SOURCELESS_SUFFIXES).find((x) => wanted.toUpperCase().endsWith(x));
+    if (sourceless) {
+      const venue = VENUES.find((v) => v.id === SOURCELESS_SUFFIXES[sourceless])!;
+      return reply.code(400).send({ error: `${venue.name} hat keine Kursquelle und ist nicht handelbar. ${venue.note}` });
     }
     let hit;
     try {

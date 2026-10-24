@@ -6,6 +6,10 @@ const DAY = 86400;
 export interface Archive {
   /** Fetches the day once per symbol. A day that is not over yet is fetched again next time. */
   ensureDay(symbol: string, dayStartT: number): Promise<void>;
+  /** Days in `[fromDayT, toDayT)` never fetched or not complete yet, newest first, then by symbol. */
+  missingDays(symbols: string[], fromDayT: number, toDayT: number): MissingDay[];
+  /** Fetches one day from the source and stores it. Returns how many bars were stored; 0 is a day without trading. */
+  fetchDay(symbol: string, dayStartT: number): Promise<number>;
   /** Bars with `fromT <= t < toT`, oldest first. */
   barsBetween(symbol: string, fromT: number, toT: number): Bar[];
   /** The newest bar whose minute is over at `s`, however long ago it was. */
@@ -14,6 +18,12 @@ export interface Archive {
   barsBefore(symbol: string, s: number, limit: number): Bar[];
   /** The first bar with `t` strictly after `s`. */
   nextBarAfter(symbol: string, s: number): Bar | undefined;
+}
+
+export interface MissingDay {
+  symbol: string;
+  dayStart: number;
+  state: "never" | "incomplete";
 }
 
 export interface ArchiveOptions {
@@ -55,35 +65,56 @@ export function createArchive(db: Db, source: MarketData, opts: ArchiveOptions =
     return run;
   }
 
-  const inflight = new Map<string, Promise<void>>();
+  const inflight = new Map<string, Promise<number>>();
+
+  async function load(symbol: string, dayStartT: number): Promise<number> {
+    const dayEnd = dayStartT + DAY;
+    let bars: Bar[];
+    try {
+      bars = await throttled(() => source.bars(symbol, dayStartT, dayEnd));
+    } catch (err) {
+      // "No data" is a holiday or a day without trading, not a failure. Anything else is.
+      if (!(err instanceof MarketDataError && err.kind === "no_data")) throw err;
+      bars = [];
+    }
+    // The source also sends the minute that is still running, with incomplete values, and
+    // `insert or ignore` would keep them for good. Only finished minutes are stored; the
+    // rest is fetched again, because a day that is not over is fetched again.
+    const finished = bars.filter((b) => b.t + 60 <= now());
+    store(symbol, dayStartT, finished, now() >= dayEnd ? 1 : 0);
+    return finished.length;
+  }
+
+  /** One load per symbol and day at a time, however many callers ask. */
+  function loadOnce(symbol: string, dayStartT: number): Promise<number> {
+    const key = `${symbol}:${dayStartT}`;
+    const running = inflight.get(key);
+    if (running) return running;
+    const p = load(symbol, dayStartT).finally(() => inflight.delete(key));
+    inflight.set(key, p);
+    return p;
+  }
 
   return {
-    ensureDay(symbol, dayStartT) {
-      const key = `${symbol}:${dayStartT}`;
-      const running = inflight.get(key);
-      if (running) return running;
-
-      const p = (async () => {
-        const row = selectDay.get(symbol, dayStartT) as { complete: number } | undefined;
-        if (row?.complete === 1) return;
-        const dayEnd = dayStartT + DAY;
-        let bars: Bar[];
-        try {
-          bars = await throttled(() => source.bars(symbol, dayStartT, dayEnd));
-        } catch (err) {
-          // "No data" is a holiday or a day without trading, not a failure. Anything else is.
-          if (!(err instanceof MarketDataError && err.kind === "no_data")) throw err;
-          bars = [];
-        }
-        // The source also sends the minute that is still running, with incomplete values, and
-        // `insert or ignore` would keep them for good. Only finished minutes are stored; the
-        // rest is fetched again, because a day that is not over is fetched again.
-        const finished = bars.filter((b) => b.t + 60 <= now());
-        store(symbol, dayStartT, finished, now() >= dayEnd ? 1 : 0);
-      })().finally(() => inflight.delete(key));
-      inflight.set(key, p);
-      return p;
+    async ensureDay(symbol, dayStartT) {
+      const row = selectDay.get(symbol, dayStartT) as { complete: number } | undefined;
+      if (row?.complete === 1) return;
+      await loadOnce(symbol, dayStartT);
     },
+
+    missingDays(symbols, fromDayT, toDayT) {
+      const out: MissingDay[] = [];
+      for (let dayStart = toDayT - DAY; dayStart >= fromDayT; dayStart -= DAY) {
+        for (const symbol of symbols) {
+          const row = selectDay.get(symbol, dayStart) as { complete: number } | undefined;
+          if (row?.complete === 1) continue;
+          out.push({ symbol, dayStart, state: row ? "incomplete" : "never" });
+        }
+      }
+      return out;
+    },
+
+    fetchDay: loadOnce,
 
     barsBetween(symbol, fromT, toT) {
       return db
