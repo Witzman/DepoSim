@@ -26,13 +26,28 @@ export interface MissingList {
   items: { symbol: string; day: string; dayStart: number; state: "never" | "incomplete"; inReach: boolean }[];
 }
 
-/** POST /api/archive/backfill, body { days?: number } */
+/** The report of a finished backfill (inside BackfillJob.report). */
 export interface BackfillReport {
   days: number;
   daysIsAssumption: boolean;
   stoppedByRateLimit: boolean;
   counts: { loaded: number; empty: number; error: number; skipped: number; outOfRange: number };
   items: { symbol: string; day: string; dayStart: number; status: BackfillStatus; label: string; bars?: number; reason?: string }[];
+}
+
+/**
+ * POST /api/archive/backfill, body { days?: number }, answers 202 with the job (409 { error } if refused).
+ * GET /api/archive/backfill answers the current or last job; before any run: running false, startedAt null, done 0, total 0.
+ */
+export interface BackfillJob {
+  running: boolean;
+  startedAt: number | null;
+  finishedAt: number | null;
+  done: number;
+  total: number;
+  report: BackfillReport | null;
+  /** Only when the run broke off on an unexpected error. */
+  error?: string;
 }
 
 export interface Bar {

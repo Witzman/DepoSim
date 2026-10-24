@@ -66,13 +66,31 @@ export interface BackfillReport {
   items: ReportItem[];
 }
 
-export type BackfillResult = { ok: true; report: BackfillReport } | { ok: false; reason: string };
+/** The current or last backfill. Only the last report is kept, in memory; a restart forgets it. */
+export interface BackfillJob {
+  running: boolean;
+  /** UTC seconds; null while no backfill has run since the start. */
+  startedAt: number | null;
+  finishedAt: number | null;
+  /** Items tried so far, and items planned. */
+  done: number;
+  total: number;
+  report: BackfillReport | null;
+  /** Set only when the run broke off on an unexpected error. */
+  error?: string;
+}
+
+export type BackfillStart = { ok: true; job: BackfillJob } | { ok: false; reason: string };
 
 const dayName = (dayStart: number) => new Date(dayStart * 1000).toISOString().slice(0, 10);
 
 export interface Backfill {
   missing(days?: number): MissingList;
-  run(days?: number): Promise<BackfillResult>;
+  /** Starts a background job and returns at once with its state, or says why it is refused. */
+  start(days?: number): BackfillStart;
+  status(): BackfillJob;
+  /** Resolves when the job that is running now has finished (for tests and shutdown). */
+  settled(): Promise<void>;
 }
 
 export function createBackfill(deps: {
@@ -84,6 +102,8 @@ export function createBackfill(deps: {
 }): Backfill {
   const { archive, store, session, instruments, now } = deps;
   let running = false;
+  let job: BackfillJob = { running: false, startedAt: null, finishedAt: null, done: 0, total: 0, report: null };
+  let current: Promise<void> = Promise.resolve();
 
   function blocked(): string | null {
     const t = now();
@@ -119,49 +139,61 @@ export function createBackfill(deps: {
         items: plan(days).map((m) => ({ ...m, day: dayName(m.dayStart) })),
       };
     },
-
-    async run(days = DEFAULT_DAYS) {
+    start(days = DEFAULT_DAYS) {
       const reason = blocked();
       if (reason) return { ok: false, reason };
       running = true;
-      try {
-        const items: ReportItem[] = [];
-        let limited = false;
-        for (const m of plan(days)) {
-          const base = { symbol: m.symbol, day: dayName(m.dayStart), dayStart: m.dayStart };
-          const add = (status: BackfillStatus, extra: { bars?: number; reason?: string } = {}) =>
-            items.push({ ...base, status, label: LABELS[status], ...extra });
-          if (!m.inReach) {
-            add("out_of_range", { reason: `Yahoo liefert Minutenbalken nur für die letzten ${REACH_DAYS} Tage.` });
-          } else if (limited) {
-            add("skipped", { reason: "Yahoo hat mit 429 abgelehnt; der Rest wurde nicht versucht." });
-          } else {
-            try {
-              const bars = await archive.fetchDay(m.symbol, m.dayStart);
-              add(bars > 0 ? "loaded" : "empty", { bars });
-            } catch (err) {
-              if (err instanceof MarketDataError && err.kind === "rate_limited") limited = true;
-              add("error", { reason: describeError(err) });
-            }
+      const planned = plan(days);
+      job = { running: true, startedAt: Math.floor(now()), finishedAt: null, done: 0, total: planned.length, report: null };
+      const mine = job;
+      current = work(days, planned, mine);
+      return { ok: true, job: { ...mine } };
+    },
+
+    status: () => ({ ...job }),
+    settled: () => current,
+  };
+
+  async function work(days: number, planned: ReturnType<typeof plan>, mine: BackfillJob): Promise<void> {
+    try {
+      const items: ReportItem[] = [];
+      let limited = false;
+      for (const m of planned) {
+        const base = { symbol: m.symbol, day: dayName(m.dayStart), dayStart: m.dayStart };
+        const add = (status: BackfillStatus, extra: { bars?: number; reason?: string } = {}) =>
+          items.push({ ...base, status, label: LABELS[status], ...extra });
+        if (!m.inReach) {
+          add("out_of_range", { reason: `Yahoo liefert Minutenbalken nur für die letzten ${REACH_DAYS} Tage.` });
+        } else if (limited) {
+          add("skipped", { reason: "Yahoo hat mit 429 abgelehnt; der Rest wurde nicht versucht." });
+        } else {
+          try {
+            const bars = await archive.fetchDay(m.symbol, m.dayStart);
+            add(bars > 0 ? "loaded" : "empty", { bars });
+          } catch (err) {
+            if (err instanceof MarketDataError && err.kind === "rate_limited") limited = true;
+            add("error", { reason: describeError(err) });
           }
         }
-        const count = (s: BackfillStatus) => items.filter((i) => i.status === s).length;
-        return {
-          ok: true,
-          report: {
-            days,
-            daysIsAssumption: days === DEFAULT_DAYS,
-            stoppedByRateLimit: limited,
-            counts: {
-              loaded: count("loaded"), empty: count("empty"), error: count("error"),
-              skipped: count("skipped"), outOfRange: count("out_of_range"),
-            },
-            items,
-          },
-        };
-      } finally {
-        running = false;
+        mine.done = items.length;
       }
-    },
-  };
+      const count = (s: BackfillStatus) => items.filter((i) => i.status === s).length;
+      mine.report = {
+        days,
+        daysIsAssumption: days === DEFAULT_DAYS,
+        stoppedByRateLimit: limited,
+        counts: {
+          loaded: count("loaded"), empty: count("empty"), error: count("error"),
+          skipped: count("skipped"), outOfRange: count("out_of_range"),
+        },
+        items,
+      };
+    } catch (err) {
+      mine.error = describeError(err);
+    } finally {
+      mine.running = false;
+      mine.finishedAt = Math.floor(now());
+      running = false;
+    }
+  }
 }

@@ -88,14 +88,16 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     return backfill.missing(query.data.days);
   });
 
-  // Runs until every missing day is tried, so the answer can take a while (one call every 500 ms).
+  // A background job: it can take minutes (one call every 500 ms), longer than a proxy waits.
   app.post("/api/archive/backfill", async (req, reply) => {
     const body = daysQuery.safeParse(req.body ?? {});
     if (!body.success) return invalid(reply, body.error);
-    const result = await backfill.run(body.data.days);
+    const result = backfill.start(body.data.days);
     if (!result.ok) return reply.code(409).send({ error: result.reason });
-    return result.report;
+    return reply.code(202).send(result.job);
   });
+
+  app.get("/api/archive/backfill", async () => backfill.status());
 
   app.get("/api/watchlist", async () => instruments.list().map(shown));
 

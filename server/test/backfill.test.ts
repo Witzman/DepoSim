@@ -33,8 +33,19 @@ function make(opts: { now?: number; onCall?: (n: number, symbol: string) => void
 }
 
 const get = (app: FastifyInstance, url: string) => app.inject({ url });
-const backfill = (app: FastifyInstance, body: unknown = {}) =>
+const post = (app: FastifyInstance, body: unknown = {}) =>
   app.inject({ method: "POST", url: "/api/archive/backfill", payload: body as object });
+/** Starts a job, waits until it is done and answers like the old blocking call did: the report. */
+const backfill = async (app: FastifyInstance, body: unknown = {}) => {
+  const res = await post(app, body);
+  if (res.statusCode !== 202) return res;
+  for (let i = 0; i < 500; i++) {
+    const job = (await get(app, "/api/archive/backfill")).json();
+    if (!job.running) return { statusCode: 200, json: () => job.report } as { statusCode: number; json: () => any };
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  throw new Error("backfill did not finish");
+};
 
 describe("archive.missingDays", () => {
   it("lists never fetched and incomplete days, not complete ones", async () => {
@@ -172,13 +183,38 @@ describe("POST /api/archive/backfill", () => {
     const slow: MarketData = { bars: async (s, f, t) => { await gate; return source.bars(s, f, t); } };
     const app = buildApp({ dbPath: ":memory:", marketData: slow, instruments: [SAP], now: () => NOW, minGapMs: 0, tickMs: 20 });
     open.push(app);
-    const first = backfill(app);
-    await new Promise((r) => setTimeout(r, 30));
-    const second = await backfill(app);
+    const first = await post(app);
+    expect(first.statusCode).toBe(202);
+    const second = await post(app);
     expect(second.statusCode).toBe(409);
     expect(second.json().error).toMatch(/läuft bereits/);
     release();
-    expect((await first).statusCode).toBe(200);
+    for (let i = 0; i < 500 && (await get(app, "/api/archive/backfill")).json().running; i++) await new Promise((r) => setTimeout(r, 5));
+    expect((await get(app, "/api/archive/backfill")).json().running).toBe(false);
+  });
+
+  it("answers 202 at once with the job state, and GET follows it to the report", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { source } = makeSource();
+    const slow: MarketData = { bars: async (s, f, t) => { await gate; return source.bars(s, f, t); } };
+    const app = buildApp({ dbPath: ":memory:", marketData: slow, instruments: [SAP], now: () => NOW, minGapMs: 0, tickMs: 20 });
+    open.push(app);
+    const idle = (await get(app, "/api/archive/backfill")).json();
+    expect(idle).toEqual({ running: false, startedAt: null, finishedAt: null, done: 0, total: 0, report: null });
+
+    const res = await post(app);
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({ running: true, startedAt: NOW, finishedAt: null, done: 0, total: 14, report: null });
+    const mid = (await get(app, "/api/archive/backfill")).json();
+    expect(mid).toMatchObject({ running: true, finishedAt: null, total: 14, report: null });
+
+    release();
+    for (let i = 0; i < 500 && (await get(app, "/api/archive/backfill")).json().running; i++) await new Promise((r) => setTimeout(r, 5));
+    const done = (await get(app, "/api/archive/backfill")).json();
+    expect(done).toMatchObject({ running: false, startedAt: NOW, finishedAt: NOW, done: 14, total: 14 });
+    expect(done.report).toMatchObject({ days: 7, stoppedByRateLimit: false });
+    expect(done.report.items).toHaveLength(14);
   });
 
   it("rejects a bad range", async () => {
