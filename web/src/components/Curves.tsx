@@ -5,6 +5,7 @@ import { tickMarkFormatter, timeFormatter } from "../chartTime.js";
 import { signedPercent } from "../format.js";
 import type { Theme } from "../theme.js";
 import type { BenchmarkCurve, Curve, DepotView, Instrument } from "../types.js";
+import { underwater } from "../risk.js";
 import { normalize } from "../view.js";
 
 // Ghosts are always dashed (and say "Geist" in the legend); the others vary between solid and dotted.
@@ -35,6 +36,9 @@ export function Curves({ simulationId, depots, simulationTime, theme, instrument
   const [bench, setBench] = useState<BenchmarkCurve | null>(null);
   const benchLine = useRef<ISeriesApi<"Line"> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const dd = useRef<HTMLDivElement>(null);
+  const ddChart = useRef<IChartApi | null>(null);
+  const ddLines = useRef(new Map<number, ISeriesApi<"Line">>());
   const idKey = depots.map((d) => d.id).join(",");
 
   // The stored curves: again when the set of depots changes.
@@ -67,7 +71,7 @@ export function Curves({ simulationId, depots, simulationTime, theme, instrument
     const api = createChart(host.current!, {
       autoSize: true,
       layout: { background: { type: ColorType.Solid, color: css("--surface") }, textColor: css("--muted") },
-      grid: { vertLines: { color: css("--border") }, horzLines: { color: css("--border") } },
+      grid: { vertLines: { color: css("--grid") }, horzLines: { color: css("--grid") } },
       rightPriceScale: { borderColor: css("--border") },
       timeScale: { borderColor: css("--border"), timeVisible: true, secondsVisible: false, tickMarkFormatter },
       localization: { timeFormatter, priceFormatter: (p: number) => `${p.toFixed(2).replace(".", ",")} %` },
@@ -82,13 +86,54 @@ export function Curves({ simulationId, depots, simulationTime, theme, instrument
     };
   }, []);
 
+  // The drawdown chart: the fall from the running peak, per depot.
+  useEffect(() => {
+    const api = createChart(dd.current!, {
+      autoSize: true,
+      layout: { background: { type: ColorType.Solid, color: css("--surface") }, textColor: css("--muted") },
+      grid: { vertLines: { color: css("--grid") }, horzLines: { color: css("--grid") } },
+      rightPriceScale: { borderColor: css("--border") },
+      timeScale: { borderColor: css("--border"), timeVisible: true, secondsVisible: false, tickMarkFormatter },
+      localization: { timeFormatter, priceFormatter: (p: number) => `${p.toFixed(2).replace(".", ",")} %` },
+    });
+    ddChart.current = api;
+    const map = ddLines.current;
+    return () => { api.remove(); ddChart.current = null; map.clear(); };
+  }, []);
+
+  useEffect(() => {
+    const api = ddChart.current;
+    if (!api) return;
+    const c = { surface: css("--surface"), muted: css("--muted"), border: css("--border") };
+    api.applyOptions({
+      layout: { background: { type: ColorType.Solid, color: c.surface }, textColor: c.muted },
+      grid: { vertLines: { color: css("--grid") }, horzLines: { color: css("--grid") } },
+      rightPriceScale: { borderColor: c.border },
+      timeScale: { borderColor: c.border },
+    });
+    const wanted = new Set(curves.map((x) => x.id));
+    for (const [id, series] of ddLines.current) {
+      if (!wanted.has(id)) { api.removeSeries(series); ddLines.current.delete(id); }
+    }
+    curves.forEach((curve, i) => {
+      let series = ddLines.current.get(curve.id);
+      if (!series) {
+        series = api.addSeries(LineSeries, { lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+        ddLines.current.set(curve.id, series);
+      }
+      series.applyOptions({ color: seriesColor(i), lineStyle: curve.kind === "ghost" ? LineStyle.LargeDashed : STYLES[i % STYLES.length] });
+      series.setData(underwater(curve.points).map((p) => ({ time: p.t as UTCTimestamp, value: p.pct })));
+    });
+    if (curves.some((x) => x.points.length > 1)) api.timeScale().fitContent();
+  }, [curves, theme]);
+
   useEffect(() => {
     const api = chart.current;
     if (!api) return;
     const c = { surface: css("--surface"), muted: css("--muted"), border: css("--border") };
     api.applyOptions({
       layout: { background: { type: ColorType.Solid, color: c.surface }, textColor: c.muted },
-      grid: { vertLines: { color: c.border }, horzLines: { color: c.border } },
+      grid: { vertLines: { color: css("--grid") }, horzLines: { color: css("--grid") } },
       rightPriceScale: { borderColor: c.border },
       timeScale: { borderColor: c.border },
     });
@@ -154,6 +199,9 @@ export function Curves({ simulationId, depots, simulationTime, theme, instrument
           </li>
         )}
       </ul>
+      <h3>Rückgang vom Hoch (in Prozent)</h3>
+      <div className="chart curves" data-testid="underwater" data-series={curves.length} ref={dd} />
+      <p className="muted">Wie weit jedes Depot unter seinem bisherigen Höchststand liegt. Null heißt: auf dem Hoch.</p>
       {bench && bench.currency === "USD" && <p className="muted">Der Maßstab ist der Kurs in Dollar, ohne Wechselkurs.</p>}
     </section>
   );

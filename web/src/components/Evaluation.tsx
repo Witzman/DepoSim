@@ -96,6 +96,52 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
         {rows.filter((r) => r.m.unavailable).slice(0, 1).map((r) => <p key={r.key} className="muted" data-testid="metrics-note">{r.m.unavailable}</p>)}
         {anyBasis && <p className="muted">Volatilität und Sharpe sind geschätzt aus den Werten der Spalte „Basis“, hochgerechnet auf ein Jahr. Sharpe ohne risikofreien Zins.</p>}
 
+        <h3>Risiko</h3>
+        <div className="scroll">
+          <table className="positions num stacked" data-testid="risk">
+            <thead><tr><th>Depot</th><th>Sortino</th><th>Calmar</th><th title="Verlust, den jeder zwanzigste Schritt erreicht oder übersteigt">Value at Risk 95 %</th><th>Bester Schritt</th><th>Schlechtester Schritt</th><th>Gewinnschritte</th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.key} data-testid={`risk-${r.key}`}>
+                  <td>{r.name}{r.ghost && <span className="badge ghost">Geist</span>}</td>
+                  <td data-label="Sortino">{formatRatio(r.m.sortino)}</td>
+                  <td data-label="Calmar">{formatRatio(r.m.calmar)}</td>
+                  <td data-label="Value at Risk 95 %">{formatPercentPlain(r.m.var95)}</td>
+                  <td data-label="Bester Schritt">{r.m.bestStep === null ? "—" : signedPercent(r.m.bestStep)}</td>
+                  <td data-label="Schlechtester Schritt">{r.m.worstStep === null ? "—" : signedPercent(r.m.worstStep)}</td>
+                  <td data-label="Gewinnschritte">{formatPercentPlain(r.m.upShare)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="muted">Ein Schritt ist ein Wert der Spalte „Basis“. Calmar rechnet die Rendite auf ein Jahr hoch; bei kurzer Laufzeit ist das eine grobe Schätzung. Value at Risk ist historisch, aus den eigenen Schritten.</p>
+
+        {data.benchmark && (
+          <>
+            <h3>Gegen den Maßstab {data.benchmark.symbol}</h3>
+            <div className="scroll">
+              <table className="positions num stacked" data-testid="relative">
+                <thead><tr><th>Depot</th><th>Beta</th><th>Alpha p. a.</th><th>Tracking Error</th><th>Information Ratio</th><th>Besser als Maßstab</th></tr></thead>
+                <tbody>
+                  {data.depots.map((d) => (
+                    <tr key={d.id} data-testid={`relative-${d.id}`}>
+                      <td>{d.name}{d.kind === "ghost" && <span className="badge ghost">Geist</span>}</td>
+                      <td data-label="Beta">{formatRatio(d.vsBenchmark?.beta ?? null)}</td>
+                      <td data-label="Alpha p. a.">{d.vsBenchmark?.alpha == null ? "—" : signedPercent(d.vsBenchmark.alpha)}</td>
+                      <td data-label="Tracking Error">{formatPercentPlain(d.vsBenchmark?.trackingError ?? null)}</td>
+                      <td data-label="Information Ratio">{formatRatio(d.vsBenchmark?.informationRatio ?? null)}</td>
+                      <td data-label="Besser als Maßstab">{formatPercentPlain(d.vsBenchmark?.hitShare ?? null)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {data.depots.every((d) => d.vsBenchmark === null) && <p className="muted">Noch zu wenige gemeinsame Werte für den Vergleich mit dem Maßstab.</p>}
+            <p className="muted">Beta: wie stark das Depot den Schritten des Maßstabs folgt. Alpha: Mehrertrag darüber hinaus, hochgerechnet, ohne risikofreien Zins.</p>
+          </>
+        )}
+
         {data.depots.length > 1 && (
           <>
             <h3>Korrelation der Depots</h3>

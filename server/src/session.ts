@@ -8,7 +8,7 @@ import {
 } from "./domain/clock.js";
 import { type AllocationLine, planAllocation } from "./domain/allocation.js";
 import { type Breakdown, type FeeLedger, breakdown, feeLedger } from "./domain/breakdown.js";
-import { type Correlation, type Metrics, type Point, computeMetrics, correlationMatrix, thin } from "./domain/metrics.js";
+import { type Correlation, type Metrics, type Point, type Relative, computeMetrics, correlationMatrix, relativeTo, thin } from "./domain/metrics.js";
 import { type Orderbook, buildOrderbook } from "./domain/orderbook.js";
 import { type Journal, type JournalOrder, buildJournal } from "./domain/journal.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
@@ -93,7 +93,7 @@ export interface Curves {
 }
 
 export interface Evaluation {
-  depots: { id: number; name: string; kind: DepotKind; startedAt: number; metrics: Metrics; fees: FeeLedger; breakdown: Breakdown }[];
+  depots: { id: number; name: string; kind: DepotKind; startedAt: number; metrics: Metrics; vsBenchmark: Relative | null; fees: FeeLedger; breakdown: Breakdown }[];
   correlation: Correlation;
   benchmark: { symbol: string; name: string; metrics: Metrics } | null;
   note: string;
@@ -562,6 +562,15 @@ export class SessionService {
     const sim = this.sim(id);
     const refs = this.refsAt(sim.simulationTime);
     const curves = this.store.listDepots(id).map((d) => ({ depot: d, points: this.store.valueCurve(d.id, EVALUATION_POINTS) }));
+    const inst = sim.benchmark ? this.registry.get(sim.benchmark) : undefined;
+    const benchSeries: Point[] | null = inst
+      ? thin(
+        this.archive
+          .barsBetween(inst.symbol, sim.startAt - 59, sim.simulationTime - 59)
+          .map((b) => ({ t: b.t + 60, value: b.c })),
+        EVALUATION_POINTS,
+      )
+      : null;
     const depots = curves.map(({ depot, points }) => {
       const state = this.store.loadDepot(depot.id);
       const held = [...state.positions].map(([symbol, pos]) => ({ symbol, value: positionValue(pos, refs.get(symbol)) }));
@@ -571,21 +580,14 @@ export class SessionService {
         kind: depot.kind,
         startedAt: points[0]?.t ?? sim.startAt,
         metrics: computeMetrics(points),
+        vsBenchmark: benchSeries ? relativeTo(points, benchSeries) : null,
         fees: feeLedger(state.orders, sim.startCash),
         breakdown: breakdown(held, state.cash, this.instruments),
       };
     });
-    const inst = sim.benchmark ? this.registry.get(sim.benchmark) : undefined;
-    let benchmark: Evaluation["benchmark"] = null;
-    if (inst) {
-      const series: Point[] = thin(
-        this.archive
-          .barsBetween(inst.symbol, sim.startAt - 59, sim.simulationTime - 59)
-          .map((b) => ({ t: b.t + 60, value: b.c })),
-        EVALUATION_POINTS,
-      );
-      benchmark = { symbol: inst.symbol, name: inst.name, metrics: computeMetrics(series) };
-    }
+    const benchmark: Evaluation["benchmark"] = inst && benchSeries
+      ? { symbol: inst.symbol, name: inst.name, metrics: computeMetrics(benchSeries) }
+      : null;
     return {
       depots,
       correlation: correlationMatrix(curves.map(({ depot, points }) => ({ id: depot.id, points }))),

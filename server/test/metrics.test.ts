@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeMetrics, correlationMatrix, resample, returnsOf, thin } from "../src/domain/metrics.js";
+import { computeMetrics, correlationMatrix, quantile, relativeTo, resample, returnsOf, thin } from "../src/domain/metrics.js";
 
 const DAY = 86400;
 const T0 = 1792627200 + 12 * 3600; // 2026-10-22 12:00 UTC
@@ -134,5 +134,68 @@ describe("thin", () => {
     expect(out[0]).toEqual(pts[0]);
     expect(out[out.length - 1]).toEqual(pts[pts.length - 1]);
     expect(out.every((p, i) => i === 0 || p.t > out[i - 1].t)).toBe(true);
+  });
+});
+
+describe("quantile", () => {
+  it("interpolates between neighbours", () => {
+    expect(quantile([4, 1, 3, 2], 0)).toBe(1);
+    expect(quantile([4, 1, 3, 2], 1)).toBe(4);
+    expect(quantile([1, 2, 3, 4, 5], 0.5)).toBe(3);
+    expect(quantile([1, 2], 0.5)).toBe(1.5);
+  });
+});
+
+describe("risk figures", () => {
+  const m = computeMetrics(daily(wobble(60, 0.01)));
+  it("are measured on the same basis as volatility and stay finite", () => {
+    expect(m.basis).toBe("day");
+    for (const x of [m.sortino, m.var95, m.bestStep, m.worstStep, m.upShare]) expect(Number.isFinite(x)).toBe(true);
+  });
+  it("order best step, worst step and value at risk", () => {
+    expect(m.worstStep!).toBeLessThanOrEqual(m.var95!);
+    expect(m.var95!).toBeLessThan(0);
+    expect(m.bestStep!).toBeGreaterThan(0);
+    expect(m.upShare!).toBeGreaterThan(0);
+    expect(m.upShare!).toBeLessThan(1);
+  });
+  it("have a Sortino ratio only when something fell, and no Calmar ratio without a drawdown", () => {
+    const climb = computeMetrics(daily(grow(30, 1.01)));
+    expect(climb.sortino).toBeNull();
+    expect(climb.calmar).toBeNull();
+    expect(climb.var95).toBeNull();
+    expect(climb.upShare).toBe(1);
+  });
+  it("give a Calmar ratio from the annualized return over the drawdown", () => {
+    expect(m.maxDrawdown!).toBeLessThan(0);
+    expect(Number.isFinite(m.calmar!)).toBe(true);
+  });
+  it("are null on a series that is too short", () => {
+    const short = computeMetrics(daily([100, 101, 102]));
+    expect([short.sortino, short.calmar, short.var95, short.bestStep, short.worstStep, short.upShare]).toEqual([null, null, null, null, null, null]);
+  });
+});
+
+describe("relativeTo", () => {
+  const bench = daily(wobble(60, 0.01));
+  it("gives beta 1, no alpha and no tracking error against itself", () => {
+    const r = relativeTo(bench, bench)!;
+    expect(r.beta).toBeCloseTo(1, 10);
+    expect(r.alpha).toBeCloseTo(0, 10);
+    expect(r.trackingError).toBeCloseTo(0, 10);
+    expect(r.informationRatio).toBeNull();
+    expect(r.hitShare).toBe(0);
+  });
+  it("doubles the beta for a curve that moves twice as far", () => {
+    const base = 1_000_000;
+    const lev = bench.map((p) => ({ t: p.t, value: base + 2 * (p.value - base) }));
+    // returns of the leveraged curve are not exactly twice the returns, so allow some room
+    const r = relativeTo(lev, bench)!;
+    expect(r.beta!).toBeGreaterThan(1.8);
+    expect(r.beta!).toBeLessThan(2.2);
+    expect(r.trackingError!).toBeGreaterThan(0);
+  });
+  it("is null when there are too few common steps", () => {
+    expect(relativeTo(daily([1, 2, 3]), daily([1, 2, 3]))).toBeNull();
   });
 });

@@ -152,7 +152,27 @@ export interface Metrics {
   volatility: number | null;
   maxDrawdown: number | null;
   sharpe: number | null;
+  /** Like Sharpe, but only falling steps count as risk. */
+  sortino: number | null;
+  /** Annualized return over the maximum drawdown. */
+  calmar: number | null;
+  /** The loss one step in twenty reaches (negative ratio per step of `basis`). */
+  var95: number | null;
+  bestStep: number | null;
+  worstStep: number | null;
+  /** Share of steps that gained, 0 to 1. */
+  upShare: number | null;
   unavailable?: string;
+}
+
+/** A depot's steps against the benchmark's; GET /api/simulations/:id/evaluation, per depot, when a benchmark is set. */
+export interface Relative {
+  basis: Basis;
+  beta: number | null;
+  alpha: number | null;
+  trackingError: number | null;
+  informationRatio: number | null;
+  hitShare: number;
 }
 
 export interface Slice {
@@ -168,6 +188,7 @@ export interface Evaluation {
     kind: DepotKind;
     startedAt: number;
     metrics: Metrics;
+    vsBenchmark: Relative | null;
     fees: { orders: number; commission: number; foreign: number; total: number; shareOfStart: number };
     breakdown: { sector: Slice[]; country: Slice[]; currency: Slice[] };
   }[];

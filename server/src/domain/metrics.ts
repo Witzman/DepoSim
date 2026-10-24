@@ -69,8 +69,28 @@ export interface Metrics {
   maxDrawdown: number | null;
   /** Annualized mean return over volatility, without a risk-free rate. */
   sharpe: number | null;
+  /** Annualized mean return over the annualized downside deviation (only falling steps count as risk). */
+  sortino: number | null;
+  /** Annualized return over the size of the maximum drawdown. */
+  calmar: number | null;
+  /** The loss that one step in twenty reaches or exceeds (historical, 95 %), as a negative ratio per step of the basis; null if steps never lost. */
+  var95: number | null;
+  /** The best and the worst single step, as ratios. */
+  bestStep: number | null;
+  worstStep: number | null;
+  /** Share of steps that gained, 0 to 1. */
+  upShare: number | null;
   /** Why volatility and Sharpe ratio are missing. */
   unavailable?: string;
+}
+
+/** The value below which `p` of the sorted-in-place values lie, linear between neighbours. */
+export function quantile(values: number[], p: number): number {
+  const s = [...values].sort((a, b) => a - b);
+  const pos = (s.length - 1) * p;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  return s[lo] + (s[hi] - s[lo]) * (pos - lo);
 }
 
 export function computeMetrics(points: Point[]): Metrics {
@@ -86,7 +106,10 @@ export function computeMetrics(points: Point[]): Metrics {
       if (peak > 0) maxDrawdown = Math.min(maxDrawdown, p.value / peak - 1);
     }
   }
-  const base: Metrics = { basis: null, periodsPerYear: null, totalReturn, volatility: null, maxDrawdown, sharpe: null };
+  const base: Metrics = {
+    basis: null, periodsPerYear: null, totalReturn, volatility: null, maxDrawdown, sharpe: null,
+    sortino: null, calmar: null, var95: null, bestStep: null, worstStep: null, upShare: null,
+  };
 
   for (const basis of LADDER) {
     const r = returnsOf(resample(points, basis));
@@ -95,7 +118,19 @@ export function computeMetrics(points: Point[]): Metrics {
     const vol = stdev(r) * Math.sqrt(ppy);
     const volatility = Number.isFinite(vol) ? vol : null;
     const sharpe = volatility !== null && volatility > FLAT ? (mean(r) * ppy) / volatility : null;
-    return { ...base, basis, periodsPerYear: ppy, volatility: volatility === null ? null : volatility, sharpe: Number.isFinite(sharpe) ? sharpe : null };
+    const finite = (x: number | null) => (x !== null && Number.isFinite(x) ? x : null);
+    const downside = Math.sqrt(r.reduce((a, x) => a + Math.min(x, 0) ** 2, 0) / r.length) * Math.sqrt(ppy);
+    const sortino = downside > FLAT ? (mean(r) * ppy) / downside : null;
+    const grown = last.value / first.value;
+    const annual = grown > 0 && first.value > 0 ? grown ** (ppy / r.length) - 1 : null;
+    const calmar = annual !== null && maxDrawdown !== null && maxDrawdown < -FLAT ? annual / -maxDrawdown : null;
+    const q = quantile(r, 0.05);
+    return {
+      ...base, basis, periodsPerYear: ppy, volatility: volatility === null ? null : volatility,
+      sharpe: finite(sharpe), sortino: finite(sortino), calmar: finite(calmar),
+      var95: q < 0 ? q : null, bestStep: Math.max(...r), worstStep: Math.min(...r),
+      upShare: r.filter((x) => x > 0).length / r.length,
+    };
   }
   return { ...base, unavailable: `Für Volatilität und Sharpe-Ratio liegen zu wenige Werte vor (mindestens ${MIN_RETURNS} Renditen nötig).` };
 }
@@ -156,4 +191,47 @@ export function correlationMatrix(curves: { id: number; points: Point[] }[]): Co
     }
   }
   return { ids: curves.map((c) => c.id), basis: finest < 0 ? null : LADDER[finest], matrix };
+}
+
+export interface Relative {
+  basis: Basis;
+  /** Slope of the depot's steps against the benchmark's steps. */
+  beta: number | null;
+  /** Annualized excess return over what beta explains (Jensen, without a risk-free rate). */
+  alpha: number | null;
+  /** Annualized volatility of the difference of the steps. */
+  trackingError: number | null;
+  /** Annualized mean difference over the tracking error. */
+  informationRatio: number | null;
+  /** Share of steps in which the depot did better than the benchmark. */
+  hitShare: number;
+}
+
+/** How a curve moved against a benchmark over the steps both have, or null when there are too few. */
+export function relativeTo(curve: Point[], benchmark: Point[]): Relative | null {
+  const common = commonReturns(curve, benchmark);
+  if (!common) return null;
+  const { basis, x, y } = common;
+  const ppy = PERIODS[basis];
+  const my = mean(y);
+  const mx = mean(x);
+  let cov = 0;
+  let varY = 0;
+  for (let i = 0; i < x.length; i++) {
+    cov += (x[i] - mx) * (y[i] - my);
+    varY += (y[i] - my) ** 2;
+  }
+  const beta = varY > FLAT ? cov / varY : null;
+  const alpha = beta === null ? null : (mx - beta * my) * ppy;
+  const diff = x.map((v, i) => v - y[i]);
+  const te = stdev(diff) * Math.sqrt(ppy);
+  const finite = (v: number | null) => (v !== null && Number.isFinite(v) ? v : null);
+  return {
+    basis,
+    beta: finite(beta),
+    alpha: finite(alpha),
+    trackingError: finite(te),
+    informationRatio: te > FLAT ? finite((mean(diff) * ppy) / te) : null,
+    hitShare: diff.filter((d) => d > 0).length / diff.length,
+  };
 }

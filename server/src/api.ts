@@ -54,7 +54,7 @@ const TRADE_KEY = /^\d{1,12}:\d{1,12}$/;
 
 const barsQuery = z.object({
   symbol: z.string().min(1),
-  limit: z.coerce.number().int().min(1).max(2000).default(500),
+  limit: z.coerce.number().int().min(1).max(20000).default(500),
 });
 
 const searchQuery = z.object({ q: z.string().trim().min(2).max(40) });
