@@ -217,5 +217,9 @@ test.describe("phone, 390 x 844", () => {
     await page.getByRole("tab", { name: "Auswertung" }).click();
     await expect(page.getByTestId("journal")).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    // The page hides sideways overflow, so check the boxes themselves: no card reaches past the screen edge.
+    const wide = await page.evaluate(() => [...document.querySelectorAll("main .card")]
+      .filter((e) => e.getBoundingClientRect().right > window.innerWidth + 1 || e.getBoundingClientRect().left < -1).length);
+    expect(wide).toBe(0);
   });
 });

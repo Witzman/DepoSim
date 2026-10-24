@@ -254,6 +254,7 @@ kbd { font: inherit; font-size: 0.85rem; padding: 1px 6px; border: 1px solid var
 
 /* Paket E */
 .badge.ghost { border-color: var(--muted); color: var(--muted); border-style: dashed; }
+.btn[aria-selected="true"] .badge.ghost { border-color: currentColor; color: inherit; }
 .badge.warn { border-color: var(--down); color: var(--down); margin-left: 0; }
 dialog.backfill { width: min(94vw, 600px); max-height: 90vh; overflow-y: auto; }
 .missing-list { max-height: 220px; overflow-y: auto; }
