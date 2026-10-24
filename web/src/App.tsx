@@ -294,9 +294,9 @@ export function App() {
                 />
               </section>
               <div className="tabs" role="tablist" aria-label="Ansicht">
-                <button role="tab" className="btn" aria-selected={view === "trade"} aria-pressed={view === "trade"}
+                <button role="tab" className="btn" aria-selected={view === "trade"}
                   onClick={() => setView("trade")}>Handel</button>
-                <button role="tab" className="btn" aria-selected={view === "evaluation"} aria-pressed={view === "evaluation"}
+                <button role="tab" className="btn" aria-selected={view === "evaluation"}
                   onClick={() => setView("evaluation")}>Auswertung</button>
               </div>
               {snapshot && depot && (

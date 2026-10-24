@@ -88,7 +88,7 @@ h2 { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-s
 }
 .btn:hover { border-color: var(--muted); }
 .btn:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.btn[aria-pressed="true"], .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.btn[aria-pressed="true"], .btn[role="tab"][aria-selected="true"], .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .btn:disabled { opacity: 0.5; cursor: default; }
 .btn.small { padding: 3px 8px; font-size: 0.85rem; }
 

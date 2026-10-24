@@ -323,9 +323,16 @@ export class SessionService {
   addDepot(id: number, name?: string): { ok: true; depot: Depot } | { ok: false; reason: string } {
     const sim = this.sim(id);
     if (sim.endedAt !== null) return { ok: false, reason: "Die Simulation ist beendet." };
-    const count = this.store.listDepots(id).length;
+    const existing = this.store.listDepots(id);
+    const count = existing.length;
     if (count >= MAX_DEPOTS) return { ok: false, reason: `Mehr als ${MAX_DEPOTS} Depots gibt es nicht.` };
-    return { ok: true, depot: this.store.createDepot(id, name ?? `Depot ${count + 1}`) };
+    return { ok: true, depot: this.store.createDepot(id, name ?? this.nextDepotName(existing)) };
+  }
+
+  /** "Depot N" with N one above the highest number in use, so a deleted depot's name is not given out again. */
+  private nextDepotName(existing: Depot[]): string {
+    const used = existing.map((d) => Number(/^Depot (\d+)$/.exec(d.name)?.[1] ?? 0));
+    return `Depot ${Math.max(existing.length, ...used) + 1}`;
   }
 
   removeDepot(id: number, depotId: number): { ok: true } | { ok: false; reason: string } {

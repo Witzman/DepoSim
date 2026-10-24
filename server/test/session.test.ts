@@ -757,3 +757,17 @@ describe("allocate", () => {
     expect(snap.orders.every((o) => o.status === "open")).toBe(true);
   });
 });
+
+describe("default depot names", () => {
+  it("never repeats a name after a depot was deleted", () => {
+    const t = setup();
+    const two = t.svc.addDepot(t.id);
+    t.svc.addDepot(t.id); // Depot 3
+    if (!two.ok) throw new Error(two.reason);
+    t.svc.removeDepot(t.id, two.depot.id);
+    const again = t.svc.addDepot(t.id);
+    expect(again.ok && again.depot.name).toBe("Depot 4");
+    const names = t.svc.snapshot(t.id).depots.map((d) => d.name);
+    expect(new Set(names).size).toBe(names.length);
+  });
+});

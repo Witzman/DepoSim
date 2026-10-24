@@ -32,7 +32,7 @@ export function DepotSwitch({ depots, activeId, disabled, onSelect, onAdd, onRen
     <section className="card" aria-label="Depots">
       <div className="depot-tabs" role="tablist" aria-label="Depots">
         {depots.map((d) => (
-          <button key={d.id} role="tab" className="btn" aria-selected={d.id === active.id} aria-pressed={d.id === active.id}
+          <button key={d.id} role="tab" className="btn" aria-selected={d.id === active.id}
             onClick={() => onSelect(d.id)}>{d.name}</button>
         ))}
         <button className="btn small" disabled={disabled || depots.length >= MAX_DEPOTS} onClick={onAdd}>+ Depot</button>
