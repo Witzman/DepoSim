@@ -8,6 +8,10 @@ export interface IndicatorParams {
   rsi: { period: number };
   macd: { fast: number; slow: number; signal: number };
   bollinger: { period: number; k: number };
+  vwap: Record<string, never>;
+  atr: { period: number };
+  stoch: { k: number; d: number };
+  obv: Record<string, never>;
 }
 
 export interface IndicatorPrefs { enabled: IndicatorId[]; params: IndicatorParams }
@@ -15,6 +19,7 @@ export interface IndicatorPrefs { enabled: IndicatorId[]; params: IndicatorParam
 export const defaultParams = (): IndicatorParams => ({
   sma: { period: 20 }, ema: { period: 20 }, rsi: { period: 14 },
   macd: { fast: 12, slow: 26, signal: 9 }, bollinger: { period: 20, k: 2 },
+  vwap: {}, atr: { period: 14 }, stoch: { k: 14, d: 3 }, obv: {},
 });
 
 export const defaultPrefs = (): IndicatorPrefs => ({ enabled: [], params: defaultParams() });
@@ -42,6 +47,10 @@ export function parsePrefs(raw: string | null): IndicatorPrefs {
         signal: num(p.macd?.signal, d.macd.signal, true),
       },
       bollinger: { period: num(p.bollinger?.period, d.bollinger.period, true), k: num(p.bollinger?.k, d.bollinger.k, false) },
+      vwap: {},
+      atr: { period: num(p.atr?.period, d.atr.period, true) },
+      stoch: { k: num(p.stoch?.k, d.stoch.k, true), d: num(p.stoch?.d, d.stoch.d, true) },
+      obv: {},
     };
   } catch {
     return defaultPrefs();

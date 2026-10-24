@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bollinger, compute, ema, macd, rsi, sma } from "../src/indicators.js";
+import { atr, bollinger, compute, ema, macd, obv, rsi, sma, stochastic, vwap, type Ohlcv } from "../src/indicators.js";
 
 const noNaN = (xs: (number | null)[]) => xs.every((x) => x === null || Number.isFinite(x));
 
@@ -108,5 +108,80 @@ describe("compute", () => {
   });
   it("returns an empty result when nothing is enabled", () => {
     expect(compute(closes, {})).toEqual({});
+  });
+});
+
+const bar = (t: number, o: number, h: number, l: number, c: number, v = 100): Ohlcv => ({ t, o, h, l, c, v });
+// 2026-10-23 10:00 Berlin (08:00 UTC), one bar a minute
+const T0 = Date.UTC(2026, 9, 23, 8, 0) / 1000;
+
+describe("atr", () => {
+  it("is the mean true range at first, then Wilder-smoothed", () => {
+    const bars = [bar(T0, 10, 11, 9, 10), bar(T0 + 60, 10, 12, 10, 11), bar(T0 + 120, 11, 13, 11, 12), bar(T0 + 180, 12, 12, 9, 10)];
+    // true ranges: 2, 2, 3  -> seed (2+2)/2 = 2 at index 2 for period 2, then (2*1+3)/2 = 2.5
+    const r = atr(bars, 2);
+    expect(r.slice(0, 2)).toEqual([null, null]);
+    expect(r[2]).toBe(2);
+    expect(r[3]).toBe(2.5);
+  });
+  it("counts a gap in the true range", () => {
+    const bars = [bar(T0, 10, 10, 10, 10), bar(T0 + 60, 20, 21, 20, 21)];
+    expect(atr(bars, 1)[1]).toBe(11); // |21 - 10|
+  });
+  it("is all null when too short", () => {
+    expect(atr([bar(T0, 1, 1, 1, 1)], 14)).toEqual([null]);
+  });
+});
+
+describe("stochastic", () => {
+  it("is 100 at the top of the range and 0 at the bottom", () => {
+    const up = [bar(T0, 1, 2, 1, 2), bar(T0 + 60, 2, 3, 2, 3), bar(T0 + 120, 3, 4, 3, 4)];
+    expect(stochastic(up, 3, 1).k[2]).toBe(100);
+    const down = [bar(T0, 4, 4, 3, 3), bar(T0 + 60, 3, 3, 2, 2), bar(T0 + 120, 2, 2, 1, 1)];
+    expect(stochastic(down, 3, 1).k[2]).toBe(0);
+  });
+  it("is 50 for a flat range and %D waits for %K", () => {
+    const flat = Array.from({ length: 5 }, (_, i) => bar(T0 + i * 60, 5, 5, 5, 5));
+    const r = stochastic(flat, 2, 3);
+    expect(r.k).toEqual([null, 50, 50, 50, 50]);
+    expect(r.d).toEqual([null, null, null, 50, 50]);
+  });
+});
+
+describe("obv", () => {
+  it("adds volume on up closes, subtracts on down closes, keeps on equal", () => {
+    const bars = [bar(T0, 1, 1, 1, 10, 5), bar(T0 + 60, 1, 1, 1, 11, 7), bar(T0 + 120, 1, 1, 1, 10, 3), bar(T0 + 180, 1, 1, 1, 10, 9)];
+    expect(obv(bars)).toEqual([0, 7, 4, 4]);
+  });
+});
+
+describe("vwap", () => {
+  it("weights the typical price by volume and restarts every day", () => {
+    const bars = [
+      bar(T0, 0, 12, 8, 10, 1), // typical 10
+      bar(T0 + 60, 0, 21, 15, 18, 3), // typical 18
+      bar(T0 + 86400, 0, 6, 6, 6, 2), // next day, typical 6
+    ];
+    const r = vwap(bars);
+    expect(r[0]).toBe(10);
+    expect(r[1]).toBe((10 * 1 + 18 * 3) / 4);
+    expect(r[2]).toBe(6);
+  });
+  it("stays null while there is no volume", () => {
+    expect(vwap([bar(T0, 1, 1, 1, 1, 0)])).toEqual([null]);
+  });
+});
+
+describe("compute with bars", () => {
+  const bars = Array.from({ length: 30 }, (_, i) => bar(T0 + i * 60, 10 + i, 11 + i, 9 + i, 10 + i));
+  it("leaves the bar-based indicators out without bars", () => {
+    expect(compute(bars.map((b) => b.c), { atr: { period: 5 }, obv: {} })).toEqual({});
+  });
+  it("computes them with bars, all of the input length and never NaN", () => {
+    const r = compute(bars.map((b) => b.c), { atr: { period: 5 }, obv: {}, vwap: {}, stoch: { k: 5, d: 3 } }, bars);
+    for (const s of [r.atr!, r.obv!, r.vwap!, r.stoch!.k, r.stoch!.d]) {
+      expect(s).toHaveLength(30);
+      expect(noNaN(s)).toBe(true);
+    }
   });
 });

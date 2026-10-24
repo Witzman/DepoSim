@@ -6,10 +6,14 @@ const ROWS: { id: IndicatorId; label: string; fields: Field[] }[] = [
   { id: "sma", label: "SMA", fields: [{ key: "period", label: "Periode" }] },
   { id: "ema", label: "EMA", fields: [{ key: "period", label: "Periode" }] },
   { id: "bollinger", label: "Bollinger", fields: [{ key: "period", label: "Periode" }, { key: "k", label: "Faktor", step: 0.5 }] },
+  { id: "vwap", label: "VWAP (Tag)", fields: [] },
   { id: "rsi", label: "RSI", fields: [{ key: "period", label: "Periode" }] },
   { id: "macd", label: "MACD", fields: [
     { key: "fast", label: "schnell" }, { key: "slow", label: "langsam" }, { key: "signal", label: "Signal" },
   ] },
+  { id: "stoch", label: "Stochastik", fields: [{ key: "k", label: "%K" }, { key: "d", label: "%D" }] },
+  { id: "atr", label: "ATR", fields: [{ key: "period", label: "Periode" }] },
+  { id: "obv", label: "OBV", fields: [] },
 ];
 
 interface Props {
@@ -26,7 +30,7 @@ export function IndicatorMenu({ prefs, onChange }: Props) {
   };
   return (
     <details className="ind-menu">
-      <summary className="btn">Indikatoren</summary>
+      <summary className="btn small">Indikatoren</summary>
       <div className="ind-list">
         {ROWS.map((r) => (
           <div key={r.id} className="ind-row">

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { compute, type IndicatorConfig, type IndicatorResult } from "./indicators.js";
+import { compute, type IndicatorConfig, type IndicatorResult, type Ohlcv } from "./indicators.js";
 import type { WorkerRequest } from "./indicators.worker.js";
 
 /**
- * Indicator values for the closes, computed off the main thread. Only the newest request
+ * Indicator values for the bars, computed off the main thread. Only the newest request
  * counts (latest wins by `seq`); without Worker support it computes inline.
  */
-export function useIndicators(closes: number[], config: IndicatorConfig): { result: IndicatorResult; seq: number } {
+export function useIndicators(bars: Ohlcv[], config: IndicatorConfig): { result: IndicatorResult; seq: number } {
   const [state, setState] = useState<{ result: IndicatorResult; seq: number }>({ result: {}, seq: 0 });
   const worker = useRef<Worker | null>(null);
   const sent = useRef(0);
@@ -30,12 +30,12 @@ export function useIndicators(closes: number[], config: IndicatorConfig): { resu
     const seq = ++sent.current;
     if (Object.keys(config).length === 0) return setState({ result: {}, seq });
     if (worker.current) {
-      const req: WorkerRequest = { seq, closes, config };
+      const req: WorkerRequest = { seq, bars, config };
       worker.current.postMessage(req);
     } else {
-      setState({ result: compute(closes, config), seq });
+      setState({ result: compute(bars.map((b) => b.c), config, bars), seq });
     }
-  }, [closes, config]);
+  }, [bars, config]);
 
   return state;
 }

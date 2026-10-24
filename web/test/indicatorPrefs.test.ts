@@ -13,6 +13,12 @@ describe("indicator prefs", () => {
     expect(p.params.rsi.period).toBe(9);
     expect(p.params.sma.period).toBe(20);
   });
+  it("knows the volume-based indicators and their defaults", () => {
+    const p = parsePrefs('{"enabled":["obv","vwap","atr","stoch"],"params":{"stoch":{"k":9,"d":-1}}}');
+    expect(p.enabled).toEqual(["vwap", "stoch", "atr", "obv"]);
+    expect(p.params.stoch).toEqual({ k: 9, d: 3 });
+    expect(p.params.atr.period).toBe(14);
+  });
   it("only enabled indicators reach the config", () => {
     expect(toConfig({ ...defaultPrefs(), enabled: ["macd"] })).toEqual({ macd: { fast: 12, slow: 26, signal: 9 } });
   });
