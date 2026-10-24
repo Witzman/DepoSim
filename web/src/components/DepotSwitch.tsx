@@ -49,7 +49,7 @@ export function DepotSwitch({ depots, activeId, disabled, onSelect, onAdd, onRen
         <button className="btn small" disabled={disabled || !ghostCheck.ok || depots.length >= MAX_DEPOTS} data-testid="ghost-create" onClick={onGhost}
           title={ghostCheck.ok ? "Eine eingefrorene Kopie dieses Depots anlegen" : ghostCheck.reason}>Geisterdepot anlegen</button>
         <button className="btn small" onClick={() => { setName(active.name); setOpen(true); }}>Depot verwalten</button>
-        {!disabled && !ghostCheck.ok && !ghost && <span className="muted note-inline" data-testid="ghost-reason">Geisterdepot: {ghostCheck.reason}</span>}
+        {!disabled && !ghostCheck.ok && !ghost && <span className="muted note-inline" data-testid="ghost-reason" title={ghostCheck.reason}>Geisterdepot: {ghostCheck.reason}</span>}
       </div>
 
       <dialog ref={dialog} aria-label="Depot verwalten" onClose={() => setOpen(false)}>

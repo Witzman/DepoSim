@@ -127,7 +127,9 @@ export function Palette({
   }
 
   return (
-    <dialog ref={dialog} className="palette" data-testid="palette" aria-label="Befehlspalette" onClose={onClose}>
+    <dialog ref={dialog} className="palette" data-testid="palette" aria-label="Befehlspalette" onCancel={onClose}
+      // The close event comes a task after Esc. A palette reopened in between is open again by then: leave it be.
+      onClose={() => { if (!dialog.current?.open) onClose(); }}>
       <input
         ref={input} data-testid="palette-input" type="text" role="combobox" aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list"
         aria-activedescendant={entries.length > 0 ? `palette-option-${Math.min(active, entries.length - 1)}` : undefined}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type Socket, addDepot, addGhost, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, getBars, getWatchlist, listSimulations,
   openSocket, removeDepot, setBenchmark, removeInstrument, renameDepot,
@@ -8,7 +8,8 @@ import { BackfillDialog } from "./components/BackfillDialog.js";
 import { Compare } from "./components/Compare.js";
 import { Journal } from "./components/Journal.js";
 import { OrderbookPanel } from "./components/Orderbook.js";
-import { Chart } from "./components/Chart.js";
+import { Chart, type Fill } from "./components/Chart.js";
+import { CHART_PREFS_KEY, RAW_LIMIT, defaultChartPrefs, parseChartPrefs, type ChartPrefs } from "./bars.js";
 import { Collapsible } from "./components/Collapsible.js";
 import { ClockBar } from "./components/ClockBar.js";
 import { Curves } from "./components/Curves.js";
@@ -31,8 +32,6 @@ import { useNarrow } from "./useNarrow.js";
 import { useTheme } from "./theme.js";
 import type { Bar, Instrument, ServerMessage, Simulation, Snapshot, Tempo } from "./types.js";
 
-const BARS_SHOWN = 500;
-const MAX_BARS = 2000;
 const SELECTED_KEY = "deposim-selected";
 
 function storedSelection(): number | null {
@@ -53,6 +52,14 @@ function rememberSelection(id: number | null) {
   }
 }
 
+function storedChartPrefs(): ChartPrefs {
+  try {
+    return parseChartPrefs(localStorage.getItem(CHART_PREFS_KEY));
+  } catch {
+    return defaultChartPrefs(); // blocked storage: the chart opens with its defaults
+  }
+}
+
 export function App() {
   const { theme, toggle } = useTheme();
   const [simulations, setSimulations] = useState<Simulation[]>([]);
@@ -61,6 +68,11 @@ export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [symbol, setSymbol] = useState("SAP.DE");
   const [bars, setBars] = useState<Bar[]>([]);
+  const [chartPrefs, setChartPrefs] = useState<ChartPrefs>(storedChartPrefs);
+  const rawLimit = RAW_LIMIT[chartPrefs.timeframe];
+  const barsKey = useRef("");
+  const rawLimitRef = useRef(rawLimit);
+  rawLimitRef.current = rawLimit;
   const [notice, setNotice] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ticketCommand, setTicketCommand] = useState<{ side: "buy" | "sell"; n: number }>({ side: "buy", n: 0 });
@@ -110,7 +122,8 @@ export function App() {
         setBars((prev) => {
           const last = prev.length ? prev[prev.length - 1].t : -1;
           const next = [...prev, ...fresh.filter((b) => b.t > last)];
-          return next.length > MAX_BARS ? next.slice(-MAX_BARS) : next;
+          const cap = Math.max(2000, Math.round(rawLimitRef.current * 1.2));
+          return next.length > cap ? next.slice(-cap) : next;
         });
       }
     } else {
@@ -180,13 +193,23 @@ export function App() {
 
   // The chart's history: reloaded for another simulation or another symbol.
   useEffect(() => {
-    if (selectedId === null) return setBars([]);
+    // Another title or simulation: the old bars must not stay on the chart while the new ones load.
+    const barsFor = `${selectedId}|${symbol}`;
+    if (barsFor !== barsKey.current) { barsKey.current = barsFor; setBars([]); }
+    if (selectedId === null) return;
     let current = true;
-    getBars(selectedId, symbol, BARS_SHOWN)
+    getBars(selectedId, symbol, rawLimit)
       .then((b) => current && setBars(b))
       .catch((e) => current && setNotice(e.message));
     return () => { current = false; };
-  }, [selectedId, symbol]);
+  }, [selectedId, symbol, rawLimit]);
+
+  function changeChartPrefs(p: ChartPrefs) {
+    setChartPrefs(p);
+    try {
+      localStorage.setItem(CHART_PREFS_KEY, JSON.stringify(p));
+    } catch { /* the choice then lasts only until the page is closed */ }
+  }
 
   async function create(input: { name: string; startAt?: number; live?: boolean }) {
     const sim = await createSimulation(input);
@@ -315,12 +338,28 @@ export function App() {
   const price = snapshot?.prices[symbol];
   const depot = snapshot ? pickDepot(snapshot.depots, activeDepotId) : undefined;
   const isGhost = depot?.kind === "ghost";
+  const fills = useMemo<Fill[]>(() => (depot?.orders ?? []).flatMap((o) =>
+    o.status === "filled" && o.symbol === symbol && o.filledSim !== undefined && o.fillPrice !== undefined
+      ? [{ t: o.filledSim, side: o.side, price: o.fillPrice, qty: o.qty }] : []), [depot?.orders, symbol]);
   const locked = live === null || live.endedAt !== null || snapshot === null;
 
   return (
     <div className={`app${narrow && live ? " with-bar" : ""}`}>
       <header className="topbar">
-        <h1>DepoSim</h1>
+        <h1 className="brand">
+          <svg viewBox="0 0 32 32" aria-hidden="true">
+            <rect width="32" height="32" rx="7" fill="var(--accent)" />
+            <path d="M6 22 L12 15 L17 19 L22 11 L26 9" fill="none" stroke="var(--accent-text)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          DepoSim
+        </h1>
+        {live && (
+          <span className={`pill${snapshot?.running ? " on" : ""}`} data-testid="top-status">
+            <span className="dot" aria-hidden="true" />
+            {live.endedAt !== null ? "beendet" : snapshot?.running ? "läuft" : "angehalten"}
+          </span>
+        )}
+        <span className="spacer" />
         <button className="btn small" data-testid="palette-open" onClick={() => setPaletteOpen(true)}
           aria-label="Suche und Befehle öffnen (Strg+K)" title="Strg+K">Suche</button>
         <button className="btn small" data-testid="theme-toggle" onClick={toggle} aria-label="Hell oder Dunkel umschalten">
@@ -386,15 +425,18 @@ export function App() {
               ) : view === "trade" ? (
                 <>
               <section className="card">
-                <div className="toolbar">
-                  <select aria-label="Wertpapier" value={symbol} onChange={(e) => setSymbol(e.target.value)}>
-                    {watchlist.map((i) => <option key={i.symbol} value={i.symbol}>{i.symbol} · {i.name}</option>)}
-                  </select>
-                  {price && instrument && (
-                    <span className="num" data-testid="last-price">{formatPrice(price.price, instrument.currency)}</span>
-                  )}
-                </div>
-                <Chart bars={bars} theme={theme} simulationId={live.id} symbol={symbol} />
+<Chart bars={bars} prefs={chartPrefs} onPrefs={changeChartPrefs} fills={fills} theme={theme}
+                  simulationId={live.id} symbol={symbol}
+                  lead={(
+                    <div className="lead">
+                      <select aria-label="Wertpapier" value={symbol} onChange={(e) => setSymbol(e.target.value)}>
+                        {watchlist.map((i) => <option key={i.symbol} value={i.symbol}>{i.symbol} · {i.name}</option>)}
+                      </select>
+                      {price && instrument && (
+                        <span className="num last" data-testid="last-price">{formatPrice(price.price, instrument.currency)}</span>
+                      )}
+                    </div>
+                  )} />
               </section>
               <div className="trade-grid">
                 <div className="stack">

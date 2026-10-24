@@ -1,5 +1,5 @@
 // Caches only the user interface. The API, the socket and the health check always go to the network.
-const CACHE = "deposim-ui-v1";
+const CACHE = "deposim-ui-v2";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.add("/")).catch(() => {}).then(() => self.skipWaiting()));

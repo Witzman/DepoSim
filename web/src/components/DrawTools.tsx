@@ -33,10 +33,10 @@ export function DrawTools({ tool, trendStarted, markerPending, count, onTool, on
     <div className="draw-tools">
       <div role="group" aria-label="Zeichenwerkzeuge" className="draw-buttons">
         {TOOLS.map((t) => (
-          <button key={t.id} type="button" className="btn" aria-pressed={tool === t.id} title={t.hint}
+          <button key={t.id} type="button" className="btn small" aria-pressed={tool === t.id} title={t.hint}
             onClick={() => onTool(tool === t.id ? null : t.id)}>{t.label}</button>
         ))}
-        <button type="button" className="btn" disabled={count === 0} onClick={onClear}>Alle löschen</button>
+        <button type="button" className="btn small" disabled={count === 0} onClick={onClear}>Alle löschen</button>
       </div>
       {markerPending && (
         <form className="draw-text" onSubmit={(e) => { e.preventDefault(); onMarkerText(text); }}>
