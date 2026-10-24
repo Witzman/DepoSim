@@ -1,0 +1,60 @@
+{
+ "quotes": [
+  {
+   "exchange": "GER",
+   "shortname": "Siemens Energy AG             N",
+   "longname": "Siemens Energy AG",
+   "quoteType": "EQUITY",
+   "symbol": "ENR.DE",
+   "exchDisp": "XETRA"
+  },
+  {
+   "exchange": "GER",
+   "shortname": "SIEMENS AG                    N",
+   "longname": "Siemens Aktiengesellschaft",
+   "quoteType": "EQUITY",
+   "symbol": "SIE.DE",
+   "exchDisp": "XETRA"
+  },
+  {
+   "exchange": "PNK",
+   "shortname": "Siemens AG",
+   "longname": "Siemens Aktiengesellschaft",
+   "quoteType": "EQUITY",
+   "symbol": "SIEGY",
+   "exchDisp": "OTC Markets"
+  },
+  {
+   "exchange": "OQX",
+   "shortname": "Siemens Energy AG",
+   "longname": "Siemens Energy AG",
+   "quoteType": "EQUITY",
+   "symbol": "SMERY",
+   "exchDisp": "OQX"
+  },
+  {
+   "exchange": "GER",
+   "shortname": "Siemens Healthineers AG       N",
+   "longname": "Siemens Healthineers AG",
+   "quoteType": "EQUITY",
+   "symbol": "SHL.DE",
+   "exchDisp": "XETRA"
+  },
+  {
+   "exchange": "FRA",
+   "shortname": "Siemens Energy AG             N",
+   "longname": "Siemens Energy AG",
+   "quoteType": "EQUITY",
+   "symbol": "ENR.F",
+   "exchDisp": "Frankfurt"
+  },
+  {
+   "exchange": "NSI",
+   "shortname": "SIEMENS LTD",
+   "longname": "Siemens Limited",
+   "quoteType": "EQUITY",
+   "symbol": "SIEMENS.NS",
+   "exchDisp": "NSE"
+  }
+ ]
+}
