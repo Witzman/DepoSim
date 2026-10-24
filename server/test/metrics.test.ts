@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeMetrics, correlationMatrix, resample, returnsOf } from "../src/domain/metrics.js";
+import { computeMetrics, correlationMatrix, resample, returnsOf, thin } from "../src/domain/metrics.js";
 
 const DAY = 86400;
 const T0 = 1792627200 + 12 * 3600; // 2026-10-22 12:00 UTC
@@ -122,5 +122,17 @@ describe("correlationMatrix", () => {
     const m = correlationMatrix([{ id: 1, points: daily([1, 2]) }, { id: 2, points: daily([2, 1]) }]);
     expect(m.basis).toBeNull();
     expect(m.matrix).toEqual([[1, null], [null, 1]]);
+  });
+});
+
+describe("thin", () => {
+  it("keeps short series as they are, and thins long ones to the limit with first and last point", () => {
+    const pts = Array.from({ length: 12_000 }, (_, i) => ({ t: i, value: i }));
+    expect(thin(pts.slice(0, 50), 5000)).toHaveLength(50);
+    const out = thin(pts, 5000);
+    expect(out.length).toBeLessThanOrEqual(5000);
+    expect(out[0]).toEqual(pts[0]);
+    expect(out[out.length - 1]).toEqual(pts[pts.length - 1]);
+    expect(out.every((p, i) => i === 0 || p.t > out[i - 1].t)).toBe(true);
   });
 });

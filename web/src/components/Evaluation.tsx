@@ -70,7 +70,7 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
     ...data.depots.map((d) => ({ key: `d${d.id}`, name: d.name, since: formatSimTime(d.startedAt), m: d.metrics })),
     ...(data.benchmark ? [{ key: "bench", name: `Maßstab ${data.benchmark.symbol}`, m: data.benchmark.metrics }] : []),
   ];
-  const basis = rows.find((r) => r.m.basis)?.m.basis ?? null;
+  const anyBasis = rows.some((r) => r.m.basis);
 
   return (
     <>
@@ -78,12 +78,13 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
         <h2>Kennzahlen</h2>
         <div className="scroll">
           <table className="positions num" data-testid="metrics">
-            <thead><tr><th>Depot</th><th>Seit</th><th>Rendite</th><th>Volatilität p. a.</th><th>Max. Rückgang</th><th>Sharpe</th></tr></thead>
+            <thead><tr><th>Depot</th><th>Seit</th><th>Rendite</th><th>Basis</th><th>Volatilität p. a.</th><th>Max. Rückgang</th><th>Sharpe</th></tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.key} data-testid={`metrics-${r.key}`}>
                   <td>{r.name}</td><td>{r.since ?? "—"}</td>
                   <td><Change ratio={r.m.totalReturn} /></td>
+                  <td>{basisLabel(r.m.basis)}</td>
                   <td>{formatPercentPlain(r.m.volatility)}</td>
                   <td>{formatPercentPlain(r.m.maxDrawdown)}</td>
                   <td>{formatRatio(r.m.sharpe)}</td>
@@ -93,7 +94,7 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
           </table>
         </div>
         {rows.filter((r) => r.m.unavailable).slice(0, 1).map((r) => <p key={r.key} className="muted" data-testid="metrics-note">{r.m.unavailable}</p>)}
-        {basis && <p className="muted">Geschätzt aus {basisLabel(basis)}, hochgerechnet auf ein Jahr. Sharpe ohne risikofreien Zins.</p>}
+        {anyBasis && <p className="muted">Volatilität und Sharpe sind geschätzt aus den Werten der Spalte „Basis“, hochgerechnet auf ein Jahr. Sharpe ohne risikofreien Zins.</p>}
 
         {data.depots.length > 1 && (
           <>
@@ -113,7 +114,7 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
             </div>
             {data.correlation.basis === null
               ? <p className="muted">Noch zu wenige gemeinsame Werte für eine Korrelation.</p>
-              : <p className="muted">Geschätzt aus {basisLabel(data.correlation.basis)}.</p>}
+              : <p className="muted">Geschätzt; je kürzer die gemeinsame Zeit, desto feiner die Werte (bis {basisLabel(data.correlation.basis)}).</p>}
           </>
         )}
       </section>

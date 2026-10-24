@@ -727,6 +727,15 @@ describe("benchmark and evaluation", () => {
     expect((await app.inject({ url: `/api/simulations/${id}/curves` })).json().benchmark).toBeNull();
   });
 
+  it("tells connected clients when the benchmark changes", async () => {
+    const app = make();
+    const id = await createSim(app);
+    const client = await connect(app, id);
+    await until(() => client.msgs.length > 0);
+    await app.inject({ method: "PATCH", url: `/api/simulations/${id}`, payload: { benchmark: "SAP.DE" } });
+    await until(() => client.msgs.some((m) => m.type === "snapshot" && m.simulation.benchmark === "SAP.DE"));
+  });
+
   it("answers 400 for a symbol that is not in the list, 400 for a bad body and 404 for an unknown simulation", async () => {
     const app = make();
     const id = await createSim(app);

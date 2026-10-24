@@ -272,6 +272,7 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
       return reply.code(400).send({ error: `Unbekanntes Wertpapier ${symbol}.` });
     }
     store.setBenchmark(sim.id, symbol);
+    hub.broadcastSnapshot(sim.id);
     return store.getSimulation(sim.id);
   });
 

@@ -8,7 +8,7 @@ import {
 } from "./domain/clock.js";
 import { type AllocationLine, planAllocation } from "./domain/allocation.js";
 import { type Breakdown, type FeeLedger, breakdown, feeLedger } from "./domain/breakdown.js";
-import { type Correlation, type Metrics, type Point, computeMetrics, correlationMatrix } from "./domain/metrics.js";
+import { type Correlation, type Metrics, type Point, computeMetrics, correlationMatrix, thin } from "./domain/metrics.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
 import type { Cent } from "./domain/money.js";
 import type { Depot, OrderRecord, Simulation, Store } from "./store.js";
@@ -447,9 +447,12 @@ export class SessionService {
     const inst = sim.benchmark ? this.registry.get(sim.benchmark) : undefined;
     let benchmark: Evaluation["benchmark"] = null;
     if (inst) {
-      const series: Point[] = this.archive
-        .barsBetween(inst.symbol, sim.startAt - 59, sim.simulationTime - 59)
-        .map((b) => ({ t: b.t + 60, value: b.c }));
+      const series: Point[] = thin(
+        this.archive
+          .barsBetween(inst.symbol, sim.startAt - 59, sim.simulationTime - 59)
+          .map((b) => ({ t: b.t + 60, value: b.c })),
+        EVALUATION_POINTS,
+      );
       benchmark = { symbol: inst.symbol, name: inst.name, metrics: computeMetrics(series) };
     }
     return {

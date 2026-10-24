@@ -35,6 +35,16 @@ function bucketed(points: Point[], basis: Basis): Bucketed[] {
 export const resample = (points: Point[], basis: Basis): Point[] =>
   bucketed(points, basis).map(({ t, value }) => ({ t, value }));
 
+/** At most `max` points, evenly spaced from the end backwards, with the first and the last point kept. */
+export function thin(points: Point[], max: number): Point[] {
+  if (points.length <= max) return points;
+  const step = Math.ceil((points.length - 1) / (max - 1));
+  const out: Point[] = [];
+  for (let i = points.length - 1; i > 0; i -= step) out.push(points[i]);
+  out.push(points[0]);
+  return out.reverse();
+}
+
 /** Simple returns between neighbours. A step from a value of zero has no return and is left out. */
 export function returnsOf(points: Point[]): number[] {
   const out: number[] = [];
