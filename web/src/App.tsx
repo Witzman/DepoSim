@@ -327,7 +327,7 @@ export function App() {
                     <span className="num" data-testid="last-price">{formatPrice(price.price, instrument.currency)}</span>
                   )}
                 </div>
-                <Chart bars={bars} theme={theme} />
+                <Chart bars={bars} theme={theme} simulationId={live.id} symbol={symbol} />
               </section>
               <div className="trade-grid">
                 <OrderTicket simulationId={live.id} depotId={depot?.id} instrument={instrument} priceKey={price?.barT}

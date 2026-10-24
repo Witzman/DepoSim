@@ -213,3 +213,7 @@ h3 { margin: var(--gap) 0 4px; font-size: 0.85rem; font-weight: 600; }
 .ind-row { display: flex; align-items: center; gap: 6px; }
 .ind-row label { min-width: 90px; }
 .ind-param { width: 4.5em; }
+.draw-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.draw-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.draw-text { display: flex; gap: 6px; }
+.draw-hint { font-size: 0.85rem; }
