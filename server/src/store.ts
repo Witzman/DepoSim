@@ -58,6 +58,15 @@ export interface Store {
   endSimulation(id: number): void;
   deleteSimulation(id: number): void;
   listDepots(simulationId: number): Depot[];
+  /** A depot with the simulation's start cash; its curve starts at the simulation time. */
+  createDepot(simulationId: number, name: string): Depot;
+  /** Takes the positions, orders and curve of the depot with it. */
+  deleteDepot(depotId: number): void;
+  renameDepot(depotId: number, name: string): void;
+  /** One point of a depot's value over time; a second write for the same time replaces the first. */
+  recordValue(depotId: number, t: number, value: Cent): void;
+  /** The points in time order, thinned to `maxPoints` (last value per interval, first point kept). */
+  valueCurve(depotId: number, maxPoints?: number): { t: number; value: Cent }[];
   setSimulationTime(id: number, simulationTime: number): void;
   setTempo(id: number, tempo: Tempo): void;
   /** Cash, positions and every order of one depot. */
@@ -139,6 +148,7 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
       "values (?, ?, ?, 1, ?, ?, ?, ?)",
   );
   const insertDepot = db.prepare("insert into depots (simulation_id, name, cash) values (?, 'Depot 1', ?)");
+  const recordPoint = db.prepare("insert or replace into depot_values (depot_id, t, value) values (?, ?, ?)");
   const selectOne = db.prepare("select * from simulations where id = ?");
   const create = db.transaction((input: NewSimulation) => {
     const id = Number(
@@ -146,7 +156,8 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
         input.name, input.startAt, input.startAt, input.startCash, JSON.stringify(input.fees), now(), input.live ? 1 : 0,
       ).lastInsertRowid,
     );
-    insertDepot.run(id, input.startCash);
+    const depotId = Number(insertDepot.run(id, input.startCash).lastInsertRowid);
+    recordPoint.run(depotId, input.startAt, input.startCash);
     return id;
   });
 
@@ -216,6 +227,37 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
         )
         .get(symbol, symbol) !== undefined,
     transaction: (fn) => db.transaction(fn)(),
+    createDepot: (simulationId, name) =>
+      db.transaction(() => {
+        const sim = getSimulation(simulationId)!;
+        const id = Number(
+          db.prepare("insert into depots (simulation_id, name, cash) values (?, ?, ?)").run(simulationId, name, sim.startCash)
+            .lastInsertRowid,
+        );
+        recordPoint.run(id, sim.simulationTime, sim.startCash);
+        return { id, simulationId, name, cash: sim.startCash };
+      })(),
+    deleteDepot: (depotId) => {
+      db.prepare("delete from depots where id = ?").run(depotId);
+    },
+    renameDepot: (depotId, name) => {
+      db.prepare("update depots set name = ? where id = ?").run(name, depotId);
+    },
+    recordValue: (depotId, t, value) => {
+      recordPoint.run(depotId, t, value);
+    },
+    valueCurve: (depotId, maxPoints = 800) => {
+      const rows = db.prepare("select t, value from depot_values where depot_id = ? order by t").all(depotId) as {
+        t: number; value: number;
+      }[];
+      if (rows.length <= maxPoints) return rows;
+      // Every `step`-th point from the end backwards, so the last point is always kept; the first is added back.
+      const step = Math.ceil((rows.length - 1) / (maxPoints - 1));
+      const out: { t: number; value: number }[] = [];
+      for (let i = rows.length - 1; i > 0; i -= step) out.push(rows[i]);
+      out.push(rows[0]);
+      return out.reverse();
+    },
     listDepots: (simulationId) =>
       (db.prepare("select id, simulation_id, name, cash from depots where simulation_id = ? order by id")
         .all(simulationId) as { id: number; simulation_id: number; name: string; cash: number }[]).map((r) => ({

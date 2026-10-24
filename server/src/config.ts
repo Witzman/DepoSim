@@ -38,6 +38,9 @@ export interface Instrument {
 /** How many instruments the person may add to the starting list. Each one is a request per refresh. */
 export const MAX_ADDED = 12;
 
+/** The most depots one simulation may hold. */
+export const MAX_DEPOTS = 8;
+
 /** The exchange rate is a price series like the others, not a tradable instrument. */
 export const FX_SYMBOL = "EURUSD=X";
 

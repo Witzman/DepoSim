@@ -168,4 +168,73 @@ describe("store, live simulations", () => {
     store.setOrderStatus(orderId, "cancelled");
     expect(store.symbolInUse("SAP.DE")).toBe(false);
   });
+
+  describe("depots and value curve", () => {
+    const count = (db: ReturnType<typeof openDb>, table: string) =>
+      (db.prepare(`select count(*) n from ${table}`).get() as { n: number }).n;
+
+    it("starts the first depot's curve at the start of the simulation", () => {
+      const store = createStore(openDb(":memory:"));
+      const sim = store.createSimulation(input);
+      expect(store.valueCurve(store.listDepots(sim.id)[0].id)).toEqual([{ t: 5000, value: 1_000_000 }]);
+    });
+
+    it("creates a depot with the start cash and a start point at the simulation time", () => {
+      const store = createStore(openDb(":memory:"));
+      const sim = store.createSimulation(input);
+      store.setSimulationTime(sim.id, 9000);
+      const depot = store.createDepot(sim.id, "Zweit");
+      expect(depot).toMatchObject({ simulationId: sim.id, name: "Zweit", cash: 1_000_000 });
+      expect(store.listDepots(sim.id).map((d) => d.name)).toEqual(["Depot 1", "Zweit"]);
+      expect(store.valueCurve(depot.id)).toEqual([{ t: 9000, value: 1_000_000 }]);
+    });
+
+    it("renames a depot", () => {
+      const store = createStore(openDb(":memory:"));
+      const sim = store.createSimulation(input);
+      const id = store.listDepots(sim.id)[0].id;
+      store.renameDepot(id, "Wachstum");
+      expect(store.listDepots(sim.id)[0].name).toBe("Wachstum");
+    });
+
+    it("deletes a depot with its positions, orders and curve, and only that depot", () => {
+      const db = openDb(":memory:");
+      const store = createStore(db);
+      const sim = store.createSimulation(input);
+      const keep = store.listDepots(sim.id)[0].id;
+      const drop = store.createDepot(sim.id, "Weg").id;
+      for (const id of [keep, drop]) {
+        db.prepare("insert into positions (depot_id, symbol, qty, cost) values (?, 'A', 1, 100)").run(id);
+        db.prepare(
+          "insert into orders (depot_id, symbol, side, kind, qty, status, created_sim) values (?, 'A', 'buy', 'market', 1, 'open', 5000)",
+        ).run(id);
+      }
+      store.deleteDepot(drop);
+      expect(store.listDepots(sim.id).map((d) => d.id)).toEqual([keep]);
+      expect(count(db, "positions")).toBe(1);
+      expect(count(db, "orders")).toBe(1);
+      expect(count(db, "depot_values")).toBe(1);
+    });
+
+    it("replaces a point written twice for the same time", () => {
+      const store = createStore(openDb(":memory:"));
+      const sim = store.createSimulation(input);
+      const id = store.listDepots(sim.id)[0].id;
+      store.recordValue(id, 6000, 990_000);
+      store.recordValue(id, 6000, 995_000);
+      expect(store.valueCurve(id)).toEqual([{ t: 5000, value: 1_000_000 }, { t: 6000, value: 995_000 }]);
+    });
+
+    it("thins a long curve to the limit and keeps the first and the last point", () => {
+      const store = createStore(openDb(":memory:"));
+      const sim = store.createSimulation(input);
+      const id = store.listDepots(sim.id)[0].id;
+      for (let k = 1; k < 2000; k++) store.recordValue(id, 5000 + k * 60, 1_000_000 + k);
+      const curve = store.valueCurve(id, 800);
+      expect(curve.length).toBeLessThanOrEqual(800);
+      expect(curve[0]).toEqual({ t: 5000, value: 1_000_000 });
+      expect(curve[curve.length - 1]).toEqual({ t: 5000 + 1999 * 60, value: 1_000_000 + 1999 });
+      expect(curve.every((p, i) => i === 0 || p.t > curve[i - 1].t)).toBe(true);
+    });
+  });
 });

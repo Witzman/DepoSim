@@ -44,6 +44,12 @@ create table if not exists depots (
   name text not null,
   cash integer not null
 );
+create table if not exists depot_values (
+  depot_id integer not null references depots (id) on delete cascade,
+  t integer not null,
+  value integer not null,
+  primary key (depot_id, t)
+);
 create table if not exists positions (
   depot_id integer not null references depots (id) on delete cascade,
   symbol text not null,
