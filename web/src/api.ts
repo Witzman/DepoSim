@@ -1,6 +1,6 @@
 import type {
   AllocationLine, BackfillJob, Bar, ClientMessage, CompareResult, CostPreview, Curves, Depot, Evaluation, Instrument, Journal, JournalNoteResult,
-  MissingList, OrderInput, Orderbook, SearchHit, ServerMessage, Simulation, VenueInfo,
+  Longterm, LongtermJob, MissingList, OrderInput, Orderbook, SearchHit, ServerMessage, Simulation, VenueInfo,
 } from "./types.js";
 
 /** An error with a message that can be shown to the person as it is. */
@@ -139,3 +139,7 @@ export function openSocket(id: number, onMessage: (m: ServerMessage) => void, on
     close: () => ws.close(),
   };
 }
+
+export const getLongterm = () => request<Longterm>("/api/longterm");
+export const startLongtermRefresh = () => request<LongtermJob>("/api/longterm/refresh", json("POST", {}));
+export const getLongtermRefresh = () => request<LongtermJob>("/api/longterm/refresh");

@@ -355,3 +355,45 @@ export type Orderbook =
       bids: { price: number; size: number }[];
     }
   | { available: false; simulated: true; label: string; symbol: string; reason: string };
+
+/** GET /api/longterm. Money is in cent, `curve` is [day "YYYY-MM-DD", value in cent]. */
+export interface LongtermTotals {
+  firstBuyDay: string | null;
+  lastDay: string | null;
+  startCash: number;
+  finalValue: number;
+  /** Ratio: 1.3 means +130 %. */
+  totalReturn: number;
+  dividendsReceived: number;
+  reinvestments: number;
+  skippedReinvestments: number;
+  feesPaid: number;
+  spreadPaid: number;
+  leftoverCash: number;
+  shares: number;
+}
+
+export interface LongtermDepot {
+  key: string;
+  index: string;
+  symbol: string;
+  etf: string;
+  totals: LongtermTotals;
+  curve: [string, number][];
+  dividendEvents: number;
+}
+
+export type Longterm =
+  | { ready: true; startDay: string; startCash: number; depots: LongtermDepot[] }
+  | { ready: false; missing: { symbol: string; reason: string }[] };
+
+export interface LongtermJob {
+  running: boolean;
+  startedAt: number | null;
+  finishedAt: number | null;
+  done: number;
+  total: number;
+  items: { symbol: string; status: "loaded" | "current" | "error" | "skipped"; label: string; bars?: number; dividends?: number; reason?: string }[];
+  stoppedByRateLimit: boolean;
+  error?: string;
+}

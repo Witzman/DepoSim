@@ -13,6 +13,7 @@ import { Collapsible } from "./components/Collapsible.js";
 import { ClockBar } from "./components/ClockBar.js";
 import { Curves } from "./components/Curves.js";
 import { Evaluation } from "./components/Evaluation.js";
+import { Longterm } from "./components/Longterm.js";
 import { DepotPanel } from "./components/DepotPanel.js";
 import { DepotSwitch } from "./components/DepotSwitch.js";
 import { OrderTicket } from "./components/OrderTicket.js";
@@ -64,7 +65,7 @@ export function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ticketCommand, setTicketCommand] = useState<{ side: "buy" | "sell"; n: number }>({ side: "buy", n: 0 });
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [view, setView] = useState<"trade" | "evaluation">("trade");
+  const [view, setView] = useState<"trade" | "evaluation" | "longterm">("trade");
   const [activeDepotId, setActiveDepotId] = useState<number | null>(null);
   const [allocationOpen, setAllocationOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -258,6 +259,7 @@ export function App() {
   function runCommand(id: CommandId) {
     if (id === "backfill") return setBackfillOpen(true);
     if (id === "ghost") return void newGhost();
+    if (id === "longterm") return setView("longterm");
     if (id === "orderbook") {
       setView("trade");
       setOrderbookOpen((o) => !o);
@@ -371,13 +373,17 @@ export function App() {
                   onClick={() => setView("trade")}>Handel</button>
                 <button role="tab" className="btn" aria-selected={view === "evaluation"}
                   onClick={() => setView("evaluation")}>Auswertung</button>
+                <button role="tab" className="btn" aria-selected={view === "longterm"}
+                  onClick={() => setView("longterm")}>Langzeitvergleich</button>
               </div>
-              {snapshot && depot && (
+              {snapshot && depot && view !== "longterm" && (
                 <DepotSwitch depots={snapshot.depots} activeId={depot.id} disabled={locked}
                   onSelect={setActiveDepotId} onAdd={newDepot} onRename={renameActive} onRemove={removeActive}
                   onAllocate={() => setAllocationOpen(true)} onGhost={() => void newGhost()} />
               )}
-              {view === "trade" ? (
+              {view === "longterm" ? (
+                <Longterm theme={theme} />
+              ) : view === "trade" ? (
                 <>
               <section className="card">
                 <div className="toolbar">
@@ -425,6 +431,8 @@ export function App() {
                 )
               )}
             </>
+          ) : view === "longterm" ? (
+            <Longterm theme={theme} />
           ) : (
             <section className="card"><p className="muted">Wähle oder lege links eine Simulation an.</p></section>
           )}
@@ -446,7 +454,7 @@ export function App() {
         open={paletteOpen} instruments={watchlist} simulations={simulations} selectedId={selectedId}
         onClose={() => setPaletteOpen(false)} onPickInstrument={setSymbol} onPickSimulation={setSelectedId}
         onToggleTheme={toggle} onShowHelp={() => setHelpOpen(true)} onAdd={addTitle}
-        commands={selectedId === null ? ["backfill"] : ["backfill", "ghost", "journal", "compare", "orderbook"]} onCommand={runCommand}
+        commands={selectedId === null ? ["backfill", "longterm"] : ["backfill", "ghost", "journal", "compare", "orderbook", "longterm"]} onCommand={runCommand}
       />
     </div>
   );

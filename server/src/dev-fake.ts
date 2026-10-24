@@ -1,6 +1,6 @@
 // The real app with made-up prices. For `npm run dev:fake` and the browser tests, never the image.
 import { WATCHLIST, FX_SYMBOL } from "./config.js";
-import type { Bar, MarketData } from "./data/marketdata.js";
+import type { Bar, DailyData, DailyBarRow, DividendRow, MarketData } from "./data/marketdata.js";
 import type { InstrumentSearch, SearchHit } from "./data/search.js";
 import { buildApp } from "./app.js";
 
@@ -66,9 +66,39 @@ export function fakeMarketData(now: () => number = () => Date.now() / 1000): Mar
   };
 }
 
+/**
+ * Daily prices for the long-term comparison: every weekday from 2019-11-01 to Friday 2026-10-23,
+ * a slow rise with a wave, and a dividend on the third Thursday of March, June, September and December.
+ * Repeatable, no randomness.
+ */
+export function fakeDailyData(): DailyData {
+  return {
+    async daily(symbol, fromT, toT) {
+      let h = 0;
+      for (const ch of symbol) h = (h * 31 + ch.charCodeAt(0)) % 997;
+      const base = 40 + (h % 60);
+      const bars: DailyBarRow[] = [];
+      const dividends: DividendRow[] = [];
+      const last = Date.UTC(2026, 9, 23) / 1000;
+      let n = 0;
+      for (let t = Math.ceil(fromT / DAY) * DAY; t < toT && t <= last; t += DAY) {
+        const d = new Date(t * 1000);
+        if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
+        const o = base + n * 0.03 + 4 * Math.sin(n / 90);
+        const c = o + 0.4 * Math.sin(n);
+        bars.push({ day: d.toISOString().slice(0, 10), o, h: Math.max(o, c) + 0.2, l: Math.min(o, c) - 0.2, c, v: 1000 });
+        const thirdThursday = d.getUTCDay() === 4 && d.getUTCDate() >= 15 && d.getUTCDate() <= 21;
+        if (thirdThursday && [2, 5, 8, 11].includes(d.getUTCMonth())) dividends.push({ exDay: bars[bars.length - 1].day, amount: 0.2 + (h % 5) / 20 });
+        n++;
+      }
+      return { bars, dividends, splits: [] };
+    },
+  };
+}
+
 export async function startFake(port: number) {
   const app = buildApp({
-    dbPath: ":memory:", marketData: fakeMarketData(fakeNow), search: fakeSearch, minGapMs: 0, tickMs: 100,
+    dbPath: ":memory:", marketData: fakeMarketData(fakeNow), dailyData: fakeDailyData(), search: fakeSearch, minGapMs: 0, tickMs: 100,
     now: fakeNow, catchUpTempo: 6000, liveRefreshS: 1,
   });
   await app.listen({ port, host: "127.0.0.1" });

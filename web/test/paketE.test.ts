@@ -76,7 +76,9 @@ describe("palette commands", () => {
     expect(hit("nachladen")).toEqual(["backfill"]);
     expect(hit("geist")).toEqual(["ghost"]);
     expect(hit("journal")).toEqual(["journal"]);
-    expect(hit("vergleich")).toEqual(["compare"]);
+    expect(hit("vergleich")).toEqual(["compare", "longterm"]); // both have "vergleich" in their name
+    expect(hit("langzeit")).toEqual(["longterm"]);
+    expect(hit("simulationsvergleich")).toEqual(["compare"]);
     expect(hit("orderbuch")).toEqual(["orderbook"]);
     expect(buildEntries("nachladen", [], [], [], [])).toEqual([]);
   });
