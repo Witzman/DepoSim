@@ -117,7 +117,10 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     const known = instruments.get(hit.symbol);
     if (known) return reply.code(200).send(shown(known));
 
-    const inst: Instrument = { symbol: hit.symbol, name: hit.name, currency: hit.currency, venue: hit.venue };
+    const inst: Instrument = {
+      symbol: hit.symbol, name: hit.name, currency: hit.currency, venue: hit.venue, kind: hit.kind,
+      ...(hit.sector ? { sector: hit.sector } : {}),
+    };
     try {
       instruments.add(inst);
     } catch (err) {

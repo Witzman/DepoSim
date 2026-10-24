@@ -21,8 +21,8 @@ export function fakePrice(symbol: string, t: number): number {
 
 /** What the fake search can find. None of them is in the starting list. */
 export const FAKE_FINDABLE: SearchHit[] = [
-  { symbol: "BMW.DE", name: "Bayerische Motoren Werke AG", currency: "EUR", venue: "XETRA", kind: "EQUITY" },
-  { symbol: "AMZN", name: "Amazon.com, Inc.", currency: "USD", venue: "US", kind: "EQUITY" },
+  { symbol: "BMW.DE", name: "Bayerische Motoren Werke AG", currency: "EUR", venue: "XETRA", kind: "EQUITY", sector: "Consumer Cyclical" },
+  { symbol: "AMZN", name: "Amazon.com, Inc.", currency: "USD", venue: "US", kind: "EQUITY", sector: "Consumer Cyclical" },
 ];
 
 export const fakeSearch: InstrumentSearch = {

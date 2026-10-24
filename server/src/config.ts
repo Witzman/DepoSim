@@ -33,6 +33,10 @@ export interface Instrument {
   name: string;
   currency: "EUR" | "USD";
   venue: Venue;
+  /** Equity or fund; only a fund is told apart, an equity without a sector is "unbekannt". */
+  kind?: "EQUITY" | "ETF";
+  /** The sector the source names for an equity. Funds have none. */
+  sector?: string;
 }
 
 /** How many instruments the person may add to the starting list. Each one is a request per refresh. */
@@ -44,17 +48,21 @@ export const MAX_DEPOTS = 8;
 /** The exchange rate is a price series like the others, not a tradable instrument. */
 export const FX_SYMBOL = "EURUSD=X";
 
-const us = (symbol: string, name: string): Instrument => ({ symbol, name, currency: "USD", venue: "US" });
-const xetra = (symbol: string, name: string): Instrument => ({ symbol, name, currency: "EUR", venue: "XETRA" });
+const us = (symbol: string, name: string, sector?: string): Instrument => ({
+  symbol, name, currency: "USD", venue: "US", kind: sector ? "EQUITY" : "ETF", ...(sector ? { sector } : {}),
+});
+const xetra = (symbol: string, name: string, sector?: string): Instrument => ({
+  symbol, name, currency: "EUR", venue: "XETRA", kind: sector ? "EQUITY" : "ETF", ...(sector ? { sector } : {}),
+});
 
 export const WATCHLIST: Instrument[] = [
-  us("AAPL", "Apple"),
-  us("MSFT", "Microsoft"),
-  us("NVDA", "NVIDIA"),
-  us("TSLA", "Tesla"),
-  xetra("SAP.DE", "SAP"),
-  xetra("SIE.DE", "Siemens"),
-  xetra("ALV.DE", "Allianz"),
+  us("AAPL", "Apple", "Technology"),
+  us("MSFT", "Microsoft", "Technology"),
+  us("NVDA", "NVIDIA", "Technology"),
+  us("TSLA", "Tesla", "Consumer Cyclical"),
+  xetra("SAP.DE", "SAP", "Technology"),
+  xetra("SIE.DE", "Siemens", "Industrials"),
+  xetra("ALV.DE", "Allianz", "Financial Services"),
   xetra("EUNL.DE", "iShares Core MSCI World (Acc)"),
   xetra("VWCE.DE", "Vanguard FTSE All-World (Acc)"),
   xetra("SXR8.DE", "iShares Core S&P 500 (Acc)"),

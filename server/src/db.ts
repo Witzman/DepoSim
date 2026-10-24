@@ -36,7 +36,9 @@ create table if not exists instruments (
   name text not null,
   currency text not null,
   venue text not null,
-  position integer not null
+  position integer not null,
+  sector text,
+  kind text
 );
 create table if not exists depots (
   id integer primary key,
@@ -85,6 +87,11 @@ export function openDb(path: string): Db {
   const columns = db.prepare("pragma table_info(simulations)").all() as { name: string }[];
   if (!columns.some((c) => c.name === "live")) {
     db.exec("alter table simulations add column live integer not null default 0");
+  }
+  // The same for the instruments table: sector and kind came later.
+  const instrumentColumns = db.prepare("pragma table_info(instruments)").all() as { name: string }[];
+  for (const column of ["sector", "kind"]) {
+    if (!instrumentColumns.some((c) => c.name === column)) db.exec(`alter table instruments add column ${column} text`);
   }
   return db;
 }

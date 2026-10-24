@@ -1,3 +1,7 @@
+import Database from "better-sqlite3";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { FX_SYMBOL, type Instrument, MAX_ADDED } from "../src/config.js";
 import { openDb } from "../src/db.js";
@@ -65,5 +69,37 @@ describe("InstrumentRegistry", () => {
     expect(kindOf(() => reg.remove("NOPE"))).toBe("unknown");
     reg.remove("X1.DE");
     expect(reg.list()).toEqual([SAP]);
+  });
+
+  it("keeps sector and kind of an added instrument across a new registry", () => {
+    const db = openDb(":memory:");
+    new InstrumentRegistry(db, [SAP]).add({ ...extra(1), sector: "Industrials", kind: "EQUITY" });
+    new InstrumentRegistry(db, [SAP]).add({ ...extra(2), kind: "ETF" });
+    const again = new InstrumentRegistry(db, [SAP]).list();
+    expect(again[1]).toMatchObject({ symbol: "X1.DE", sector: "Industrials", kind: "EQUITY" });
+    expect(again[2]).toMatchObject({ symbol: "X2.DE", kind: "ETF" });
+    expect(again[2].sector).toBeUndefined();
+    expect(again[0]).toEqual(SAP);
+  });
+
+  it("opens a database made before sector and kind existed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "deposim-"));
+    try {
+      const path = join(dir, "old.sqlite");
+      const old = new Database(path);
+      old.exec(
+        "create table instruments (symbol text primary key, name text not null, currency text not null, venue text not null, position integer not null);" +
+          "insert into instruments values ('OLD.DE', 'Alt', 'EUR', 'XETRA', 1);",
+      );
+      old.close();
+      const db = openDb(path);
+      const reg = new InstrumentRegistry(db, [SAP]);
+      expect(reg.list()[1]).toMatchObject({ symbol: "OLD.DE", name: "Alt" });
+      reg.add({ ...extra(3), sector: "Energy", kind: "EQUITY" });
+      expect(reg.get("X3.DE")).toMatchObject({ sector: "Energy" });
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

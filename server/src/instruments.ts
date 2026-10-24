@@ -18,6 +18,8 @@ interface Row {
   name: string;
   currency: Instrument["currency"];
   venue: Instrument["venue"];
+  sector: string | null;
+  kind: Instrument["kind"] | null;
 }
 
 /**
@@ -32,9 +34,14 @@ export class InstrumentRegistry {
 
   list(): Instrument[] {
     const added = this.db
-      .prepare("select symbol, name, currency, venue from instruments order by position")
+      .prepare("select symbol, name, currency, venue, sector, kind from instruments order by position")
       .all() as Row[];
-    return [...this.seed, ...added];
+    return [
+      ...this.seed,
+      ...added.map(({ sector, kind, ...rest }): Instrument => ({
+        ...rest, ...(kind ? { kind } : {}), ...(sector ? { sector } : {}),
+      })),
+    ];
   }
 
   get(symbol: string): Instrument | undefined {
@@ -55,8 +62,8 @@ export class InstrumentRegistry {
     }
     const next = (this.db.prepare("select coalesce(max(position), 0) + 1 as p from instruments").get() as { p: number }).p;
     this.db
-      .prepare("insert into instruments (symbol, name, currency, venue, position) values (?, ?, ?, ?, ?)")
-      .run(inst.symbol, inst.name, inst.currency, inst.venue, next);
+      .prepare("insert into instruments (symbol, name, currency, venue, position, sector, kind) values (?, ?, ?, ?, ?, ?, ?)")
+      .run(inst.symbol, inst.name, inst.currency, inst.venue, next, inst.sector ?? null, inst.kind ?? null);
   }
 
   remove(symbol: string): void {

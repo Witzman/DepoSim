@@ -121,4 +121,18 @@ describe("createYahooSearch", () => {
     await search.search("q0"); // dropped
     expect(f.urls).toHaveLength(102);
   });
+
+  it("carries the sector of an equity and leaves it out for a fund", async () => {
+    const body = JSON.stringify({
+      quotes: [
+        { exchange: "GER", quoteType: "EQUITY", symbol: "SAP.DE", longname: "SAP SE", sector: "Technology" },
+        { exchange: "GER", quoteType: "ETF", symbol: "EUNL.DE", longname: "iShares MSCI World" },
+        { exchange: "GER", quoteType: "EQUITY", symbol: "ODD.DE", longname: "Odd", sector: 5 },
+      ],
+    });
+    const hits = await createYahooSearch((async () => new Response(body)) as unknown as typeof fetch).search("x1");
+    expect(hits[0]).toMatchObject({ symbol: "SAP.DE", sector: "Technology", kind: "EQUITY" });
+    expect(hits[1].sector).toBeUndefined();
+    expect(hits[2].sector).toBeUndefined();
+  });
 });

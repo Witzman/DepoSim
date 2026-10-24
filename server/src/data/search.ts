@@ -3,6 +3,7 @@ import { MarketDataError } from "./marketdata.js";
 
 export interface SearchHit extends Instrument {
   kind: "EQUITY" | "ETF";
+  sector?: string;
 }
 
 export interface InstrumentSearch {
@@ -55,7 +56,10 @@ export function createYahooSearch(fetchFn: typeof fetch = fetch, now: () => numb
         const place = PLACES[x?.exchange];
         if (!place || (x.quoteType !== "EQUITY" && x.quoteType !== "ETF") || typeof x.symbol !== "string") continue;
         const name = String(x.longname ?? x.shortname ?? x.symbol).trim();
-        hits.push({ symbol: x.symbol, name, currency: place.currency, venue: place.venue, kind: x.quoteType });
+        hits.push({
+          symbol: x.symbol, name, currency: place.currency, venue: place.venue, kind: x.quoteType,
+          ...(x.quoteType === "EQUITY" && typeof x.sector === "string" && x.sector ? { sector: x.sector } : {}),
+        });
       }
 
       cache.delete(key); // so a refreshed entry counts as the newest
