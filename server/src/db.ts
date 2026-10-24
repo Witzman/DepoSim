@@ -45,7 +45,15 @@ create table if not exists depots (
   id integer primary key,
   simulation_id integer not null references simulations (id) on delete cascade,
   name text not null,
-  cash integer not null
+  cash integer not null,
+  kind text not null default 'normal'
+);
+create table if not exists journal_notes (
+  simulation_id integer references simulations (id) on delete cascade,
+  trade_key text,
+  text text,
+  updated_at integer,
+  primary key (simulation_id, trade_key)
 );
 create table if not exists depot_values (
   depot_id integer not null references depots (id) on delete cascade,
@@ -95,5 +103,8 @@ export function openDb(path: string): Db {
   for (const column of ["sector", "kind"]) {
     if (!instrumentColumns.some((c) => c.name === column)) db.exec(`alter table instruments add column ${column} text`);
   }
+  // Depot kinds (normal, ghost) came with Paket E.
+  const depotColumns = db.prepare("pragma table_info(depots)").all() as { name: string }[];
+  if (!depotColumns.some((c) => c.name === "kind")) db.exec("alter table depots add column kind text not null default 'normal'");
   return db;
 }

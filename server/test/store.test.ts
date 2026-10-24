@@ -266,4 +266,61 @@ describe("store, live simulations", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("opens a database made before depot kinds and journal notes, migrates it and keeps the data", () => {
+    const dir = mkdtempSync(join(tmpdir(), "deposim-old-"));
+    try {
+      const path = join(dir, "old.sqlite");
+      const old = new Database(path);
+      // The schema as it was before Paket E: depots without `kind`, no journal_notes.
+      old.exec(`
+        create table simulations (id integer primary key, name text not null, start_at integer not null, simulation_time integer not null,
+          tempo integer not null, start_cash integer not null, fees_json text not null, created_at integer not null, ended_at integer,
+          live integer not null default 0, benchmark text);
+        create table depots (id integer primary key, simulation_id integer not null references simulations (id) on delete cascade,
+          name text not null, cash integer not null);
+        create table positions (depot_id integer not null references depots (id) on delete cascade, symbol text not null,
+          qty integer not null, cost integer not null, primary key (depot_id, symbol));
+        insert into simulations (name, start_at, simulation_time, tempo, start_cash, fees_json, created_at)
+          values ('Alt', 1, 1, 1, 100, '${JSON.stringify(DEFAULT_FEES)}', 1);
+        insert into depots (simulation_id, name, cash) values (1, 'Depot 1', 4200);
+        insert into positions values (1, 'SAP.DE', 3, 900);`);
+      old.close();
+
+      const db = openDb(path);
+      const store = createStore(db);
+      expect(store.listDepots(1)).toEqual([{ id: 1, simulationId: 1, name: "Depot 1", cash: 4200, kind: "normal" }]);
+      expect(store.loadDepot(1).positions.get("SAP.DE")).toEqual({ qty: 3, cost: 900 });
+      store.setNote(1, "7:3", "zu früh", 99);
+      expect(store.notes(1)).toEqual({ "7:3": "zu früh" });
+      db.close();
+      openDb(path).close(); // a second open does not trip over what is there now
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps one note per trade, replaces it, deletes it on empty text and drops it with the simulation", () => {
+    const store = createStore(openDb(":memory:"));
+    const a = store.createSimulation(input);
+    const b = store.createSimulation(input);
+    store.setNote(a.id, "2:1", "erste", 10);
+    store.setNote(a.id, "2:1", "zweite", 11);
+    store.setNote(b.id, "2:1", "andere", 11);
+    expect(store.notes(a.id)).toEqual({ "2:1": "zweite" });
+    store.setNote(a.id, "2:1", "", 12);
+    expect(store.notes(a.id)).toEqual({});
+    store.deleteSimulation(b.id);
+    expect(store.notes(b.id)).toEqual({});
+  });
+
+  it("creates a ghost depot with frozen cash and positions and a curve that starts at the freeze", () => {
+    const store = createStore(openDb(":memory:"));
+    const sim = store.createSimulation(input);
+    const ghost = store.createGhostDepot(sim.id, "Geist von Depot 1", 500, new Map([["A", { qty: 2, cost: 300 }]]), 6000, 12345);
+    expect(ghost).toMatchObject({ simulationId: sim.id, name: "Geist von Depot 1", cash: 500, kind: "ghost" });
+    expect(store.loadDepot(ghost.id).positions.get("A")).toEqual({ qty: 2, cost: 300 });
+    expect(store.valueCurve(ghost.id)).toEqual([{ t: 6000, value: 12345 }]);
+    expect(store.listDepots(sim.id).map((d) => d.kind)).toEqual(["normal", "ghost"]);
+  });
 });

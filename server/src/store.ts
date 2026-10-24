@@ -20,11 +20,15 @@ export interface Simulation {
   benchmark: string | null;
 }
 
+/** A ghost is a frozen copy of a depot that never trades; it is only valued at market. */
+export type DepotKind = "normal" | "ghost";
+
 export interface Depot {
   id: number;
   simulationId: number;
   name: string;
   cash: Cent;
+  kind: DepotKind;
 }
 
 export interface NewSimulation {
@@ -62,6 +66,17 @@ export interface Store {
   listDepots(simulationId: number): Depot[];
   /** A depot with the simulation's start cash; its curve starts at the simulation time. */
   createDepot(simulationId: number, name: string): Depot;
+  /**
+   * A ghost depot with the given cash and positions; its curve starts at `t` with `value`.
+   * The orders of the source are not copied.
+   */
+  createGhostDepot(
+    simulationId: number, name: string, cash: Cent, positions: DepotState["positions"], t: number, value: Cent,
+  ): Depot;
+  /** The journal notes of a simulation, by trade key. */
+  notes(simulationId: number): Record<string, string>;
+  /** Stores a note for a trade; empty text deletes it. */
+  setNote(simulationId: number, tradeKey: string, text: string, at: number): void;
   /** Takes the positions, orders and curve of the depot with it. */
   deleteDepot(depotId: number): void;
   renameDepot(depotId: number, name: string): void;
@@ -236,15 +251,40 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
         .get(symbol, symbol) !== undefined,
     transaction: (fn) => db.transaction(fn)(),
     createDepot: (simulationId, name) =>
-      db.transaction(() => {
+      db.transaction((): Depot => {
         const sim = getSimulation(simulationId)!;
         const id = Number(
           db.prepare("insert into depots (simulation_id, name, cash) values (?, ?, ?)").run(simulationId, name, sim.startCash)
             .lastInsertRowid,
         );
         recordPoint.run(id, sim.simulationTime, sim.startCash);
-        return { id, simulationId, name, cash: sim.startCash };
+        return { id, simulationId, name, cash: sim.startCash, kind: "normal" };
       })(),
+    createGhostDepot: (simulationId, name, cash, positions, t, value) =>
+      db.transaction((): Depot => {
+        const id = Number(
+          db.prepare("insert into depots (simulation_id, name, cash, kind) values (?, ?, ?, 'ghost')").run(simulationId, name, cash)
+            .lastInsertRowid,
+        );
+        const insert = db.prepare("insert into positions (depot_id, symbol, qty, cost) values (?, ?, ?, ?)");
+        for (const [symbol, pos] of positions) insert.run(id, symbol, pos.qty, pos.cost);
+        recordPoint.run(id, t, value);
+        return { id, simulationId, name, cash, kind: "ghost" };
+      })(),
+    notes: (simulationId) =>
+      Object.fromEntries(
+        (db.prepare("select trade_key, text from journal_notes where simulation_id = ?").all(simulationId) as {
+          trade_key: string; text: string;
+        }[]).map((r) => [r.trade_key, r.text]),
+      ),
+    setNote: (simulationId, tradeKey, text, at) => {
+      if (text === "") {
+        db.prepare("delete from journal_notes where simulation_id = ? and trade_key = ?").run(simulationId, tradeKey);
+        return;
+      }
+      db.prepare("insert or replace into journal_notes (simulation_id, trade_key, text, updated_at) values (?, ?, ?, ?)")
+        .run(simulationId, tradeKey, text, at);
+    },
     deleteDepot: (depotId) => {
       db.prepare("delete from depots where id = ?").run(depotId);
     },
@@ -267,12 +307,13 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
       return out.reverse();
     },
     listDepots: (simulationId) =>
-      (db.prepare("select id, simulation_id, name, cash from depots where simulation_id = ? order by id")
-        .all(simulationId) as { id: number; simulation_id: number; name: string; cash: number }[]).map((r) => ({
+      (db.prepare("select id, simulation_id, name, cash, kind from depots where simulation_id = ? order by id")
+        .all(simulationId) as { id: number; simulation_id: number; name: string; cash: number; kind: DepotKind }[]).map((r) => ({
         id: r.id,
         simulationId: r.simulation_id,
         name: r.name,
         cash: r.cash,
+        kind: r.kind,
       })),
   };
 }
