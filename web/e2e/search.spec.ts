@@ -83,6 +83,7 @@ test("an added title that nobody holds can be removed, and a title in the list i
   await page.keyboard.press("Control+k");
   await expect(page.getByTestId("palette")).toBeVisible();
   await page.getByTestId("palette-input").pressSequentially("siemens");
+  await expect(page.getByTestId("palette").getByRole("option")).toHaveCount(1); // the list has caught up with the typing
   await page.keyboard.press("Enter");
   await expect(page.getByLabel("Wertpapier", { exact: true })).toHaveValue("SIE.DE");
 });
