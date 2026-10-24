@@ -9,6 +9,7 @@ import {
 import { type AllocationLine, planAllocation } from "./domain/allocation.js";
 import { type Breakdown, type FeeLedger, breakdown, feeLedger } from "./domain/breakdown.js";
 import { type Correlation, type Metrics, type Point, computeMetrics, correlationMatrix, thin } from "./domain/metrics.js";
+import { type Journal, type JournalOrder, buildJournal } from "./domain/journal.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
 import type { Cent } from "./domain/money.js";
 import type { Depot, DepotKind, OrderRecord, Simulation, Store } from "./store.js";
@@ -394,6 +395,29 @@ export class SessionService {
       ok: true,
       depot: this.store.createGhostDepot(id, `Geist von ${source.name}`, state.cash, state.positions, sim.simulationTime, value),
     };
+  }
+
+  /** Trades, hit rate, holding time and "too early" of one depot, computed now from its filled orders. */
+  journal(id: number, depotId: number): Journal & { depotId: number; simulationTime: number } {
+    const sim = this.sim(id);
+    const filled: JournalOrder[] = [];
+    for (const o of this.store.loadDepot(depotId).orders) {
+      if (o.status !== "filled" || o.filledSim === undefined || o.fillPrice === undefined) continue;
+      filled.push({
+        id: o.id, symbol: o.symbol, side: o.side, qty: o.qty, fillPrice: o.fillPrice, filledSim: o.filledSim,
+        gross: o.gross ?? 0, commission: o.commission ?? 0, foreignFee: o.foreignFee ?? 0,
+      });
+    }
+    const journal = buildJournal({ orders: filled, s: sim.simulationTime, bars: this.archive, notes: this.store.notes(id) });
+    return { ...journal, depotId, simulationTime: sim.simulationTime };
+  }
+
+  /** True if the key names a trade of any normal depot of the simulation. */
+  hasTrade(id: number, tradeKey: string): boolean {
+    return this.store
+      .listDepots(id)
+      .filter((d) => d.kind === "normal")
+      .some((d) => this.journal(id, d.id).trades.some((t) => t.key === tradeKey));
   }
 
   /** "Depot N" with N one above the highest number in use, so a deleted depot's name is not given out again. */

@@ -44,6 +44,10 @@ const allocateBody = z.object({
   dryRun: z.boolean().optional(),
 });
 
+const journalQuery = z.object({ depotId: z.coerce.number().int().optional() });
+const noteBody = z.object({ text: z.string().max(500, "Die Notiz darf höchstens 500 Zeichen haben.") });
+const TRADE_KEY = /^\d{1,12}:\d{1,12}$/;
+
 const barsQuery = z.object({
   symbol: z.string().min(1),
   limit: z.coerce.number().int().min(1).max(2000).default(500),
@@ -290,6 +294,32 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     const sim = simulationOf(req.params);
     if (!sim) return notFound(reply);
     return session.evaluation(sim.id);
+  });
+
+  app.get("/api/simulations/:id/journal", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    const query = journalQuery.safeParse(req.query);
+    if (!query.success) return invalid(reply, query.error);
+    const depots = store.listDepots(sim.id);
+    const depot = query.data.depotId === undefined ? depots.find((d) => d.id === session.defaultDepotId(sim.id)) : depots.find((d) => d.id === query.data.depotId);
+    if (!depot) return unknownDepot(reply);
+    if (depot.kind === "ghost") return reply.code(400).send({ error: "Ein Geisterdepot hat kein Journal." });
+    return session.journal(sim.id, depot.id);
+  });
+
+  app.put("/api/simulations/:id/journal/:tradeKey", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    const body = noteBody.safeParse(req.body);
+    if (!body.success) return invalid(reply, body.error);
+    const tradeKey = (req.params as { tradeKey: string }).tradeKey;
+    if (!TRADE_KEY.test(tradeKey) || !session.hasTrade(sim.id, tradeKey)) {
+      return reply.code(404).send({ error: "Unbekannter Trade." });
+    }
+    const text = body.data.text.trim();
+    store.setNote(sim.id, tradeKey, text, Math.floor(Date.now() / 1000));
+    return { tradeKey, text };
   });
 
   app.patch("/api/simulations/:id", async (req, reply) => {

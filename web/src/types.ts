@@ -246,3 +246,62 @@ export type ServerMessage =
   | { type: "error"; text: string };
 
 export type ClientMessage = { type: "run" } | { type: "pause" } | { type: "tempo"; tempo: Tempo };
+
+/** GET /api/simulations/:id/journal?depotId= (default: the first normal depot; 400 for a ghost, 404 unknown). */
+export interface JournalTrade {
+  /** "<sellOrderId>:<buyOrderId>", the key for PUT /api/simulations/:id/journal/:key. */
+  key: string;
+  symbol: string;
+  qty: number;
+  buyOrderId: number;
+  sellOrderId: number;
+  openedSim: number;
+  closedSim: number;
+  holdSeconds: number;
+  buyPrice: number;
+  sellPrice: number;
+  buyCost: number;
+  sellProceeds: number;
+  fees: number;
+  netPnl: number;
+  netPct: number | null;
+  note: string | null;
+}
+
+export interface JournalHorizon {
+  days: 1 | 5;
+  status: "done" | "open";
+  laterClose?: number;
+  movePct?: number;
+  tooEarly?: boolean;
+}
+
+export interface JournalSale {
+  orderId: number;
+  symbol: string;
+  qty: number;
+  soldSim: number;
+  price: number;
+  horizons: JournalHorizon[];
+}
+
+export interface Journal {
+  depotId: number;
+  simulationTime: number;
+  trades: JournalTrade[];
+  hitRate: { n: number; wins: number; rate: number | null; basis: string };
+  holding: { n: number; medianSeconds: number | null; meanSeconds: number | null; basis: string };
+  open: { symbol: string; qty: number; cost: number; openedSim: number }[];
+  sales: JournalSale[];
+  tooEarly: { days: 1 | 5; n: number; open: number; count: number; rate: number | null; avgMovePct: number | null; basis: string }[];
+  /** Under 5 trades: show "wenig Daten". */
+  fewData: boolean;
+  /** "Beobachtung, keine Prognose." */
+  note: string;
+}
+
+/** PUT /api/simulations/:id/journal/:key, body { text } (max 500 characters, empty deletes); answers { tradeKey, text }. */
+export interface JournalNoteResult {
+  tradeKey: string;
+  text: string;
+}

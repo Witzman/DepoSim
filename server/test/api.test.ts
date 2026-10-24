@@ -813,3 +813,63 @@ describe("ghost depots over HTTP", () => {
     expect((await post(app, `/api/simulations/9999/depots/1/ghost`, {})).statusCode).toBe(404);
   });
 });
+
+describe("journal over HTTP", () => {
+  const trade = async (app: FastifyInstance, id: number, depotId?: number) => {
+    const o = { symbol: "SAP.DE", kind: "market", qty: 2, ...(depotId ? { depotId } : {}) };
+    await post(app, `/api/simulations/${id}/orders`, { ...o, side: "buy" });
+    await post(app, `/api/simulations/${id}/orders`, { ...o, side: "sell" });
+  };
+
+  it("lists the trades of the first normal depot with the figures and their basis", async () => {
+    const app = make();
+    const id = await createSim(app);
+    await trade(app, id);
+    const res = await app.inject({ url: `/api/simulations/${id}/journal` });
+    expect(res.statusCode).toBe(200);
+    const j = res.json();
+    expect(j).toMatchObject({ simulationTime: START, fewData: true, open: [], hitRate: { n: 1, wins: 0, rate: 0 }, holding: { n: 1, medianSeconds: 0, meanSeconds: 0 } });
+    expect(j.depotId).toBe((await app.inject({ url: `/api/simulations/${id}/curves` })).json().depots[0].id);
+    expect(j.trades).toHaveLength(1);
+    expect(j.trades[0]).toMatchObject({ symbol: "SAP.DE", qty: 2, note: null, key: expect.stringMatching(/^\d+:\d+$/) });
+    expect(j.trades[0].netPnl).toBeLessThan(0); // spread and fees
+    expect(j.tooEarly).toHaveLength(2);
+    expect(j.tooEarly[0]).toMatchObject({ days: 1, n: 0, rate: null, avgMovePct: null });
+    expect(j.sales[0].horizons.map((h: any) => h.status)).toEqual(["open", "open"]);
+  });
+
+  it("stores, replaces and deletes a note, and joins it into the journal", async () => {
+    const app = make();
+    const id = await createSim(app);
+    await trade(app, id);
+    const key = (await app.inject({ url: `/api/simulations/${id}/journal` })).json().trades[0].key;
+    const put = (text: unknown) => app.inject({ method: "PUT", url: `/api/simulations/${id}/journal/${key}`, payload: { text } as object });
+    expect((await put("Zu früh raus")).json()).toEqual({ tradeKey: key, text: "Zu früh raus" });
+    expect((await app.inject({ url: `/api/simulations/${id}/journal` })).json().trades[0].note).toBe("Zu früh raus");
+    await put("Neu");
+    expect((await app.inject({ url: `/api/simulations/${id}/journal` })).json().trades[0].note).toBe("Neu");
+    expect((await put("")).statusCode).toBe(200);
+    expect((await app.inject({ url: `/api/simulations/${id}/journal` })).json().trades[0].note).toBeNull();
+    expect((await put("x".repeat(501))).statusCode).toBe(400);
+    expect((await put("x".repeat(500))).statusCode).toBe(200);
+    expect((await app.inject({ method: "PUT", url: `/api/simulations/${id}/journal/99:98`, payload: { text: "a" } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "PUT", url: `/api/simulations/${id}/journal/abc`, payload: { text: "a" } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "PUT", url: `/api/simulations/9999/journal/${key}`, payload: { text: "a" } })).statusCode).toBe(404);
+  });
+
+  it("serves a chosen depot, refuses a ghost and answers 404 for unknown ones", async () => {
+    const app = make();
+    const id = await createSim(app);
+    const second = (await post(app, `/api/simulations/${id}/depots`, {})).json().id;
+    await trade(app, id, second);
+    expect((await app.inject({ url: `/api/simulations/${id}/journal?depotId=${second}` })).json().trades).toHaveLength(1);
+    expect((await app.inject({ url: `/api/simulations/${id}/journal` })).json().trades).toHaveLength(0);
+    await post(app, `/api/simulations/${id}/orders`, { symbol: "SAP.DE", side: "buy", kind: "market", qty: 1, depotId: second });
+    const ghost = (await post(app, `/api/simulations/${id}/depots/${second}/ghost`, {})).json().id;
+    const refused = await app.inject({ url: `/api/simulations/${id}/journal?depotId=${ghost}` });
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json().error).toMatch(/Geisterdepot/);
+    expect((await app.inject({ url: `/api/simulations/${id}/journal?depotId=9999` })).statusCode).toBe(404);
+    expect((await app.inject({ url: `/api/simulations/9999/journal` })).statusCode).toBe(404);
+  });
+});
