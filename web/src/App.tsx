@@ -335,10 +335,13 @@ export function App() {
             />
           </Collapsible>
           {live && (
+            <>
             <Collapsible narrow={narrow} title="Watchlist">
               <Watchlist instruments={watchlist} prices={snapshot?.prices ?? {}} venues={snapshot?.venues}
-                selected={symbol} onSelect={setSymbol} onRemove={removeTitle} onBackfill={() => setBackfillOpen(true)} />
+                selected={symbol} onSelect={setSymbol} onRemove={removeTitle} onBackfill={() => setBackfillOpen(true)} showBackfill={!narrow} />
             </Collapsible>
+            {narrow && <button className="btn" data-testid="backfill-open" onClick={() => setBackfillOpen(true)}>Fehlende Kurse nachladen</button>}
+            </>
           )}
         </div>
 

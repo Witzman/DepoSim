@@ -9,6 +9,8 @@ interface Props {
   onSelect: (symbol: string) => void;
   onRemove: (symbol: string) => void;
   onBackfill: () => void;
+  /** False on the phone, where the button sits outside the folded list. */
+  showBackfill?: boolean;
 }
 
 const VENUES: { venue: Venue; label: string }[] = [
@@ -16,7 +18,7 @@ const VENUES: { venue: Venue; label: string }[] = [
   { venue: "US", label: "US-Börsen" },
 ];
 
-export function Watchlist({ instruments, prices, venues, selected, onSelect, onRemove, onBackfill }: Props) {
+export function Watchlist({ instruments, prices, venues, selected, onSelect, onRemove, onBackfill, showBackfill = true }: Props) {
   return (
     <section className="card" aria-label="Watchlist" data-testid="watchlist">
       {VENUES.map(({ venue, label }) => {
@@ -48,7 +50,7 @@ export function Watchlist({ instruments, prices, venues, selected, onSelect, onR
           </div>
         );
       })}
-      <button className="btn small" data-testid="backfill-open" onClick={onBackfill}>Fehlende Kurse nachladen</button>
+      {showBackfill && <button className="btn small" data-testid="backfill-open" onClick={onBackfill}>Fehlende Kurse nachladen</button>}
     </section>
   );
 }

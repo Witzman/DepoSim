@@ -222,4 +222,29 @@ test.describe("phone, 390 x 844", () => {
       .filter((e) => e.getBoundingClientRect().right > window.innerWidth + 1 || e.getBoundingClientRect().left < -1).length);
     expect(wide).toBe(0);
   });
+
+  test("Auswertung tables stack instead of scrolling sideways", async ({ page }) => {
+    await createSimulation(page);
+    await page.getByLabel("Menge").fill("1");
+    await expect(page.getByTestId("cost-total")).toBeVisible();
+    await page.getByRole("form", { name: "Orderticket" }).getByRole("button", { name: "Kaufen" }).click();
+    await expect(page.getByTestId("position-SAP.DE")).toBeVisible();
+    await page.keyboard.press("Control+k");
+    await page.getByTestId("palette-input").fill("geist");
+    await page.getByRole("option", { name: /Geist/ }).first().click();
+    await page.getByRole("tab", { name: "Auswertung" }).click();
+    await expect(page.getByTestId("metrics")).toBeVisible();
+    await expect(page.getByTestId("fees")).toBeVisible();
+    const clipped = await page.evaluate(() => [...document.querySelectorAll("main .scroll")]
+      .filter((e) => e.scrollWidth > e.clientWidth).map((e) => e.querySelector("table")?.getAttribute("data-testid")));
+    expect(clipped).toEqual([]);
+    await expect(page.getByTestId("metrics").locator("td[data-label='Rendite']").first()).toBeVisible();
+  });
+
+  test("backfill button is reachable with the Watchlist folded", async ({ page }) => {
+    await createSimulation(page);
+    await expect(page.locator("details.fold", { hasText: "Watchlist" })).not.toHaveAttribute("open", "");
+    await page.getByTestId("backfill-open").click();
+    await expect(page.getByRole("dialog", { name: "Fehlende Kurse nachladen" })).toBeVisible();
+  });
 });
