@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { createYahoo } from "../src/data/yahoo.js";
+import { createYahoo, createYahooDaily } from "../src/data/yahoo.js";
 import { MarketDataError } from "../src/data/marketdata.js";
 
 const fixture = (name: string) =>
@@ -77,5 +77,46 @@ describe("yahoo adapter", () => {
     const err = await createYahoo(fetchFn as typeof fetch).bars("X", 0, 1).catch((e) => e);
     expect(err).toBeInstanceOf(MarketDataError);
     expect(err.kind).toBe("network");
+  });
+});
+
+describe("yahoo daily adapter", () => {
+  const chart = {
+    chart: {
+      result: [{
+        timestamp: [1572595200, 1572854400, 1572940800], // 2019-11-01, 11-04, 11-05 08:00 UTC
+        events: {
+          dividends: { "1572940800": { amount: 0.25, date: 1572940800 } },
+          splits: { "1572854400": { date: 1572854400, numerator: 2, denominator: 1 } },
+        },
+        indicators: { quote: [{
+          open: [10, null, 11], high: [12, null, 13], low: [9, null, 10], close: [11, null, 12], volume: [100, null, 300],
+        }] },
+      }],
+      error: null,
+    },
+  };
+
+  it("reads days, ex-dates and splits; a day without prices is left out", async () => {
+    let url = "";
+    const fetchFn = async (input: URL | RequestInfo) => {
+      url = String(input);
+      return new Response(JSON.stringify(chart));
+    };
+    const s = await createYahooDaily(fetchFn as typeof fetch).daily("VUSA.DE", 1, 2);
+    expect(url).toContain("interval=1d");
+    expect(url).toContain("events=div,split");
+    expect(s.bars).toEqual([
+      { day: "2019-11-01", o: 10, h: 12, l: 9, c: 11, v: 100 },
+      { day: "2019-11-05", o: 11, h: 13, l: 10, c: 12, v: 300 },
+    ]);
+    expect(s.dividends).toEqual([{ exDay: "2019-11-05", amount: 0.25 }]);
+    expect(s.splits).toEqual([{ day: "2019-11-04", numerator: 2, denominator: 1 }]);
+  });
+
+  it("maps 429 and an unknown symbol like the minute adapter", async () => {
+    await expect(createYahooDaily(respond("", 429)).daily("X", 1, 2)).rejects.toMatchObject({ kind: "rate_limited" });
+    const none = JSON.stringify({ chart: { result: null, error: { code: "Not Found" } } });
+    await expect(createYahooDaily(respond(none, 404)).daily("X", 1, 2)).rejects.toMatchObject({ kind: "no_data" });
   });
 });

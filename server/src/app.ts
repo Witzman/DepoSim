@@ -7,11 +7,12 @@ import { registerApi } from "./api.js";
 import { createBackfill } from "./backfill.js";
 import { FX_SYMBOL, type Instrument, WATCHLIST } from "./config.js";
 import { createArchive } from "./data/archive.js";
-import type { MarketData } from "./data/marketdata.js";
+import type { DailyData, MarketData } from "./data/marketdata.js";
 import { type InstrumentSearch, createYahooSearch } from "./data/search.js";
-import { createYahoo } from "./data/yahoo.js";
+import { createYahoo, createYahooDaily } from "./data/yahoo.js";
 import { openDb } from "./db.js";
 import { InstrumentRegistry } from "./instruments.js";
+import { createLongterm } from "./longterm.js";
 import { SessionService } from "./session.js";
 import { createStore } from "./store.js";
 import { createHub } from "./ws.js";
@@ -20,6 +21,8 @@ export interface AppOptions {
   dbPath: string;
   /** The price source. Defaults to Yahoo. */
   marketData?: MarketData;
+  /** The daily-price source of the long-term comparison. Defaults to Yahoo. */
+  dailyData?: DailyData;
   instruments?: Instrument[];
   /** The instrument search. Defaults to Yahoo. */
   search?: InstrumentSearch;
@@ -57,6 +60,9 @@ export function buildApp(opts: AppOptions): FastifyInstance {
     delayS: opts.liveDelayS, catchUpTempo: opts.catchUpTempo,
   });
   const backfill = createBackfill({ archive, store, session, instruments, now: opts.now ?? (() => Date.now() / 1000) });
+  const longterm = createLongterm({
+    db, source: opts.dailyData ?? createYahooDaily(), now: opts.now ?? (() => Date.now() / 1000), minGapMs: opts.minGapMs,
+  });
   const hub = createHub(session, store, opts.tickMs ?? 250, opts.liveRefreshS ?? 60);
 
   const app = Fastify({ logger: process.env.NODE_ENV !== "test" });
@@ -74,7 +80,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   });
 
   app.get("/healthz", async (_req, reply) => reply.type("text/plain").send("ok"));
-  registerApi(app, { store, session, archive, instruments, search: opts.search ?? createYahooSearch(), hub, backfill });
+  registerApi(app, { store, session, archive, instruments, search: opts.search ?? createYahooSearch(), hub, backfill, longterm });
 
   if (existsSync(WEB_DIST)) {
     app.register(fastifyStatic, { root: WEB_DIST });

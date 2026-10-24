@@ -19,6 +19,28 @@ create table if not exists fetched_days (
   complete integer not null,
   primary key (symbol, day_start)
 );
+create table if not exists daily_bars (
+  symbol text not null,
+  day text not null,
+  o real not null,
+  h real not null,
+  l real not null,
+  c real not null,
+  v integer not null,
+  primary key (symbol, day)
+);
+create table if not exists dividends (
+  symbol text not null,
+  ex_day text not null,
+  amount real not null,
+  primary key (symbol, ex_day)
+);
+create table if not exists daily_fetched (
+  symbol text primary key,
+  fetched_at integer not null,
+  last_day text,
+  splits integer not null default 0
+);
 create table if not exists simulations (
   id integer primary key,
   name text not null,

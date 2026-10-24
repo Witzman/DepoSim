@@ -7,6 +7,7 @@ import { MarketDataError } from "./data/marketdata.js";
 import type { InstrumentSearch } from "./data/search.js";
 import { DEFAULT_FEES } from "./domain/fees.js";
 import { describeError } from "./errors.js";
+import type { Longterm } from "./longterm.js";
 import { type InstrumentRegistry, RegistryError } from "./instruments.js";
 import type { SessionService } from "./session.js";
 import type { Store } from "./store.js";
@@ -69,6 +70,7 @@ interface Deps {
   search: InstrumentSearch;
   hub: Hub;
   backfill: Backfill;
+  longterm: Longterm;
 }
 
 const invalid = (reply: FastifyReply, err: z.ZodError) => {
@@ -77,7 +79,7 @@ const invalid = (reply: FastifyReply, err: z.ZodError) => {
   return reply.code(400).send({ error: `Ungültige Eingabe (${where}): ${issue.message}` });
 };
 
-export function registerApi(app: FastifyInstance, { store, session, archive, instruments, search, hub, backfill }: Deps) {
+export function registerApi(app: FastifyInstance, { store, session, archive, instruments, search, hub, backfill, longterm }: Deps) {
   const simulationOf = (params: unknown) => {
     const id = Number((params as { id?: string }).id);
     return Number.isInteger(id) ? store.getSimulation(id) : undefined;
@@ -105,6 +107,15 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
   });
 
   app.get("/api/archive/backfill", async () => backfill.status());
+
+  // Langzeitvergleich (#19): computed from stored daily data on every request, nothing kept in memory.
+  app.get("/api/longterm", async () => longterm.compute());
+  app.post("/api/longterm/refresh", async (_req, reply) => {
+    const result = longterm.start();
+    if (!result.ok) return reply.code(409).send({ error: result.reason });
+    return reply.code(202).send(result.job);
+  });
+  app.get("/api/longterm/refresh", async () => longterm.status());
 
   app.get("/api/watchlist", async () => instruments.list().map(shown));
 
