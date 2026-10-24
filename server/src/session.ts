@@ -9,6 +9,7 @@ import {
 import { type AllocationLine, planAllocation } from "./domain/allocation.js";
 import { type Breakdown, type FeeLedger, breakdown, feeLedger } from "./domain/breakdown.js";
 import { type Correlation, type Metrics, type Point, computeMetrics, correlationMatrix, thin } from "./domain/metrics.js";
+import { type Orderbook, buildOrderbook } from "./domain/orderbook.js";
 import { type Journal, type JournalOrder, buildJournal } from "./domain/journal.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
 import type { Cent } from "./domain/money.js";
@@ -423,6 +424,16 @@ export class SessionService {
       ok: true,
       depot: this.store.createGhostDepot(id, `Geist von ${source.name}`, state.cash, state.positions, sim.simulationTime, value),
     };
+  }
+
+  /** A drawn book for display; reads one bar and writes nothing. Undefined for an unknown symbol. */
+  orderbook(id: number, symbol: string): Orderbook | undefined {
+    const inst = this.registry.get(symbol);
+    if (!inst) return undefined;
+    const s = this.sim(id).simulationTime;
+    return buildOrderbook({
+      symbol: inst.symbol, currency: inst.currency, bar: this.archive.lastCompleteBar(inst.symbol, s), venueOpen: this.venueOpen(inst.venue, s),
+    });
   }
 
   /** Normalised curves and key figures of one simulation, computed now. */

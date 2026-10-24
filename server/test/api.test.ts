@@ -935,3 +935,44 @@ describe("simulation comparison", () => {
     expect((await app.inject({ url: `/api/simulations/${a}/curves` })).statusCode).toBe(200);
   });
 });
+
+describe("orderbook over HTTP", () => {
+  it("serves a labelled, simulated book while the market is open", async () => {
+    const app = make();
+    const id = await createSim(app);
+    const res = await app.inject({ url: `/api/simulations/${id}/orderbook?symbol=SAP.DE` });
+    expect(res.statusCode).toBe(200);
+    const book = res.json();
+    expect(book).toMatchObject({ available: true, simulated: true, symbol: "SAP.DE", currency: "EUR", label: expect.stringMatching(/^SIMULIERT, keine echten Tiefendaten/) });
+    expect(book.asks).toHaveLength(5);
+    expect(book.bids).toHaveLength(5);
+    expect(book.asks[0].price).toBeGreaterThan(book.mid);
+    expect(book.bids[0].price).toBeLessThan(book.mid);
+  });
+
+  it("says why there is none when the venue is shut, and rejects an unknown symbol or simulation", async () => {
+    const app = make();
+    const id = await createSim(app, D0 + 12 * H); // SAP stopped trading at 08:00 UTC
+    const shut = await app.inject({ url: `/api/simulations/${id}/orderbook?symbol=SAP.DE` });
+    expect(shut.json()).toMatchObject({ available: false, simulated: true, reason: expect.stringMatching(/geschlossen/) });
+    expect((await app.inject({ url: `/api/simulations/${id}/orderbook?symbol=NOPE` })).statusCode).toBe(400);
+    expect((await app.inject({ url: `/api/simulations/${id}/orderbook` })).statusCode).toBe(400);
+    expect((await app.inject({ url: `/api/simulations/9999/orderbook?symbol=SAP.DE` })).statusCode).toBe(404);
+  });
+
+  it("changes neither the fill price nor the fees of a market order", async () => {
+    const fillOf = async (withBook: boolean) => {
+      const app = make();
+      const id = await createSim(app);
+      if (withBook) for (let i = 0; i < 3; i++) await app.inject({ url: `/api/simulations/${id}/orderbook?symbol=SAP.DE` });
+      await post(app, `/api/simulations/${id}/orders`, { symbol: "SAP.DE", side: "buy", kind: "market", qty: 3 });
+      const snap = await connect(app, id);
+      await until(() => snap.msgs.length > 0);
+      return snap.msgs[0].depots[0].orders[0];
+    };
+    const plain = await fillOf(false);
+    const looked = await fillOf(true);
+    expect(looked.fillPrice).toBe(plain.fillPrice);
+    expect(looked).toMatchObject({ gross: plain.gross, commission: plain.commission, foreignFee: plain.foreignFee, status: "filled" });
+  });
+});

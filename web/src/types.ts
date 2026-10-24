@@ -335,3 +335,23 @@ export interface CompareResult {
   simulations: Comparison[];
   note: string;
 }
+
+/** GET /api/simulations/:id/orderbook?symbol= (400 for an unknown symbol). Display only; always labelled as simulated. */
+export type Orderbook =
+  | {
+      available: true;
+      simulated: true;
+      /** "SIMULIERT, keine echten Tiefendaten, aus der Kerze abgeleitet" */
+      label: string;
+      symbol: string;
+      currency: "EUR" | "USD";
+      /** End of the candle the book is drawn from. */
+      asOf: number;
+      mid: number;
+      tick: number;
+      halfSpread: number;
+      /** Nearest to the mid first. */
+      asks: { price: number; size: number }[];
+      bids: { price: number; size: number }[];
+    }
+  | { available: false; simulated: true; label: string; symbol: string; reason: string };

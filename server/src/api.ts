@@ -268,6 +268,16 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     };
   });
 
+  app.get("/api/simulations/:id/orderbook", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    const query = z.object({ symbol: z.string().min(1) }).safeParse(req.query);
+    if (!query.success) return invalid(reply, query.error);
+    const book = session.orderbook(sim.id, query.data.symbol);
+    if (!book) return reply.code(400).send({ error: `Unbekanntes Wertpapier ${query.data.symbol}.` });
+    return book;
+  });
+
   app.post("/api/simulations/:id/orders/preview", async (req, reply) => {
     const sim = simulationOf(req.params);
     if (!sim) return notFound(reply);
