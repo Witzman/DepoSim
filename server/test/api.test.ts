@@ -552,6 +552,22 @@ describe("search and the watchlist", () => {
     expect(await symbols(app)).toEqual(["SAP.DE"]);
   });
 
+  it("sends a fresh snapshot to a connected client after an add and after a remove, even while the clock stands", async () => {
+    const { app } = withSearch();
+    const id = await createSim(app, D0 + 13 * H + 1800 + 600); // AAPL is trading
+    const { msgs } = await connect(app, id);
+    await until(() => msgs.some((m) => m.type === "snapshot"));
+    expect(msgs.at(-1).prices.AAPL).toBeUndefined();
+
+    await post(app, "/api/watchlist", { symbol: "AAPL" });
+    await until(() => msgs.at(-1).prices?.AAPL !== undefined);
+    expect(msgs.at(-1).type).toBe("snapshot");
+
+    await del(app, "/api/watchlist/AAPL");
+    await until(() => msgs.at(-1).prices?.AAPL === undefined);
+    expect(msgs.at(-1).type).toBe("snapshot");
+  });
+
   it("refuses to remove an instrument that a simulation holds, or has an open order in", async () => {
     const { app } = withSearch();
     await post(app, "/api/watchlist", { symbol: "AAPL" });

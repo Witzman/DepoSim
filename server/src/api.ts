@@ -73,6 +73,11 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     symbol: i.symbol, name: i.name, currency: i.currency, venue: i.venue, added: instruments.isAdded(i.symbol),
   });
 
+  /** The prices of a changed list reach the clients now, not at the next tick (the clock may stand). */
+  const refreshClients = () => {
+    for (const sim of store.listSimulations()) if (sim.endedAt === null) hub.broadcastSnapshot(sim.id);
+  };
+
   app.get("/api/search", async (req, reply) => {
     const query = searchQuery.safeParse(req.query);
     if (!query.success) return invalid(reply, query.error);
@@ -115,6 +120,7 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
       instruments.remove(inst.symbol); // nothing was shown yet, so it is as if it had not been added
       return sourceFailed(reply, err);
     }
+    refreshClients();
     return reply.code(201).send(shown(inst));
   });
 
@@ -128,6 +134,7 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
       return reply.code(409).send({ error: "Das Wertpapier wird gehalten oder hat offene Orders." });
     }
     instruments.remove(symbol);
+    refreshClients();
     return reply.code(204).send();
   });
 

@@ -114,8 +114,8 @@ export function Palette({
   return (
     <dialog ref={dialog} className="palette" data-testid="palette" aria-label="Befehlspalette" onClose={onClose}>
       <input
-        ref={input} type="text" role="combobox" aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list"
-        aria-label="Wertpapier, Simulation oder Befehl" placeholder="Wertpapier suchen oder Befehl …"
+        ref={input} data-testid="palette-input" type="text" role="combobox" aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list"
+        aria-label="Suche und Befehle" placeholder="Wertpapier suchen oder Befehl …"
         value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={onKeyDown} autoComplete="off" spellCheck={false}
       />
       <ul id="palette-list" role="listbox" aria-label="Treffer">
