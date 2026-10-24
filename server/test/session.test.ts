@@ -3,6 +3,7 @@ import { createArchive } from "../src/data/archive.js";
 import type { MarketDataErrorKind } from "../src/data/marketdata.js";
 import { openDb } from "../src/db.js";
 import { DEFAULT_FEES } from "../src/domain/fees.js";
+import { InstrumentRegistry } from "../src/instruments.js";
 import { SessionService } from "../src/session.js";
 import { createStore } from "../src/store.js";
 import type { Instrument } from "../src/config.js";
@@ -27,9 +28,10 @@ function setup(opts: SetupOpts = {}) {
   const db = openDb(":memory:");
   const store = createStore(db);
   const archive = createArchive(db, source, { now: () => clock.now, minGapMs: 0 });
+  const registry = new InstrumentRegistry(db, opts.instruments ?? [SAP, AAPL]);
   const make = () =>
     new SessionService({
-      store, archive, instruments: opts.instruments ?? [SAP, AAPL], fxSymbol: FX, now: () => clock.now,
+      store, archive, instruments: registry, fxSymbol: FX, now: () => clock.now,
       delayS: opts.delayS, catchUpTempo: opts.catchUpTempo,
     });
   const svc = make();
@@ -38,7 +40,7 @@ function setup(opts: SetupOpts = {}) {
     fees: opts.fees ?? DEFAULT_FEES, live: opts.live,
   });
   const depotId = store.listDepots(sim.id)[0].id;
-  return { db, store, archive, svc, make, sim, id: sim.id, depotId, calls, all, clock };
+  return { db, store, archive, registry, svc, make, sim, id: sim.id, depotId, calls, all, clock };
 }
 
 const orderOf = (t: ReturnType<typeof setup>, orderId: number) =>
@@ -66,6 +68,39 @@ describe("start", () => {
   it("still starts when only one market has no data that day, like a holiday", async () => {
     const t = setup({ noDataFor: ["AAPL"] });
     await expect(t.svc.start(t.id)).resolves.toBeUndefined();
+  });
+});
+
+describe("instruments added while the service runs", () => {
+  const NOBAR = { symbol: "NOBAR.DE", name: "Ohne Kerzen", currency: "EUR", venue: "XETRA" } as const;
+
+  it("shows an added instrument in the snapshot once the archive has bars for it, and not before", async () => {
+    const t = setup({ instruments: [SAP], startAt: D0 + 13 * H + 1800 + 600 });
+    await t.svc.start(t.id);
+    expect(Object.keys(t.svc.snapshot(t.id).prices)).toEqual(["SAP.DE"]);
+    t.registry.add(AAPL);
+    expect(Object.keys(t.svc.snapshot(t.id).prices)).toEqual(["SAP.DE"]); // no bars for AAPL in the archive yet
+    await t.archive.ensureDay("AAPL", D0);
+    expect(t.svc.snapshot(t.id).prices.AAPL).toMatchObject({ price: 309 });
+  });
+
+  it("leaves an added instrument without bars out of the prices and does not disturb the tick", async () => {
+    const t = setup({ instruments: [SAP], startAt: D0 + 7 * H + 600 });
+    await t.svc.start(t.id);
+    t.registry.add(NOBAR);
+    const before = t.svc.snapshot(t.id);
+    expect(before.prices["NOBAR.DE"]).toBeUndefined();
+    const r = t.svc.tick(t.id, 1000);
+    expect(r.simulationTime).toBeGreaterThan(t.sim.startAt);
+    expect(r.newBars["NOBAR.DE"]).toBeUndefined();
+  });
+
+  it("rejects an order for an added instrument that has no price yet, with a reason", async () => {
+    const t = setup({ instruments: [SAP], startAt: D0 + 7 * H + 600 });
+    await t.svc.start(t.id);
+    t.registry.add(NOBAR);
+    const res = t.svc.previewOrder(t.id, { symbol: "NOBAR.DE", side: "buy", kind: "market", qty: 1 });
+    expect(res).toEqual({ ok: false, reason: expect.stringMatching(/keinen Kurs/) });
   });
 });
 

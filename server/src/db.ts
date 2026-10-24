@@ -31,6 +31,13 @@ create table if not exists simulations (
   ended_at integer,
   live integer not null default 0
 );
+create table if not exists instruments (
+  symbol text primary key,
+  name text not null,
+  currency text not null,
+  venue text not null,
+  position integer not null
+);
 create table if not exists depots (
   id integer primary key,
   simulation_id integer not null references simulations (id) on delete cascade,

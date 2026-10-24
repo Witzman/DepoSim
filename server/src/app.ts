@@ -9,6 +9,7 @@ import { createArchive } from "./data/archive.js";
 import type { MarketData } from "./data/marketdata.js";
 import { createYahoo } from "./data/yahoo.js";
 import { openDb } from "./db.js";
+import { InstrumentRegistry } from "./instruments.js";
 import { SessionService } from "./session.js";
 import { createStore } from "./store.js";
 import { createHub } from "./ws.js";
@@ -45,9 +46,10 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   if (opts.dbPath !== ":memory:") mkdirSync(dirname(opts.dbPath), { recursive: true });
   const db = openDb(opts.dbPath);
   const store = createStore(db);
+  const instruments = new InstrumentRegistry(db, opts.instruments ?? WATCHLIST);
   const archive = createArchive(db, opts.marketData ?? createYahoo(), { minGapMs: opts.minGapMs, now: opts.now });
   const session = new SessionService({
-    store, archive, instruments: opts.instruments ?? WATCHLIST, fxSymbol: FX_SYMBOL, now: opts.now,
+    store, archive, instruments, fxSymbol: FX_SYMBOL, now: opts.now,
     delayS: opts.liveDelayS, catchUpTempo: opts.catchUpTempo,
   });
   const hub = createHub(session, store, opts.tickMs ?? 250, opts.liveRefreshS ?? 60);
@@ -67,7 +69,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   });
 
   app.get("/healthz", async (_req, reply) => reply.type("text/plain").send("ok"));
-  registerApi(app, { store, session, archive, instruments: opts.instruments ?? WATCHLIST, hub });
+  registerApi(app, { store, session, archive, instruments, hub });
 
   if (existsSync(WEB_DIST)) {
     app.register(fastifyStatic, { root: WEB_DIST });

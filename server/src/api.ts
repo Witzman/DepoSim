@@ -1,9 +1,9 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
-import type { Instrument } from "./config.js";
 import type { Archive } from "./data/archive.js";
 import { DEFAULT_FEES } from "./domain/fees.js";
 import { describeError } from "./errors.js";
+import type { InstrumentRegistry } from "./instruments.js";
 import type { SessionService } from "./session.js";
 import type { Store } from "./store.js";
 import type { Hub } from "./ws.js";
@@ -39,7 +39,7 @@ interface Deps {
   store: Store;
   session: SessionService;
   archive: Archive;
-  instruments: Instrument[];
+  instruments: InstrumentRegistry;
   hub: Hub;
 }
 
@@ -57,7 +57,9 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
   const notFound = (reply: FastifyReply) => reply.code(404).send({ error: "Unbekannte Simulation." });
 
   app.get("/api/watchlist", async () =>
-    instruments.map(({ symbol, name, currency, venue }) => ({ symbol, name, currency, venue })),
+    instruments.list().map(({ symbol, name, currency, venue }) => ({
+      symbol, name, currency, venue, added: instruments.isAdded(symbol),
+    })),
   );
 
   app.get("/api/simulations", async () => store.listSimulations());
@@ -113,7 +115,7 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     if (!sim) return notFound(reply);
     const query = barsQuery.safeParse(req.query);
     if (!query.success) return invalid(reply, query.error);
-    if (!instruments.some((i) => i.symbol === query.data.symbol)) {
+    if (!instruments.get(query.data.symbol)) {
       return reply.code(400).send({ error: `Unbekanntes Wertpapier ${query.data.symbol}.` });
     }
     return {

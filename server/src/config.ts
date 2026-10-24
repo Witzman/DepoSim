@@ -35,6 +35,9 @@ export interface Instrument {
   venue: Venue;
 }
 
+/** How many instruments the person may add to the starting list. Each one is a request per refresh. */
+export const MAX_ADDED = 12;
+
 /** The exchange rate is a price series like the others, not a tradable instrument. */
 export const FX_SYMBOL = "EURUSD=X";
 

@@ -1,4 +1,5 @@
 import type { Instrument, Venue } from "./config.js";
+import type { InstrumentRegistry } from "./instruments.js";
 import type { Archive } from "./data/archive.js";
 import { type Bar, MarketDataError } from "./data/marketdata.js";
 import { type DepotState, type NewOrder, depotValue, fillOrder, positionValue, triggersLimit, validateOrder } from "./domain/broker.js";
@@ -18,7 +19,7 @@ const dayOf = (t: number) => Math.floor(t / DAY) * DAY;
 export interface SessionDeps {
   store: Store;
   archive: Archive;
-  instruments: Instrument[];
+  instruments: InstrumentRegistry;
   /** The exchange-rate series. It is read for prices but is not an instrument. */
   fxSymbol: string;
   /** Current time in UTC seconds. */
@@ -70,8 +71,7 @@ export type PreviewResult = { ok: true; cost: CostPreview; problem?: string } | 
 export class SessionService {
   private readonly store: Store;
   private readonly archive: Archive;
-  private readonly instruments: Instrument[];
-  private readonly bySymbol: Map<string, Instrument>;
+  private readonly registry: InstrumentRegistry;
   private readonly fx: string;
   private readonly now: () => number;
   private readonly delayS: number;
@@ -83,12 +83,16 @@ export class SessionService {
   constructor(deps: SessionDeps) {
     this.store = deps.store;
     this.archive = deps.archive;
-    this.instruments = deps.instruments;
-    this.bySymbol = new Map(deps.instruments.map((i) => [i.symbol, i]));
+    this.registry = deps.instruments;
     this.fx = deps.fxSymbol;
     this.now = deps.now ?? (() => Date.now() / 1000);
     this.delayS = deps.delayS ?? DEFAULT_DELAY_S;
     this.catchUpTempo = deps.catchUpTempo ?? DEFAULT_CATCH_UP_TEMPO;
+  }
+
+  /** The tradable instruments right now. The list can grow while the service runs, so it is read on every use. */
+  private get instruments(): Instrument[] {
+    return this.registry.list();
   }
 
   /** Loads the start day of every instrument. Throws, and starts nothing, if there are no prices. */
@@ -237,7 +241,7 @@ export class SessionService {
     const sim = this.sim(id);
     if (sim.endedAt !== null) return { ok: false, reason: "Die Simulation ist beendet." };
     if (!this.store.listDepots(id).some((d) => d.id === depotId)) return { ok: false, reason: "Unbekanntes Depot." };
-    const inst = this.bySymbol.get(o.symbol);
+    const inst = this.registry.get(o.symbol);
     if (!inst) return { ok: false, reason: `Unbekanntes Wertpapier ${o.symbol}.` };
 
     const s = sim.simulationTime;
@@ -265,7 +269,7 @@ export class SessionService {
   /** What the order would cost at the current price, with the same numbers a fill would use. */
   previewOrder(id: number, o: NewOrder): PreviewResult {
     const sim = this.sim(id);
-    const inst = this.bySymbol.get(o.symbol);
+    const inst = this.registry.get(o.symbol);
     if (!inst) return { ok: false, reason: `Unbekanntes Wertpapier ${o.symbol}.` };
     const ref = this.refAt(inst, sim.simulationTime);
     if (!ref) return { ok: false, reason: `Für ${o.symbol} gibt es noch keinen Kurs.` };
@@ -369,7 +373,7 @@ export class SessionService {
 
   /** Fills what this finished bar triggers. True if the depot changed. */
   private evaluate(state: DepotState & { orders: OrderRecord[] }, sim: Simulation, symbol: string, bar: Bar): boolean {
-    const inst = this.bySymbol.get(symbol)!;
+    const inst = this.registry.get(symbol)!;
     let changed = false;
     for (const o of state.orders) {
       if (o.status !== "open" || o.symbol !== symbol) continue;

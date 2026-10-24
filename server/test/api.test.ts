@@ -48,11 +48,11 @@ async function connect(app: FastifyInstance, id: number) {
 }
 
 describe("simulations", () => {
-  it("lists the watchlist", async () => {
+  it("lists the watchlist, with the starting list marked as not added", async () => {
     const res = await make().inject({ url: "/api/watchlist" });
     expect(res.json()).toEqual([
-      { symbol: "SAP.DE", name: "SAP", currency: "EUR", venue: "XETRA" },
-      { symbol: "AAPL", name: "Apple", currency: "USD", venue: "US" },
+      { symbol: "SAP.DE", name: "SAP", currency: "EUR", venue: "XETRA", added: false },
+      { symbol: "AAPL", name: "Apple", currency: "USD", venue: "US", added: false },
     ]);
   });
 
