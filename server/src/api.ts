@@ -268,7 +268,7 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     const body = orderBody.safeParse(req.body);
     if (!body.success) return invalid(reply, body.error);
     const { depotId, ...order } = body.data;
-    const result = session.placeOrder(sim.id, depotId ?? store.listDepots(sim.id)[0].id, order);
+    const result = session.placeOrder(sim.id, depotId ?? session.defaultDepotId(sim.id), order);
     if (!result.ok) return reply.code(400).send({ error: result.reason });
     hub.broadcastSnapshot(sim.id);
     return reply.code(201).send({ orderId: result.orderId });
@@ -327,6 +327,17 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     store.renameDepot(depot.id, body.data.name);
     hub.broadcastSnapshot(sim.id);
     return { ...depot, name: body.data.name };
+  });
+
+  app.post("/api/simulations/:id/depots/:depotId/ghost", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    const depot = depotOf(sim, req.params);
+    if (!depot) return unknownDepot(reply);
+    const result = session.ghostDepot(sim.id, depot.id);
+    if (!result.ok) return reply.code(409).send({ error: result.reason });
+    hub.broadcastSnapshot(sim.id);
+    return reply.code(201).send(result.depot);
   });
 
   app.delete("/api/simulations/:id/depots/:depotId", async (req, reply) => {

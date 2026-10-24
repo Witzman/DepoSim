@@ -108,11 +108,15 @@ export interface PositionView {
   value: number;
 }
 
+/** A ghost is a frozen copy of a depot (POST /api/simulations/:id/depots/:depotId/ghost); it never trades. */
+export type DepotKind = "normal" | "ghost";
+
 export interface Depot {
   id: number;
   simulationId: number;
   name: string;
   cash: number;
+  kind: DepotKind;
 }
 
 export interface CurvePoint {
@@ -123,6 +127,7 @@ export interface CurvePoint {
 export interface Curve {
   id: number;
   name: string;
+  kind: DepotKind;
   points: CurvePoint[];
 }
 
@@ -160,6 +165,7 @@ export interface Evaluation {
   depots: {
     id: number;
     name: string;
+    kind: DepotKind;
     startedAt: number;
     metrics: Metrics;
     fees: { orders: number; commission: number; foreign: number; total: number; shareOfStart: number };
@@ -181,6 +187,7 @@ export interface AllocationLine {
 export interface DepotView {
   id: number;
   name: string;
+  kind: DepotKind;
   cash: number;
   value: number;
   positions: PositionView[];

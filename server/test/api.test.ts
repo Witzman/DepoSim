@@ -780,3 +780,36 @@ describe("benchmark and evaluation", () => {
     expect((await app.inject({ url: `/api/simulations/9999/evaluation` })).statusCode).toBe(404);
   });
 });
+
+describe("ghost depots over HTTP", () => {
+  it("creates a ghost from a depot with a position, shows its kind, and refuses trading on it", async () => {
+    const app = make();
+    const id = await createSim(app);
+    const source = (await app.inject({ url: `/api/simulations/${id}/curves` })).json().depots[0].id;
+    const none = await post(app, `/api/simulations/${id}/depots/${source}/ghost`, {});
+    expect(none.statusCode).toBe(409);
+    expect(none.json().error).toMatch(/Position/);
+
+    await post(app, `/api/simulations/${id}/orders`, { symbol: "SAP.DE", side: "buy", kind: "market", qty: 2 });
+    const made = await post(app, `/api/simulations/${id}/depots/${source}/ghost`, {});
+    expect(made.statusCode).toBe(201);
+    expect(made.json()).toMatchObject({ name: "Geist von Depot 1", kind: "ghost", simulationId: id });
+    const ghost = made.json().id;
+
+    const order = { symbol: "SAP.DE", side: "buy", kind: "market", qty: 1, depotId: ghost };
+    const placed = await post(app, `/api/simulations/${id}/orders`, order);
+    expect(placed.statusCode).toBe(400);
+    expect(placed.json().error).toMatch(/Geisterdepot/);
+    expect((await post(app, `/api/simulations/${id}/orders/preview`, order)).statusCode).toBe(400);
+    expect((await post(app, `/api/simulations/${id}/depots/${ghost}/allocate`, { weights: [{ symbol: "SAP.DE", percent: 10 }] })).statusCode).toBe(400);
+    expect((await post(app, `/api/simulations/${id}/depots/${ghost}/ghost`, {})).statusCode).toBe(409);
+
+    const curves = (await app.inject({ url: `/api/simulations/${id}/curves` })).json();
+    expect(curves.depots.map((d: any) => d.kind)).toEqual(["normal", "ghost"]);
+    const renamed = await app.inject({ method: "PATCH", url: `/api/simulations/${id}/depots/${ghost}`, payload: { name: "Kopie" } });
+    expect(renamed.json()).toMatchObject({ name: "Kopie", kind: "ghost" });
+    expect((await app.inject({ method: "DELETE", url: `/api/simulations/${id}/depots/${ghost}` })).statusCode).toBe(204);
+    expect((await post(app, `/api/simulations/${id}/depots/9999/ghost`, {})).statusCode).toBe(404);
+    expect((await post(app, `/api/simulations/9999/depots/1/ghost`, {})).statusCode).toBe(404);
+  });
+});

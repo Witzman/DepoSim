@@ -11,7 +11,7 @@ import { type Breakdown, type FeeLedger, breakdown, feeLedger } from "./domain/b
 import { type Correlation, type Metrics, type Point, computeMetrics, correlationMatrix, thin } from "./domain/metrics.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
 import type { Cent } from "./domain/money.js";
-import type { Depot, OrderRecord, Simulation, Store } from "./store.js";
+import type { Depot, DepotKind, OrderRecord, Simulation, Store } from "./store.js";
 
 const DAY = 86400;
 const LOOKAHEAD_DAYS = 7;
@@ -55,6 +55,7 @@ export interface PositionView {
 export interface DepotSnapshot {
   id: number;
   name: string;
+  kind: DepotKind;
   cash: Cent;
   value: Cent;
   positions: PositionView[];
@@ -85,12 +86,12 @@ export interface BenchmarkCurve {
 }
 
 export interface Curves {
-  depots: { id: number; name: string; points: Point[] }[];
+  depots: { id: number; name: string; kind: DepotKind; points: Point[] }[];
   benchmark: BenchmarkCurve | null;
 }
 
 export interface Evaluation {
-  depots: { id: number; name: string; startedAt: number; metrics: Metrics; fees: FeeLedger; breakdown: Breakdown }[];
+  depots: { id: number; name: string; kind: DepotKind; startedAt: number; metrics: Metrics; fees: FeeLedger; breakdown: Breakdown }[];
   correlation: Correlation;
   benchmark: { symbol: string; name: string; metrics: Metrics } | null;
   note: string;
@@ -101,6 +102,8 @@ const EVALUATION_NOTE =
   "Volatilität, Sharpe-Ratio und Korrelation sind aus der Kurve geschätzt, ohne risikofreien Zins. " +
   "Spread und Devisenaufschlag stecken im Ausführungspreis und fehlen in der Gebührenbilanz. " +
   "Der Maßstab ist der Kurs in seiner eigenen Währung, ohne Wechselkurs.";
+
+const GHOST_NO_TRADE = "Ein Geisterdepot handelt nicht.";
 
 export type PlaceResult = { ok: true; orderId: number } | { ok: false; reason: string };
 
@@ -299,7 +302,9 @@ export class SessionService {
   placeOrder(id: number, depotId: number, o: NewOrder): PlaceResult {
     const sim = this.sim(id);
     if (sim.endedAt !== null) return { ok: false, reason: "Die Simulation ist beendet." };
-    if (!this.store.listDepots(id).some((d) => d.id === depotId)) return { ok: false, reason: "Unbekanntes Depot." };
+    const target = this.store.listDepots(id).find((d) => d.id === depotId);
+    if (!target) return { ok: false, reason: "Unbekanntes Depot." };
+    if (target.kind === "ghost") return { ok: false, reason: GHOST_NO_TRADE };
     const inst = this.registry.get(o.symbol);
     if (!inst) return { ok: false, reason: `Unbekanntes Wertpapier ${o.symbol}.` };
 
@@ -339,7 +344,8 @@ export class SessionService {
     const ref = this.refAt(inst, sim.simulationTime);
     if (!ref) return { ok: false, reason: `Für ${o.symbol} gibt es noch keinen Kurs.` };
 
-    const depot = this.store.listDepots(id).find((d) => d.id === depotId) ?? this.store.listDepots(id)[0];
+    const depot = this.store.listDepots(id).find((d) => d.id === depotId) ?? this.firstNormal(id);
+    if (depot.kind === "ghost") return { ok: false, reason: GHOST_NO_TRADE };
     const state = this.store.loadDepot(depot.id);
     const checked = validateOrder(state, o, ref, sim.fees);
     const priceable = Number.isInteger(o.qty) && o.qty > 0 && (o.kind === "market" || (o.limitPrice ?? 0) > 0);
@@ -357,6 +363,39 @@ export class SessionService {
     return { ok: true, depot: this.store.createDepot(id, name ?? this.nextDepotName(existing)) };
   }
 
+  /** The depot an order goes to when none is named: the first normal one (a ghost can come first once its source is gone). */
+  defaultDepotId(id: number): number {
+    return this.firstNormal(id).id;
+  }
+
+  private firstNormal(id: number): Depot {
+    const depots = this.store.listDepots(id);
+    return depots.find((d) => d.kind === "normal") ?? depots[0];
+  }
+
+  /**
+   * Freezes cash and positions of a depot at the current simulation time into a new ghost depot.
+   * The ghost is valued at market like any depot, but never trades.
+   */
+  ghostDepot(id: number, depotId: number): { ok: true; depot: Depot } | { ok: false; reason: string } {
+    const sim = this.sim(id);
+    if (sim.endedAt !== null) return { ok: false, reason: "Die Simulation ist beendet." };
+    const existing = this.store.listDepots(id);
+    const source = existing.find((d) => d.id === depotId);
+    if (!source) return { ok: false, reason: "Unbekanntes Depot." };
+    if (source.kind === "ghost") return { ok: false, reason: "Von einem Geisterdepot gibt es keinen Geist." };
+    const state = this.store.loadDepot(source.id);
+    if (![...state.positions.values()].some((p) => p.qty > 0)) {
+      return { ok: false, reason: "Ein Geisterdepot braucht mindestens eine Position." };
+    }
+    if (existing.length >= MAX_DEPOTS) return { ok: false, reason: `Mehr als ${MAX_DEPOTS} Depots gibt es nicht.` };
+    const value = depotValue(state, this.refsAt(sim.simulationTime));
+    return {
+      ok: true,
+      depot: this.store.createGhostDepot(id, `Geist von ${source.name}`, state.cash, state.positions, sim.simulationTime, value),
+    };
+  }
+
   /** "Depot N" with N one above the highest number in use, so a deleted depot's name is not given out again. */
   private nextDepotName(existing: Depot[]): string {
     const used = existing.map((d) => Number(/^Depot (\d+)$/.exec(d.name)?.[1] ?? 0));
@@ -366,7 +405,11 @@ export class SessionService {
   removeDepot(id: number, depotId: number): { ok: true } | { ok: false; reason: string } {
     const depots = this.store.listDepots(id);
     if (!depots.some((d) => d.id === depotId)) return { ok: false, reason: "Unbekanntes Depot." };
-    if (depots.length === 1) return { ok: false, reason: "Das letzte Depot lässt sich nicht löschen." };
+    const target = depots.find((d) => d.id === depotId)!;
+    // At least one normal depot stays; a ghost may always go.
+    if (target.kind === "normal" && !depots.some((d) => d.kind === "normal" && d.id !== depotId)) {
+      return { ok: false, reason: "Das letzte Depot lässt sich nicht löschen." };
+    }
     this.store.deleteDepot(depotId);
     return { ok: true };
   }
@@ -383,7 +426,9 @@ export class SessionService {
     dryRun: boolean,
   ): { ok: true; lines: AllocationLine[] } | { ok: false; reason: string } {
     const sim = this.sim(id);
-    if (!this.store.listDepots(id).some((d) => d.id === depotId)) return { ok: false, reason: "Unbekanntes Depot." };
+    const target = this.store.listDepots(id).find((d) => d.id === depotId);
+    if (!target) return { ok: false, reason: "Unbekanntes Depot." };
+    if (target.kind === "ghost") return { ok: false, reason: GHOST_NO_TRADE };
     if (!dryRun && sim.endedAt !== null) return { ok: false, reason: "Die Simulation ist beendet." };
 
     const merged = new Map<string, number>();
@@ -416,11 +461,11 @@ export class SessionService {
   /** The value curve of every depot, thinned for a chart, and the benchmark at the same times. */
   curves(id: number): Curves {
     const sim = this.sim(id);
-    const depots = this.store.listDepots(id).map((d) => ({ id: d.id, name: d.name, points: this.store.valueCurve(d.id) }));
+    const depots = this.store.listDepots(id).map((d) => ({ id: d.id, name: d.name, kind: d.kind, points: this.store.valueCurve(d.id) }));
     const inst = sim.benchmark ? this.registry.get(sim.benchmark) : undefined;
     if (!inst) return { depots, benchmark: null };
     const points: Point[] = [];
-    for (const p of depots[0]?.points ?? []) {
+    for (const p of (depots.find((d) => d.kind === "normal") ?? depots[0])?.points ?? []) {
       const bar = this.archive.lastCompleteBar(inst.symbol, p.t);
       if (bar) points.push({ t: p.t, value: bar.c });
     }
@@ -438,6 +483,7 @@ export class SessionService {
       return {
         id: depot.id,
         name: depot.name,
+        kind: depot.kind,
         startedAt: points[0]?.t ?? sim.startAt,
         metrics: computeMetrics(points),
         fees: feeLedger(state.orders, sim.startCash),
@@ -499,6 +545,7 @@ export class SessionService {
       return {
         id: depot.id,
         name: depot.name,
+        kind: depot.kind,
         cash: state.cash,
         value: depotValue(state, refs),
         positions: [...state.positions].map(([symbol, pos]) => ({

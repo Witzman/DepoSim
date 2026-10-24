@@ -824,3 +824,88 @@ describe("curves and evaluation", () => {
     expect(ev.note).toMatch(/Spread/);
   });
 });
+
+describe("ghost depots", () => {
+  const buy = { symbol: "SAP.DE", side: "buy", kind: "market", qty: 2 } as const;
+
+  async function withPosition() {
+    const t = setup();
+    await t.svc.start(t.id);
+    expect(t.svc.placeOrder(t.id, t.depotId, buy).ok).toBe(true);
+    return t;
+  }
+
+  it("freezes cash and positions of the source and starts its curve at the source's value", async () => {
+    const t = await withPosition();
+    const source = t.svc.snapshot(t.id).depots[0];
+    const r = t.svc.ghostDepot(t.id, t.depotId);
+    expect(r).toMatchObject({ ok: true, depot: { name: "Geist von Depot 1", kind: "ghost", cash: source.cash } });
+    const ghost = t.svc.snapshot(t.id).depots[1];
+    expect(ghost).toMatchObject({ kind: "ghost", cash: source.cash, value: source.value, orders: [] });
+    expect(ghost.positions).toEqual(source.positions);
+    expect(t.store.valueCurve(ghost.id)).toEqual([{ t: t.sim.startAt, value: source.value }]);
+  });
+
+  it("stays frozen when the source trades on, and is revalued at market by ticks", async () => {
+    const t = await withPosition();
+    const ghostId = (t.svc.ghostDepot(t.id, t.depotId) as { depot: { id: number } }).depot.id;
+    expect(t.svc.placeOrder(t.id, t.depotId, { ...buy, side: "sell", qty: 2 }).ok).toBe(true);
+    t.svc.tick(t.id, 120_000); // two minutes at tempo 1
+    const [source, ghost] = t.svc.snapshot(t.id).depots;
+    expect(source.positions).toEqual([]);
+    expect(ghost.positions).toHaveLength(1);
+    expect(ghost.positions[0].qty).toBe(2);
+    const curve = t.store.valueCurve(ghostId);
+    expect(curve.length).toBeGreaterThan(1);
+    expect(curve.at(-1)!.value).toBe(ghost.value);
+  });
+
+  it("is refused without a position, for a ghost, for an ended simulation, at the limit and for an unknown depot", async () => {
+    const t = setup();
+    await t.svc.start(t.id);
+    expect(t.svc.ghostDepot(t.id, t.depotId)).toEqual({ ok: false, reason: "Ein Geisterdepot braucht mindestens eine Position." });
+    expect(t.svc.ghostDepot(t.id, 9999)).toEqual({ ok: false, reason: "Unbekanntes Depot." });
+    t.svc.placeOrder(t.id, t.depotId, buy);
+    const ghost = (t.svc.ghostDepot(t.id, t.depotId) as { depot: { id: number } }).depot;
+    expect(t.svc.ghostDepot(t.id, ghost.id)).toEqual({ ok: false, reason: "Von einem Geisterdepot gibt es keinen Geist." });
+    for (let n = 3; n <= 8; n++) expect(t.svc.addDepot(t.id).ok).toBe(true);
+    expect(t.svc.ghostDepot(t.id, t.depotId)).toEqual({ ok: false, reason: "Mehr als 8 Depots gibt es nicht." });
+    t.store.endSimulation(t.id);
+    expect(t.svc.ghostDepot(t.id, t.depotId)).toEqual({ ok: false, reason: "Die Simulation ist beendet." });
+  });
+
+  it("never trades: order, preview, allocation and cancel are refused", async () => {
+    const t = await withPosition();
+    const ghost = (t.svc.ghostDepot(t.id, t.depotId) as { depot: { id: number } }).depot;
+    const reason = "Ein Geisterdepot handelt nicht.";
+    expect(t.svc.placeOrder(t.id, ghost.id, buy)).toEqual({ ok: false, reason });
+    expect(t.svc.previewOrder(t.id, buy, ghost.id)).toEqual({ ok: false, reason });
+    expect(t.svc.allocate(t.id, ghost.id, [{ symbol: "SAP.DE", percent: 50 }], false)).toEqual({ ok: false, reason });
+    expect(t.svc.allocate(t.id, ghost.id, [{ symbol: "SAP.DE", percent: 50 }], true)).toEqual({ ok: false, reason });
+    expect(t.store.loadDepot(ghost.id).orders).toEqual([]);
+    const open = t.svc.placeOrder(t.id, t.depotId, { symbol: "SAP.DE", side: "buy", kind: "limit", qty: 1, limitPrice: 1 });
+    expect(open.ok).toBe(true);
+  });
+
+  it("can be deleted, but at least one normal depot stays", async () => {
+    const t = await withPosition();
+    const ghost = (t.svc.ghostDepot(t.id, t.depotId) as { depot: { id: number } }).depot;
+    const second = t.svc.addDepot(t.id) as { depot: { id: number } };
+    expect(t.svc.removeDepot(t.id, ghost.id)).toEqual({ ok: true });
+    t.svc.ghostDepot(t.id, t.depotId);
+    expect(t.svc.removeDepot(t.id, t.depotId)).toEqual({ ok: true });
+    // only `second` and the ghost are left: the last normal depot cannot go
+    expect(t.svc.removeDepot(t.id, second.depot.id)).toEqual({ ok: false, reason: "Das letzte Depot lässt sich nicht löschen." });
+  });
+
+  it("takes the first normal depot as default, and kinds show in curves and evaluation", async () => {
+    const t = await withPosition();
+    const ghost = (t.svc.ghostDepot(t.id, t.depotId) as { depot: { id: number } }).depot;
+    const second = t.svc.addDepot(t.id) as { depot: { id: number } };
+    t.svc.removeDepot(t.id, t.depotId);
+    expect(t.svc.defaultDepotId(t.id)).toBe(second.depot.id);
+    expect(t.svc.snapshot(t.id).depots.map((d) => d.kind)).toEqual(["ghost", "normal"]);
+    expect(t.svc.curves(t.id).depots.map((d) => [d.id, d.kind])).toEqual([[ghost.id, "ghost"], [second.depot.id, "normal"]]);
+    expect(t.svc.evaluation(t.id).depots.map((d) => d.kind)).toEqual(["ghost", "normal"]);
+  });
+});
