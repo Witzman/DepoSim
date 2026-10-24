@@ -26,7 +26,40 @@ export function readSettings(env: Record<string, string | undefined>): Settings 
 
 export const SETTINGS = readSettings(process.env);
 
+/** The markets an instrument can be traded on, which means the markets with a price source. */
 export type Venue = "XETRA" | "US";
+
+/** Every market the app knows, including those it has no prices for. */
+export type VenueId = Venue | "FRANKFURT" | "TRADEGATE" | "GETTEX";
+
+export interface VenueInfo {
+  id: VenueId;
+  name: string;
+  /** IANA zone the hours are given in. */
+  timeZone: string;
+  /** Local "HH:MM"; trading runs from `opens` up to, not including, `closes`, Monday to Friday. */
+  opens: string;
+  closes: string;
+  /** False: there is no usable price source, so the market is shown but nothing can be added or traded on it. */
+  hasSource: boolean;
+  note: string;
+}
+
+export const VENUES: VenueInfo[] = [
+  { id: "XETRA", name: "Xetra", timeZone: "Europe/Berlin", opens: "09:00", closes: "17:30", hasSource: true,
+    note: "Minutenbalken von Yahoo (gemessen)." },
+  { id: "US", name: "US-Börsen", timeZone: "America/New_York", opens: "09:30", closes: "16:00", hasSource: true,
+    note: "Minutenbalken von Yahoo (gemessen)." },
+  { id: "FRANKFURT", name: "Frankfurt", timeZone: "Europe/Berlin", opens: "08:00", closes: "22:00", hasSource: false,
+    note: "Yahoo liefert für .F nur lückenhafte Minutenbalken (gemessen 2026-10-24: 16 bis 124 am Tag, Lücken bis zu drei Stunden, ETFs gar keine). Damit ließe sich nicht ehrlich handeln." },
+  { id: "TRADEGATE", name: "Tradegate", timeZone: "Europe/Berlin", opens: "08:00", closes: "22:00", hasSource: false,
+    note: "Bei Yahoo nicht auffindbar (gemessen 2026-10-24). Zeiten nach Angabe des Betreibers, nicht gemessen." },
+  { id: "GETTEX", name: "gettex", timeZone: "Europe/Berlin", opens: "08:00", closes: "22:00", hasSource: false,
+    note: "Bei Yahoo nicht auffindbar (gemessen 2026-10-24). Zeiten nach Angabe des Betreibers, nicht gemessen." },
+];
+
+/** Yahoo suffixes of markets without a source; a symbol with one of them is turned away when added. */
+export const SOURCELESS_SUFFIXES: Record<string, VenueId> = { ".F": "FRANKFURT", ".TG": "TRADEGATE", ".GETTEX": "GETTEX" };
 
 export interface Instrument {
   symbol: string;
