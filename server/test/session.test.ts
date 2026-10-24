@@ -769,6 +769,8 @@ describe("default depot names", () => {
     expect(again.ok && again.depot.name).toBe("Depot 4");
     const names = t.svc.snapshot(t.id).depots.map((d) => d.name);
     expect(new Set(names).size).toBe(names.length);
+  });
+});
 
 describe("curves and evaluation", () => {
   const minutes = (t: ReturnType<typeof setup>, n: number) => {
