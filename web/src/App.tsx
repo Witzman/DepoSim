@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  type Socket, addDepot, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, getBars, getWatchlist, listSimulations,
+  type Socket, addDepot, addGhost, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, getBars, getWatchlist, listSimulations,
   openSocket, removeDepot, setBenchmark, removeInstrument, renameDepot,
 } from "./api.js";
 import { AllocationDialog } from "./components/AllocationDialog.js";
+import { BackfillDialog } from "./components/BackfillDialog.js";
+import { Compare } from "./components/Compare.js";
+import { Journal } from "./components/Journal.js";
+import { OrderbookPanel } from "./components/Orderbook.js";
 import { Chart } from "./components/Chart.js";
 import { Collapsible } from "./components/Collapsible.js";
 import { ClockBar } from "./components/ClockBar.js";
@@ -20,7 +24,8 @@ import { SimulationPicker } from "./components/SimulationPicker.js";
 import { Watchlist } from "./components/Watchlist.js";
 import { formatPrice } from "./format.js";
 import { pickInitial } from "./select.js";
-import { pickDepot } from "./view.js";
+import { canGhost, pickDepot } from "./view.js";
+import type { CommandId } from "./palette.js";
 import { useNarrow } from "./useNarrow.js";
 import { useTheme } from "./theme.js";
 import type { Bar, Instrument, ServerMessage, Simulation, Snapshot, Tempo } from "./types.js";
@@ -63,6 +68,9 @@ export function App() {
   const [activeDepotId, setActiveDepotId] = useState<number | null>(null);
   const [allocationOpen, setAllocationOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [backfillOpen, setBackfillOpen] = useState(false);
+  const [orderbookOpen, setOrderbookOpen] = useState(false);
+  const [scrollTo, setScrollTo] = useState<{ id: string; n: number } | null>(null);
   const narrow = useNarrow();
   const socket = useRef<Socket | null>(null);
   const runningRef = useRef(false);
@@ -110,6 +118,13 @@ export function App() {
   }, []);
 
   useEffect(() => rememberSelection(selectedId), [selectedId]);
+
+  // A palette command that points at a section: scrolled to once the section is on screen.
+  useEffect(() => {
+    if (!scrollTo) return;
+    const el = document.getElementById(scrollTo.id) ?? document.querySelector(`[data-testid='${scrollTo.id}']`);
+    el?.scrollIntoView?.({ block: "nearest" });
+  }, [scrollTo, view]);
 
   // Ctrl+K (Cmd+K) opens and closes the palette, from anywhere, also from inside a field.
   useEffect(() => {
@@ -226,6 +241,32 @@ export function App() {
     }
   }
 
+  async function newGhost() {
+    const source = snapshot && pickDepot(snapshot.depots, activeDepotId);
+    if (selectedId === null || !source) return;
+    const check = canGhost(source);
+    if (!check.ok) return setNotice(check.reason);
+    try {
+      const ghost = await addGhost(selectedId, source.id);
+      setActiveDepotId(ghost.id);
+      setNotice(null);
+    } catch (e) {
+      setNotice((e as Error).message);
+    }
+  }
+
+  function runCommand(id: CommandId) {
+    if (id === "backfill") return setBackfillOpen(true);
+    if (id === "ghost") return void newGhost();
+    if (id === "orderbook") {
+      setView("trade");
+      setOrderbookOpen((o) => !o);
+      return setScrollTo((c) => ({ id: "orderbook-toggle", n: (c?.n ?? 0) + 1 }));
+    }
+    setView("evaluation");
+    setScrollTo((c) => ({ id: id === "journal" ? "journal" : "compare", n: (c?.n ?? 0) + 1 }));
+  }
+
   async function renameActive(id: number, name: string) {
     if (selectedId === null) return;
     try {
@@ -271,6 +312,7 @@ export function App() {
   const instrument = watchlist.find((i) => i.symbol === symbol);
   const price = snapshot?.prices[symbol];
   const depot = snapshot ? pickDepot(snapshot.depots, activeDepotId) : undefined;
+  const isGhost = depot?.kind === "ghost";
   const locked = live === null || live.endedAt !== null || snapshot === null;
 
   return (
@@ -295,7 +337,7 @@ export function App() {
           {live && (
             <Collapsible narrow={narrow} title="Watchlist">
               <Watchlist instruments={watchlist} prices={snapshot?.prices ?? {}} venues={snapshot?.venues}
-                selected={symbol} onSelect={setSymbol} onRemove={removeTitle} />
+                selected={symbol} onSelect={setSymbol} onRemove={removeTitle} onBackfill={() => setBackfillOpen(true)} />
             </Collapsible>
           )}
         </div>
@@ -330,7 +372,7 @@ export function App() {
               {snapshot && depot && (
                 <DepotSwitch depots={snapshot.depots} activeId={depot.id} disabled={locked}
                   onSelect={setActiveDepotId} onAdd={newDepot} onRename={renameActive} onRemove={removeActive}
-                  onAllocate={() => setAllocationOpen(true)} />
+                  onAllocate={() => setAllocationOpen(true)} onGhost={() => void newGhost()} />
               )}
               {view === "trade" ? (
                 <>
@@ -346,11 +388,22 @@ export function App() {
                 <Chart bars={bars} theme={theme} simulationId={live.id} symbol={symbol} />
               </section>
               <div className="trade-grid">
-                <OrderTicket simulationId={live.id} depotId={depot?.id} instrument={instrument} priceKey={price?.barT}
-                  disabled={locked} command={ticketCommand} />
+                <div className="stack">
+                  {isGhost ? (
+                    <section className="card" aria-label="Orderticket gesperrt" data-testid="ghost-no-ticket">
+                      <h2>Order</h2>
+                      <p className="muted">Ein Geisterdepot handelt nicht. Wechsle zu einem normalen Depot, um Orders zu legen.</p>
+                    </section>
+                  ) : (
+                    <OrderTicket simulationId={live.id} depotId={depot?.id} instrument={instrument} priceKey={price?.barT}
+                      disabled={locked} command={ticketCommand} />
+                  )}
+                  <OrderbookPanel simulationId={live.id} instrument={instrument} simulationTime={live.simulationTime}
+                    open={orderbookOpen} onToggle={() => setOrderbookOpen((o) => !o)} />
+                </div>
                 {depot && <DepotPanel depot={depot} startCash={live.startCash} />}
               </div>
-              {depot && (
+              {depot && !isGhost && (
                 <OrdersPanel orders={depot.orders} instruments={watchlist} disabled={locked} onCancel={cancel} />
               )}
                 </>
@@ -363,6 +416,8 @@ export function App() {
                       onBenchmark={chooseBenchmark} />
                     <Evaluation simulationId={live.id} activeDepotId={depot.id} running={snapshot.running}
                       benchmark={live.benchmark} />
+                    <Journal simulationId={live.id} depot={depot} running={snapshot.running} />
+                    <Compare simulations={simulations} initial={[live.id]} theme={theme} />
                   </>
                 )
               )}
@@ -377,16 +432,18 @@ export function App() {
           instruments={watchlist} onClose={() => setAllocationOpen(false)} />
       )}
       {narrow && live && (
-        <MobileBar disabled={locked} running={snapshot?.running ?? false}
+        <MobileBar disabled={locked} tradeDisabled={isGhost} running={snapshot?.running ?? false}
           onBuy={() => { setView("trade"); setTicketCommand((c) => ({ side: "buy", n: c.n + 1 })); }}
           onSell={() => { setView("trade"); setTicketCommand((c) => ({ side: "sell", n: c.n + 1 })); }}
           onToggleRun={() => socket.current?.send({ type: runningRef.current ? "pause" : "run" })} />
       )}
+      <BackfillDialog open={backfillOpen} onClose={() => setBackfillOpen(false)} />
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
       <Palette
         open={paletteOpen} instruments={watchlist} simulations={simulations} selectedId={selectedId}
         onClose={() => setPaletteOpen(false)} onPickInstrument={setSymbol} onPickSimulation={setSelectedId}
         onToggleTheme={toggle} onShowHelp={() => setHelpOpen(true)} onAdd={addTitle}
+        commands={selectedId === null ? ["backfill"] : ["backfill", "ghost", "journal", "compare", "orderbook"]} onCommand={runCommand}
       />
     </div>
   );

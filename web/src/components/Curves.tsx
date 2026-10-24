@@ -7,7 +7,8 @@ import type { Theme } from "../theme.js";
 import type { BenchmarkCurve, Curve, DepotView, Instrument } from "../types.js";
 import { normalize } from "../view.js";
 
-const STYLES = [LineStyle.Solid, LineStyle.Dashed, LineStyle.Dotted, LineStyle.LargeDashed, LineStyle.SparseDotted];
+// Ghosts are always dashed (and say "Geist" in the legend); the others vary between solid and dotted.
+const STYLES = [LineStyle.Solid, LineStyle.Dotted];
 const MIN_STEP_S = 60;
 const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const seriesColor = (i: number) => css(`--series-${(i % 8) + 1}`);
@@ -110,10 +111,10 @@ export function Curves({ simulationId, depots, simulationTime, theme, instrument
     curves.forEach((curve, i) => {
       let series = lines.current.get(curve.id);
       if (!series) {
-        series = api.addSeries(LineSeries, { lineWidth: 2, lineStyle: STYLES[i % STYLES.length], priceLineVisible: false });
+        series = api.addSeries(LineSeries, { lineWidth: 2, lineStyle: curve.kind === "ghost" ? LineStyle.LargeDashed : STYLES[i % STYLES.length], priceLineVisible: false });
         lines.current.set(curve.id, series);
       }
-      series.applyOptions({ color: seriesColor(i) });
+      series.applyOptions({ color: seriesColor(i), lineStyle: curve.kind === "ghost" ? LineStyle.LargeDashed : STYLES[i % STYLES.length] });
       series.setData(normalize(curve.points).map((p) => ({ time: p.t as UTCTimestamp, value: p.pct })));
     });
     if (curves.some((x) => x.points.length > 1)) api.timeScale().fitContent();
@@ -139,8 +140,8 @@ export function Curves({ simulationId, depots, simulationTime, theme, instrument
           const cls = last > 0 ? "up" : last < 0 ? "down" : "muted";
           return (
             <li key={c.id} data-testid={`legend-${c.id}`}>
-              <span className="swatch" style={{ borderTopColor: seriesColor(i), borderTopStyle: i % 2 ? "dashed" : "solid" }} aria-hidden="true" />
-              <span>{c.name}</span>
+              <span className="swatch" style={{ borderTopColor: seriesColor(i), borderTopStyle: c.kind === "ghost" ? "dashed" : i % 2 ? "dotted" : "solid" }} aria-hidden="true" />
+              <span>{c.name}{c.kind === "ghost" && <span className="badge ghost">Geist</span>}</span>
               <span className={`${cls} num`}>{last > 0 ? "▲" : last < 0 ? "▼" : "•"} {signedPercent(last / 100)}</span>
             </li>
           );

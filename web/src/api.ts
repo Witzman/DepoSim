@@ -1,4 +1,7 @@
-import type { AllocationLine, Bar, ClientMessage, CostPreview, Curves, Depot, Evaluation, Instrument, OrderInput, SearchHit, ServerMessage, Simulation } from "./types.js";
+import type {
+  AllocationLine, BackfillJob, Bar, ClientMessage, CompareResult, CostPreview, Curves, Depot, Evaluation, Instrument, Journal, JournalNoteResult,
+  MissingList, OrderInput, Orderbook, SearchHit, ServerMessage, Simulation, VenueInfo,
+} from "./types.js";
 
 /** An error with a message that can be shown to the person as it is. */
 export class ApiError extends Error {
@@ -72,6 +75,21 @@ export const renameDepot = (id: number, depotId: number, name: string) =>
   request<Depot>(`/api/simulations/${id}/depots/${depotId}`, json("PATCH", { name }));
 export const removeDepot = (id: number, depotId: number) =>
   request<void>(`/api/simulations/${id}/depots/${depotId}`, { method: "DELETE" });
+export const addGhost = (id: number, depotId: number) =>
+  request<Depot>(`/api/simulations/${id}/depots/${depotId}/ghost`, json("POST", {}));
+
+export const getVenues = () => request<VenueInfo[]>("/api/venues");
+export const getMissing = () => request<MissingList>("/api/archive/missing");
+export const startBackfill = () => request<BackfillJob>("/api/archive/backfill", json("POST", {}));
+export const getBackfill = () => request<BackfillJob>("/api/archive/backfill");
+
+export const getJournal = (id: number, depotId: number) => request<Journal>(`/api/simulations/${id}/journal?depotId=${depotId}`);
+export const saveJournalNote = (id: number, tradeKey: string, text: string) =>
+  request<JournalNoteResult>(`/api/simulations/${id}/journal/${encodeURIComponent(tradeKey)}`, json("PUT", { text }));
+export const compareSimulations = (ids: number[]) => request<CompareResult>(`/api/simulations/compare?ids=${ids.join(",")}`);
+export const getOrderbook = (id: number, symbol: string) =>
+  request<Orderbook>(`/api/simulations/${id}/orderbook?symbol=${encodeURIComponent(symbol)}`);
+
 export async function allocate(
   id: number, depotId: number, weights: { symbol: string; percent: number }[], dryRun: boolean,
 ): Promise<AllocationLine[]> {

@@ -20,7 +20,8 @@ function Change({ value, base }: { value: number; base: number }) {
 export function DepotPanel({ depot, startCash }: Props) {
   return (
     <section className="card" aria-label="Depot">
-      <h2>{depot.name}</h2>
+      <h2>{depot.name}{depot.kind === "ghost" && <span className="badge ghost">Geist</span>}</h2>
+      {depot.kind === "ghost" && <p className="muted" data-testid="ghost-note">Geisterdepot: eingefroren und nur zum Ansehen. Es wird weiter bewertet, aber nie gehandelt.</p>}
       <dl className="totals num">
         <dt>Depotwert</dt><dd data-testid="depot-value"><strong>{formatEur(depot.value)}</strong></dd>
         <dt>Guthaben</dt><dd data-testid="cash">{formatEur(depot.cash)}</dd>

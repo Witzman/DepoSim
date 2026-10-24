@@ -29,3 +29,19 @@ export const formatPercentPlain = (x: number | null) => (x === null ? NONE : noN
 const BASIS = { day: "Tageswerte", hour: "Stundenwerte", "5min": "5-Minuten-Werte" } as const;
 /** The step a figure is computed from, in words. */
 export const basisLabel = (basis: keyof typeof BASIS | null) => (basis === null ? NONE : BASIS[basis]);
+
+/** The two largest units of a span: "3 T 4 Std", "2 Std 5 Min", "45 Min". "—" when there is none. */
+export function formatDuration(seconds: number | null): string {
+  if (seconds === null) return NONE;
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days > 0) return hours > 0 ? `${days} T ${hours} Std` : `${days} T`;
+  if (hours > 0) return minutes > 0 ? `${hours} Std ${minutes} Min` : `${hours} Std`;
+  return minutes > 0 ? `${minutes} Min` : "unter 1 Min";
+}
+
+/** A sign that is not a colour: up, down, or level. */
+export const arrowOf = (n: number) => (n > 0 ? "▲" : n < 0 ? "▼" : "•");
+/** Euro cents with arrow and sign: "▲ +10,00 €". */
+export const signedEurArrow = (cents: number) => `${arrowOf(cents)} ${signedEur(cents)}`;

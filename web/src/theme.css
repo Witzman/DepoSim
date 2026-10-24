@@ -251,3 +251,22 @@ kbd { font: inherit; font-size: 0.85rem; padding: 1px 6px; border: 1px solid var
 .draw-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
 .draw-text { display: flex; gap: 6px; }
 .draw-hint { font-size: 0.85rem; }
+
+/* Paket E */
+.badge.ghost { border-color: var(--muted); color: var(--muted); border-style: dashed; }
+.badge.warn { border-color: var(--down); color: var(--down); margin-left: 0; }
+dialog.backfill { width: min(94vw, 600px); max-height: 90vh; overflow-y: auto; }
+.missing-list { max-height: 220px; overflow-y: auto; }
+dialog progress { width: 100%; }
+.venue-notes, ul.plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.sim-label { margin: 0 0 8px; text-transform: uppercase; letter-spacing: 0.03em; border: 1px dashed var(--muted); }
+.orderbook { display: grid; gap: 8px; }
+.orderbook .book .ask td:first-child, .orderbook .book .bid td:first-child { white-space: nowrap; }
+.orderbook .book .mid td { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font-weight: 600; }
+.journal-figures { max-width: 420px; }
+.note { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; min-width: 180px; }
+.note input { flex: 1 1 140px; min-width: 0; }
+fieldset.choose { border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 6px; margin: 0 0 8px; }
+fieldset.choose label.check { display: flex; align-items: center; gap: 8px; }
+fieldset.choose label.check input { width: auto; }
+.note-inline { font-size: 0.85rem; align-self: center; }

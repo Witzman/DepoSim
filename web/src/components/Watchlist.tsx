@@ -8,6 +8,7 @@ interface Props {
   selected: string;
   onSelect: (symbol: string) => void;
   onRemove: (symbol: string) => void;
+  onBackfill: () => void;
 }
 
 const VENUES: { venue: Venue; label: string }[] = [
@@ -15,7 +16,7 @@ const VENUES: { venue: Venue; label: string }[] = [
   { venue: "US", label: "US-Börsen" },
 ];
 
-export function Watchlist({ instruments, prices, venues, selected, onSelect, onRemove }: Props) {
+export function Watchlist({ instruments, prices, venues, selected, onSelect, onRemove, onBackfill }: Props) {
   return (
     <section className="card" aria-label="Watchlist" data-testid="watchlist">
       {VENUES.map(({ venue, label }) => {
@@ -47,6 +48,7 @@ export function Watchlist({ instruments, prices, venues, selected, onSelect, onR
           </div>
         );
       })}
+      <button className="btn small" data-testid="backfill-open" onClick={onBackfill}>Fehlende Kurse nachladen</button>
     </section>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { searchInstruments } from "../api.js";
-import { type Entry, buildEntries } from "../palette.js";
+import { type CommandId, type Entry, buildEntries } from "../palette.js";
 import type { Instrument, SearchHit, Simulation } from "../types.js";
 
 interface Props {
@@ -13,6 +13,9 @@ interface Props {
   onPickSimulation: (id: number) => void;
   onToggleTheme: () => void;
   onShowHelp: () => void;
+  /** The commands that make sense now, and what happens when one is picked. */
+  commands: CommandId[];
+  onCommand: (id: CommandId) => void;
   /** Resolves when the instrument is in the list; rejects with a message that is shown here. */
   onAdd: (symbol: string) => Promise<void>;
 }
@@ -31,13 +34,15 @@ function describe(e: Entry, selectedId: number | null): { text: string; tag: str
       return { text: "Hell oder Dunkel umschalten", tag: "Ansicht" };
     case "help":
       return { text: "Tastenkürzel anzeigen", tag: "Hilfe" };
+    case "command":
+      return { text: e.label, tag: "Befehl" };
     case "hit":
       return { text: `${e.hit.symbol} · ${e.hit.name} (${PLACE[e.hit.venue]})`, tag: "Neu hinzufügen" };
   }
 }
 
 export function Palette({
-  open, instruments, simulations, selectedId, onClose, onPickInstrument, onPickSimulation, onToggleTheme, onShowHelp, onAdd,
+  open, instruments, simulations, selectedId, onClose, onPickInstrument, onPickSimulation, onToggleTheme, onShowHelp, commands, onCommand, onAdd,
 }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -83,7 +88,7 @@ export function Palette({
     return () => { current = false; clearTimeout(timer); };
   }, [query, open]);
 
-  const entries = useMemo(() => buildEntries(query, instruments, simulations, hits), [query, instruments, simulations, hits]);
+  const entries = useMemo(() => buildEntries(query, instruments, simulations, hits, commands), [query, instruments, simulations, hits, commands]);
   useEffect(() => setActive(0), [entries.length, query]);
 
   async function pick(e: Entry | undefined) {
@@ -92,6 +97,7 @@ export function Palette({
     else if (e.kind === "simulation") onPickSimulation(e.simulation.id);
     else if (e.kind === "theme") onToggleTheme();
     else if (e.kind === "help") onShowHelp();
+    else if (e.kind === "command") onCommand(e.id);
     else {
       setBusy(true);
       setProblem(null);

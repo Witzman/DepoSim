@@ -66,8 +66,8 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
   if (!data) return <section className="card"><p className="muted">Lädt …</p></section>;
 
   const active = data.depots.find((d) => d.id === activeDepotId) ?? data.depots[0];
-  const rows: { key: string; name: string; since?: string; m: Metrics }[] = [
-    ...data.depots.map((d) => ({ key: `d${d.id}`, name: d.name, since: formatSimTime(d.startedAt), m: d.metrics })),
+  const rows: { key: string; name: string; ghost?: boolean; since?: string; m: Metrics }[] = [
+    ...data.depots.map((d) => ({ key: `d${d.id}`, name: d.name, ghost: d.kind === "ghost", since: formatSimTime(d.startedAt), m: d.metrics })),
     ...(data.benchmark ? [{ key: "bench", name: `Maßstab ${data.benchmark.symbol}`, m: data.benchmark.metrics }] : []),
   ];
   const anyBasis = rows.some((r) => r.m.basis);
@@ -82,7 +82,7 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
             <tbody>
               {rows.map((r) => (
                 <tr key={r.key} data-testid={`metrics-${r.key}`}>
-                  <td>{r.name}</td><td>{r.since ?? "—"}</td>
+                  <td>{r.name}{r.ghost && <span className="badge ghost">Geist</span>}</td><td>{r.since ?? "—"}</td>
                   <td><Change ratio={r.m.totalReturn} /></td>
                   <td>{basisLabel(r.m.basis)}</td>
                   <td>{formatPercentPlain(r.m.volatility)}</td>
@@ -101,11 +101,11 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
             <h3>Korrelation der Depots</h3>
             <div className="scroll">
               <table className="positions num" data-testid="correlation">
-                <thead><tr><th />{data.depots.map((d) => <th key={d.id}>{d.name}</th>)}</tr></thead>
+                <thead><tr><th />{data.depots.map((d) => <th key={d.id}>{d.name}{d.kind === "ghost" && <span className="badge ghost">Geist</span>}</th>)}</tr></thead>
                 <tbody>
                   {data.depots.map((d, i) => (
                     <tr key={d.id}>
-                      <td>{d.name}</td>
+                      <td>{d.name}{d.kind === "ghost" && <span className="badge ghost">Geist</span>}</td>
                       {data.correlation.matrix[i].map((x, j) => <td key={j}>{formatRatio(x)}</td>)}
                     </tr>
                   ))}
@@ -135,7 +135,7 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
             <tbody>
               {data.depots.map((d) => (
                 <tr key={d.id} data-testid={`fees-${d.id}`}>
-                  <td>{d.name}</td><td>{d.fees.orders}</td><td>{formatEur(d.fees.commission)}</td>
+                  <td>{d.name}{d.kind === "ghost" && <span className="badge ghost">Geist</span>}</td><td>{d.fees.orders}</td><td>{formatEur(d.fees.commission)}</td>
                   <td>{formatEur(d.fees.foreign)}</td><td>{formatEur(d.fees.total)}</td><td>{formatPercentPlain(d.fees.shareOfStart)}</td>
                 </tr>
               ))}
