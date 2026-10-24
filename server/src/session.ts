@@ -6,6 +6,7 @@ import { type DepotState, type NewOrder, depotValue, fillOrder, positionValue, t
 import {
   CATCH_UP_LAG_S, LIVE_EDGE_S, LIVE_MARGIN_S, OPEN_WINDOW_S, type Tempo, advanceCarry, effectiveTempo, liveLimit, skipClosed,
 } from "./domain/clock.js";
+import { type AllocationLine, planAllocation } from "./domain/allocation.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
 import type { Cent } from "./domain/money.js";
 import type { Depot, OrderRecord, Simulation, Store } from "./store.js";
@@ -333,6 +334,48 @@ export class SessionService {
     if (depots.length === 1) return { ok: false, reason: "Das letzte Depot lässt sich nicht löschen." };
     this.store.deleteDepot(depotId);
     return { ok: true };
+  }
+
+  /**
+   * Builds a depot from shares in percent. A dry run only plans. Otherwise one market order per
+   * title with at least one piece goes through `placeOrder`, so it behaves like an order by hand
+   * (an order waits while the market is shut).
+   */
+  allocate(
+    id: number,
+    depotId: number,
+    weights: { symbol: string; percent: number }[],
+    dryRun: boolean,
+  ): { ok: true; lines: AllocationLine[] } | { ok: false; reason: string } {
+    const sim = this.sim(id);
+    if (!this.store.listDepots(id).some((d) => d.id === depotId)) return { ok: false, reason: "Unbekanntes Depot." };
+    if (!dryRun && sim.endedAt !== null) return { ok: false, reason: "Die Simulation ist beendet." };
+
+    const merged = new Map<string, number>();
+    for (const w of weights) merged.set(w.symbol, (merged.get(w.symbol) ?? 0) + w.percent);
+    let lines: AllocationLine[];
+    try {
+      lines = planAllocation(
+        this.store.loadDepot(depotId).cash,
+        [...merged].map(([symbol, percent]) => {
+          const inst = this.registry.get(symbol);
+          return { symbol, percent, ref: inst && this.refAt(inst, sim.simulationTime) };
+        }),
+        sim.fees,
+      );
+    } catch (err) {
+      if (err instanceof RangeError) return { ok: false, reason: err.message };
+      throw err;
+    }
+    for (const line of lines) if (!this.registry.get(line.symbol)) line.skipped = "Unbekanntes Wertpapier";
+    if (!dryRun) {
+      for (const line of lines) {
+        if (line.qty === 0) continue;
+        const placed = this.placeOrder(id, depotId, { symbol: line.symbol, side: "buy", kind: "market", qty: line.qty });
+        if (!placed.ok) Object.assign(line, { qty: 0, total: 0, skipped: placed.reason });
+      }
+    }
+    return { ok: true, lines };
   }
 
   cancelOrder(id: number, orderId: number): { ok: true } | { ok: false; reason: string } {

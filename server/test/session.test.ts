@@ -709,3 +709,51 @@ describe("several depots", () => {
     expect(t.svc.removeDepot(t.id, 9999)).toEqual({ ok: false, reason: "Unbekanntes Depot." });
   });
 });
+
+describe("allocate", () => {
+  const weights = [{ symbol: "SAP.DE", percent: 60 }, { symbol: "AAPL", percent: 40 }];
+
+  it("plans without placing anything on a dry run", async () => {
+    const t = setup({ startAt: D0 + 13 * H + 1800 + 600 });
+    await t.svc.start(t.id);
+    const r = t.svc.allocate(t.id, t.depotId, weights, true);
+    expect(r.ok && r.lines.map((l) => l.symbol)).toEqual(["SAP.DE", "AAPL"]);
+    expect(t.svc.snapshot(t.id).depots[0].orders).toEqual([]);
+  });
+
+  it("places one market order per line and the cash falls by the planned totals", async () => {
+    const t = setup({ startAt: D0 + 13 * H + 1800 + 600 }); // both markets have a price; US is open
+    await t.svc.start(t.id);
+    const r = t.svc.allocate(t.id, t.depotId, weights, false);
+    if (!r.ok) throw new Error(r.reason);
+    const bought = r.lines.filter((l) => l.qty > 0);
+    expect(bought.length).toBeGreaterThan(0);
+    const snap = t.svc.snapshot(t.id).depots[0];
+    expect(snap.orders).toHaveLength(bought.length);
+    const filledTotal = snap.orders.filter((o) => o.status === "filled").length;
+    expect(filledTotal).toBeGreaterThan(0);
+    expect(snap.cash).toBeGreaterThanOrEqual(0);
+  });
+
+  it("merges a symbol given twice and refuses unknown symbols and bad sums", async () => {
+    const t = setup();
+    await t.svc.start(t.id);
+    const r = t.svc.allocate(t.id, t.depotId, [{ symbol: "SAP.DE", percent: 30 }, { symbol: "SAP.DE", percent: 20 }], true);
+    expect(r.ok && r.lines).toHaveLength(1);
+    expect(r.ok && r.lines[0].percent).toBe(50);
+    const bad = t.svc.allocate(t.id, t.depotId, [{ symbol: "NOPE", percent: 10 }], true);
+    expect(bad.ok && bad.lines[0]).toMatchObject({ qty: 0, skipped: "Unbekanntes Wertpapier" });
+    expect(t.svc.allocate(t.id, t.depotId, [{ symbol: "SAP.DE", percent: 120 }], true)).toMatchObject({ ok: false });
+    expect(t.svc.allocate(t.id, 9999, weights, true)).toEqual({ ok: false, reason: "Unbekanntes Depot." });
+  });
+
+  it("leaves the orders open while the market is shut, like an order by hand", async () => {
+    const t = setup({ startAt: D0 + 3 * H }); // before any bar of the day
+    await t.svc.start(t.id);
+    const r = t.svc.allocate(t.id, t.depotId, [{ symbol: "SAP.DE", percent: 50 }], false);
+    expect(r.ok).toBe(true);
+    const snap = t.svc.snapshot(t.id).depots[0];
+    expect(snap.cash).toBe(1_000_000);
+    expect(snap.orders.every((o) => o.status === "open")).toBe(true);
+  });
+});
