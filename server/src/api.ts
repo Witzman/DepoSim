@@ -44,6 +44,9 @@ const allocateBody = z.object({
   dryRun: z.boolean().optional(),
 });
 
+const compareQuery = z.object({ ids: z.string().default("") });
+const COMPARE_NOTE = "Jede Kurve reicht bis zur eigenen Simulationszeit; es gibt keine gemeinsame Zeitachse. Werte in Prozent vom ersten Punkt.";
+
 const journalQuery = z.object({ depotId: z.coerce.number().int().optional() });
 const noteBody = z.object({ text: z.string().max(500, "Die Notiz darf höchstens 500 Zeichen haben.") });
 const TRADE_KEY = /^\d{1,12}:\d{1,12}$/;
@@ -236,6 +239,19 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     hub.drop(sim.id);
     store.endSimulation(sim.id);
     return store.getSimulation(sim.id);
+  });
+
+  // A static route: it wins over `/api/simulations/:id/...` in the router.
+  app.get("/api/simulations/compare", async (req, reply) => {
+    const query = compareQuery.safeParse(req.query);
+    if (!query.success) return invalid(reply, query.error);
+    const parts = query.data.ids.split(",").map((x) => x.trim());
+    if (parts.some((x) => !/^\d{1,12}$/.test(x))) return reply.code(400).send({ error: "Die Liste ids braucht Simulationsnummern, durch Komma getrennt." });
+    const ids = [...new Set(parts.map(Number))];
+    if (ids.length < 2 || ids.length > 4) return reply.code(400).send({ error: "Der Vergleich braucht 2 bis 4 verschiedene Simulationen." });
+    const unknown = ids.find((id) => !store.getSimulation(id));
+    if (unknown !== undefined) return reply.code(404).send({ error: `Unbekannte Simulation ${unknown}.` });
+    return { simulations: ids.map((id) => session.compare(id)), note: COMPARE_NOTE };
   });
 
   app.get("/api/simulations/:id/bars", async (req, reply) => {

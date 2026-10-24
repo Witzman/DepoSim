@@ -305,3 +305,33 @@ export interface JournalNoteResult {
   tradeKey: string;
   text: string;
 }
+
+/** GET /api/simulations/compare?ids=1,2,3 (2 to 4 distinct ids; 404 { error } for an unknown one, 400 otherwise). */
+export interface Comparison {
+  id: number;
+  name: string;
+  startAt: number;
+  simulationTime: number;
+  depots: {
+    id: number;
+    name: string;
+    kind: DepotKind;
+    startedAt: number;
+    /** Percent from the depot's first point, at most 400 points, on this simulation's own time axis. */
+    points: { t: number; pct: number }[];
+    figures: {
+      returnPct: number | null;
+      /** 0 or negative, percent. */
+      maxDrawdownPct: number | null;
+      /** Commission plus foreign fee, in cents. */
+      fees: number;
+      /** Filled orders. */
+      trades: number;
+    };
+  }[];
+}
+
+export interface CompareResult {
+  simulations: Comparison[];
+  note: string;
+}

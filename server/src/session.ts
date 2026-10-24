@@ -106,6 +106,34 @@ const EVALUATION_NOTE =
 
 const GHOST_NO_TRADE = "Ein Geisterdepot handelt nicht.";
 
+/** One simulation in a comparison: curves in percent from their own start, on their own time axis. */
+export interface Comparison {
+  id: number;
+  name: string;
+  startAt: number;
+  simulationTime: number;
+  depots: {
+    id: number;
+    name: string;
+    kind: DepotKind;
+    startedAt: number;
+    /** Percent change from the first point of the depot's curve. */
+    points: { t: number; pct: number }[];
+    figures: {
+      /** Percent; null with fewer than two points. */
+      returnPct: number | null;
+      /** The deepest fall from a peak in percent (0 or negative); null with fewer than two points. */
+      maxDrawdownPct: number | null;
+      /** Commission and foreign fee booked, in cents. */
+      fees: Cent;
+      /** Filled orders. */
+      trades: number;
+    };
+  }[];
+}
+
+export const COMPARE_POINTS = 400;
+
 export type PlaceResult = { ok: true; orderId: number } | { ok: false; reason: string };
 
 /** `problem` is why the order would be rejected; the cost is shown anyway. */
@@ -395,6 +423,28 @@ export class SessionService {
       ok: true,
       depot: this.store.createGhostDepot(id, `Geist von ${source.name}`, state.cash, state.positions, sim.simulationTime, value),
     };
+  }
+
+  /** Normalised curves and key figures of one simulation, computed now. */
+  compare(id: number): Comparison {
+    const sim = this.sim(id);
+    const depots = this.store.listDepots(id).map((d) => {
+      const full = this.store.valueCurve(d.id, EVALUATION_POINTS);
+      const metrics = computeMetrics(full);
+      const first = full[0]?.value ?? 0;
+      const points = thin(full, COMPARE_POINTS).map((p) => ({ t: p.t, pct: first === 0 ? 0 : (p.value / first - 1) * 100 }));
+      const ledger = feeLedger(this.store.loadDepot(d.id).orders, sim.startCash);
+      return {
+        id: d.id, name: d.name, kind: d.kind, startedAt: full[0]?.t ?? sim.startAt, points,
+        figures: {
+          returnPct: metrics.totalReturn === null ? null : metrics.totalReturn * 100,
+          maxDrawdownPct: metrics.maxDrawdown === null ? null : metrics.maxDrawdown * 100,
+          fees: ledger.total,
+          trades: ledger.orders,
+        },
+      };
+    });
+    return { id, name: sim.name, startAt: sim.startAt, simulationTime: sim.simulationTime, depots };
   }
 
   /** Trades, hit rate, holding time and "too early" of one depot, computed now from its filled orders. */

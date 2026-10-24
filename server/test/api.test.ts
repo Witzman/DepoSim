@@ -873,3 +873,65 @@ describe("journal over HTTP", () => {
     expect((await app.inject({ url: `/api/simulations/9999/journal` })).statusCode).toBe(404);
   });
 });
+
+describe("simulation comparison", () => {
+  const compare = (app: FastifyInstance, ids: string) => app.inject({ url: `/api/simulations/compare?ids=${ids}` });
+
+  it("gives each simulation its normalised curves and figures on its own time axis", async () => {
+    const app = make();
+    const a = await createSim(app);
+    const b = await createSim(app, START + 300);
+    await post(app, `/api/simulations/${a}/orders`, { symbol: "SAP.DE", side: "buy", kind: "market", qty: 2 });
+    await app.session.tick(a, 120_000);
+    const res = await compare(app, `${a},${b}`);
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.simulations.map((s: any) => s.id)).toEqual([a, b]);
+    const first = body.simulations[0];
+    expect(first).toMatchObject({ name: "T", startAt: START, simulationTime: START + 120 });
+    const depot = first.depots[0];
+    expect(depot).toMatchObject({ kind: "normal", startedAt: START });
+    expect(depot.points[0]).toEqual({ t: START, pct: 0 });
+    expect(depot.points.at(-1).t).toBe(START + 120);
+    expect(depot.figures).toMatchObject({ trades: 1, fees: 490 });
+    expect(depot.figures.returnPct).toBeCloseTo(((depot.points.at(-1).pct) * 1), 10);
+    expect(depot.figures.maxDrawdownPct).toBeLessThanOrEqual(0);
+    // the second simulation has its own, later clock and no trades
+    expect(body.simulations[1].simulationTime).toBe(START + 300);
+    expect(body.simulations[1].depots[0].figures).toMatchObject({ trades: 0, fees: 0, returnPct: null });
+    expect(body.note).toMatch(/eigenen Simulationszeit/);
+  });
+
+  it("marks ghosts, thins long curves to 400 points and dedupes the ids", async () => {
+    const app = make();
+    const a = await createSim(app);
+    const b = await createSim(app);
+    await post(app, `/api/simulations/${a}/orders`, { symbol: "SAP.DE", side: "buy", kind: "market", qty: 1 });
+    const depotId = (await app.inject({ url: `/api/simulations/${a}/curves` })).json().depots[0].id;
+    await post(app, `/api/simulations/${a}/depots/${depotId}/ghost`, {});
+    const long = (app as any).session; // 1000 minutes of curve for the first depot
+    for (let i = 0; i < 1000; i++) long.store.recordValue(depotId, START + 60 * (i + 1), 1_000_000 + i);
+    const body = (await compare(app, `${a},${b},${a}`)).json();
+    expect(body.simulations).toHaveLength(2);
+    expect(body.simulations[0].depots.map((d: any) => d.kind)).toEqual(["normal", "ghost"]);
+    expect(body.simulations[0].depots[0].points.length).toBeLessThanOrEqual(400);
+    expect(body.simulations[0].depots[0].points[0].t).toBe(START);
+  });
+
+  it("answers 404 with a message for an unknown simulation and 400 for a bad list", async () => {
+    const app = make();
+    const a = await createSim(app);
+    const b = await createSim(app);
+    const missing = await compare(app, `${a},9999`);
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json().error).toBe("Unbekannte Simulation 9999.");
+    expect((await compare(app, `${a}`)).statusCode).toBe(400);
+    expect((await compare(app, `${a},${a}`)).statusCode).toBe(400);
+    expect((await compare(app, `${a},x`)).statusCode).toBe(400);
+    expect((await compare(app, ``)).statusCode).toBe(400);
+    const many = [a, b, ...[1, 2, 3].map(async () => createSim(app))];
+    expect((await compare(app, (await Promise.all(many)).join(","))).statusCode).toBe(400);
+    // a normal id route still works next to it
+    expect((await app.inject({ url: `/api/simulations/${a}/curves` })).statusCode).toBe(200);
+  });
+});
