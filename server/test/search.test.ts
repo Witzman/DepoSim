@@ -84,6 +84,24 @@ describe("createYahooSearch", () => {
     expect(f.urls).toHaveLength(2);
   });
 
+  it("asks Yahoo once when the same query is asked twice at the same moment, and both get the answer", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let calls = 0;
+    const fn = (async () => {
+      calls++;
+      await gate;
+      return new Response(quotes({ exchange: "GER", longname: "A", quoteType: "EQUITY", symbol: "A.DE" }), { status: 200 });
+    }) as typeof fetch;
+    const search = createYahooSearch(fn, () => 1);
+    const both = Promise.all([search.search("a.de"), search.search(" A.DE ")]);
+    release();
+    const [x, y] = await both;
+    expect(calls).toBe(1);
+    expect(x).toEqual(y);
+    expect(x).toHaveLength(1);
+  });
+
   it("does not keep a failure", async () => {
     let fail = true;
     const f = fetcher(() => (fail ? new Response("", { status: 429 }) : new Response(quotes(), { status: 200 })));

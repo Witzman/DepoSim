@@ -568,6 +568,24 @@ describe("search and the watchlist", () => {
     expect(msgs.at(-1).type).toBe("snapshot");
   });
 
+  it("removes by symbol whatever its case, like the add matches whatever its case", async () => {
+    const { app } = withSearch();
+    await post(app, "/api/watchlist", { symbol: "NEW.DE" });
+    expect((await del(app, "/api/watchlist/new.de")).statusCode).toBe(204);
+    expect(await symbols(app)).toEqual(["SAP.DE"]);
+    expect((await del(app, "/api/watchlist/sap.de")).statusCode).toBe(409); // still the starting list
+  });
+
+  it("keeps one entry when the same new symbol is added twice at the same moment", async () => {
+    const { app } = withSearch();
+    const [a, b] = await Promise.all([
+      post(app, "/api/watchlist", { symbol: "NEW.DE" }),
+      post(app, "/api/watchlist", { symbol: "NEW.DE" }),
+    ]);
+    expect([a.statusCode, b.statusCode].sort()).toEqual([200, 201]);
+    expect(await symbols(app)).toEqual(["SAP.DE", "NEW.DE"]);
+  });
+
   it("refuses to remove an instrument that a simulation holds, or has an open order in", async () => {
     const { app } = withSearch();
     await post(app, "/api/watchlist", { symbol: "AAPL" });

@@ -93,6 +93,7 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     const body = addBody.safeParse(req.body);
     if (!body.success) return invalid(reply, body.error);
     const wanted = body.data.symbol;
+    // The registry refuses the exchange rate too; asking here first saves a call to the search.
     if (!SYMBOL.test(wanted) || wanted.toUpperCase() === FX_SYMBOL) {
       return reply.code(400).send({ error: "Ungültiges Kürzel." });
     }
@@ -125,15 +126,16 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
   });
 
   app.delete("/api/watchlist/:symbol", async (req, reply) => {
-    const symbol = (req.params as { symbol: string }).symbol;
-    if (!instruments.get(symbol)) return reply.code(404).send({ error: `Unbekanntes Wertpapier ${symbol}.` });
-    if (!instruments.isAdded(symbol)) {
+    const wanted = (req.params as { symbol: string }).symbol;
+    const inst = instruments.list().find((i) => i.symbol.toUpperCase() === wanted.toUpperCase());
+    if (!inst) return reply.code(404).send({ error: `Unbekanntes Wertpapier ${wanted}.` });
+    if (!instruments.isAdded(inst.symbol)) {
       return reply.code(409).send({ error: "Dieses Wertpapier gehört zum Startbestand." });
     }
-    if (store.symbolInUse(symbol)) {
+    if (store.symbolInUse(inst.symbol)) {
       return reply.code(409).send({ error: "Das Wertpapier wird gehalten oder hat offene Orders." });
     }
-    instruments.remove(symbol);
+    instruments.remove(inst.symbol);
     refreshClients();
     return reply.code(204).send();
   });

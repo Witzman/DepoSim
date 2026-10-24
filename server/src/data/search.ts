@@ -26,12 +26,11 @@ const PLACES: Record<string, Pick<Instrument, "venue" | "currency">> = {
 
 export function createYahooSearch(fetchFn: typeof fetch = fetch, now: () => number = () => Date.now() / 1000): InstrumentSearch {
   const cache = new Map<string, { at: number; hits: SearchHit[] }>();
+  /** The same query asked while it is on its way shares that one request. */
+  const inflight = new Map<string, Promise<SearchHit[]>>();
 
-  return {
-    async search(q) {
-      const key = q.trim().toLowerCase();
-      const held = cache.get(key);
-      if (held && now() - held.at < CACHE_S) return held.hits;
+  async function fetchHits(q: string, key: string): Promise<SearchHit[]> {
+    {
 
       const url = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q.trim())}&quotesCount=10&newsCount=0`;
       let res: Response;
@@ -63,6 +62,19 @@ export function createYahooSearch(fetchFn: typeof fetch = fetch, now: () => numb
       cache.set(key, { at: now(), hits });
       if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value as string);
       return hits;
+    }
+  }
+
+  return {
+    search(q) {
+      const key = q.trim().toLowerCase();
+      const held = cache.get(key);
+      if (held && now() - held.at < CACHE_S) return Promise.resolve(held.hits);
+      const running = inflight.get(key);
+      if (running) return running;
+      const p = fetchHits(q, key).finally(() => inflight.delete(key));
+      inflight.set(key, p);
+      return p;
     },
   };
 }

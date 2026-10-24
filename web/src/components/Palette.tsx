@@ -115,6 +115,7 @@ export function Palette({
     <dialog ref={dialog} className="palette" data-testid="palette" aria-label="Befehlspalette" onClose={onClose}>
       <input
         ref={input} data-testid="palette-input" type="text" role="combobox" aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list"
+        aria-activedescendant={entries.length > 0 ? `palette-option-${Math.min(active, entries.length - 1)}` : undefined}
         aria-label="Suche und Befehle" placeholder="Wertpapier suchen oder Befehl …"
         value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={onKeyDown} autoComplete="off" spellCheck={false}
       />
@@ -122,7 +123,7 @@ export function Palette({
         {entries.map((e, n) => {
           const { text, tag } = describe(e, selectedId);
           return (
-            <li key={n} role="option" aria-selected={n === active} onMouseEnter={() => setActive(n)} onClick={() => void pick(e)}>
+            <li key={n} id={`palette-option-${n}`} role="option" aria-selected={n === active} onMouseEnter={() => setActive(n)} onClick={() => void pick(e)}>
               <span>{text}</span>
               <span className="muted">{tag}</span>
             </li>

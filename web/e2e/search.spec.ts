@@ -79,3 +79,18 @@ test("an added title that nobody holds can be removed, and a title in the list i
   await page.keyboard.press("Enter");
   await expect(page.getByLabel("Wertpapier", { exact: true })).toHaveValue("SIE.DE");
 });
+
+test("the palette names the highlighted option for screen readers, and fills a phone screen", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await createSimulation(page);
+  await page.keyboard.press("Control+k");
+  const field = page.getByTestId("palette-input");
+  const options = page.getByTestId("palette").getByRole("option");
+  const first = options.first();
+  await expect(field).toHaveAttribute("aria-activedescendant", (await first.getAttribute("id"))!);
+  await page.keyboard.press("ArrowDown");
+  const second = options.nth(1);
+  await expect(field).toHaveAttribute("aria-activedescendant", (await second.getAttribute("id"))!);
+  const box = (await page.getByTestId("palette").boundingBox())!;
+  expect(box.width).toBeGreaterThanOrEqual(388);
+});
