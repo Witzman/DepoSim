@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatEur, formatPrice, signedEur, signedPercent } from "../src/format.js";
+import { basisLabel, formatEur, formatPercentPlain, formatPrice, formatRatio, signedEur, signedPercent } from "../src/format.js";
 
 const nb = " "; // Intl puts a no-break space before the currency sign
 
@@ -26,5 +26,30 @@ describe("signedEur and signedPercent", () => {
     expect(signedEur(0)).toBe(`0,00${nb}€`);
     expect(signedPercent(0.0123)).toBe(`+1,23${nb}%`);
     expect(signedPercent(-0.5)).toBe(`-50,00${nb}%`);
+  });
+});
+
+describe("formatRatio and formatPercentPlain", () => {
+  it("writes a ratio with a German decimal comma, and a dash for nothing", () => {
+    expect(formatRatio(1.2345)).toBe("1,23");
+    expect(formatRatio(-0.5)).toBe("-0,50");
+    expect(formatRatio(null)).toBe("—");
+    expect(formatPercentPlain(0.1234)).toBe(`12,34${nb}%`);
+    expect(formatPercentPlain(null)).toBe("—");
+    expect(formatPercentPlain(-0.25)).toBe(`-25,00${nb}%`);
+  });
+
+  it("never shows a negative zero", () => {
+    expect(formatRatio(-0.0001)).toBe("0,00");
+    expect(formatPercentPlain(-0.00001)).toBe(`0,00${nb}%`);
+  });
+});
+
+describe("basisLabel", () => {
+  it("names the step the figures are computed from", () => {
+    expect(basisLabel("day")).toBe("Tageswerte");
+    expect(basisLabel("hour")).toBe("Stundenwerte");
+    expect(basisLabel("5min")).toBe("5-Minuten-Werte");
+    expect(basisLabel(null)).toBe("—");
   });
 });

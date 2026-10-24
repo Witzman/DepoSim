@@ -1,4 +1,4 @@
-import type { AllocationLine, Bar, ClientMessage, CostPreview, Curve, Depot, Instrument, OrderInput, SearchHit, ServerMessage, Simulation } from "./types.js";
+import type { AllocationLine, Bar, ClientMessage, CostPreview, Curves, Depot, Evaluation, Instrument, OrderInput, SearchHit, ServerMessage, Simulation } from "./types.js";
 
 /** An error with a message that can be shown to the person as it is. */
 export class ApiError extends Error {
@@ -62,7 +62,10 @@ export const placeOrder = async (id: number, o: OrderInput) =>
 export const cancelOrder = (id: number, orderId: number) =>
   request<void>(`/api/simulations/${id}/orders/${orderId}`, { method: "DELETE" });
 
-export const getCurves = (id: number) => request<{ depots: Curve[] }>(`/api/simulations/${id}/curves`);
+export const getCurves = (id: number) => request<Curves>(`/api/simulations/${id}/curves`);
+export const getEvaluation = (id: number) => request<Evaluation>(`/api/simulations/${id}/evaluation`);
+export const setBenchmark = (id: number, symbol: string | null) =>
+  request<Simulation>(`/api/simulations/${id}`, json("PATCH", { benchmark: symbol }));
 export const addDepot = (id: number, name?: string) =>
   request<Depot>(`/api/simulations/${id}/depots`, json("POST", name === undefined ? {} : { name }));
 export const renameDepot = (id: number, depotId: number, name: string) =>

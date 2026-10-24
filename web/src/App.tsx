@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type Socket, addDepot, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, getBars, getWatchlist, listSimulations,
-  openSocket, removeDepot, removeInstrument, renameDepot,
+  openSocket, removeDepot, setBenchmark, removeInstrument, renameDepot,
 } from "./api.js";
 import { AllocationDialog } from "./components/AllocationDialog.js";
 import { Chart } from "./components/Chart.js";
 import { ClockBar } from "./components/ClockBar.js";
 import { Curves } from "./components/Curves.js";
+import { Evaluation } from "./components/Evaluation.js";
 import { DepotPanel } from "./components/DepotPanel.js";
 import { DepotSwitch } from "./components/DepotSwitch.js";
 import { OrderTicket } from "./components/OrderTicket.js";
@@ -232,6 +233,17 @@ export function App() {
     }
   }
 
+  async function chooseBenchmark(symbol: string | null) {
+    if (selectedId === null) return;
+    try {
+      const sim = await setBenchmark(selectedId, symbol);
+      setSimulations((prev) => prev.map((x) => (x.id === sim.id ? sim : x)));
+      setSnapshot((prev) => prev && { ...prev, simulation: sim });
+    } catch (e) {
+      setNotice((e as Error).message);
+    }
+  }
+
   async function cancel(orderId: number) {
     if (selectedId === null) return;
     try {
@@ -327,8 +339,15 @@ export function App() {
               )}
                 </>
               ) : (
-                snapshot && (
-                  <Curves simulationId={live.id} depots={snapshot.depots} simulationTime={live.simulationTime} theme={theme} />
+                snapshot && depot && (
+                  <>
+                    <Curves simulationId={live.id} depots={snapshot.depots} simulationTime={live.simulationTime} theme={theme}
+                      instruments={watchlist} benchmark={live.benchmark}
+                      benchmarkPrice={live.benchmark ? snapshot.prices[live.benchmark]?.price : undefined}
+                      onBenchmark={chooseBenchmark} />
+                    <Evaluation simulationId={live.id} activeDepotId={depot.id} running={snapshot.running}
+                      benchmark={live.benchmark} />
+                  </>
                 )
               )}
             </>

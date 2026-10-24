@@ -188,3 +188,12 @@ dialog.palette p { margin: 8px 0 0; font-size: 0.9rem; }
 .legend .swatch { display: inline-block; width: 22px; border-top: 3px solid; }
 dialog.allocation { width: min(94vw, 560px); }
 .alloc-row { display: grid; grid-template-columns: minmax(0, 1fr) 90px auto; gap: 6px; }
+
+.inline { display: flex; gap: 6px; align-items: center; font-size: 0.85rem; color: var(--muted); }
+.scroll { overflow-x: auto; }
+h3 { margin: var(--gap) 0 4px; font-size: 0.85rem; font-weight: 600; }
+.dist .bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--border); }
+.dist .bar span { display: block; height: 100%; min-width: 2px; }
+.slices { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; font-size: 0.9rem; }
+.slices li { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; }
+.slices .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }

@@ -35,6 +35,8 @@ export interface Simulation {
   endedAt: number | null;
   /** Catches up to the present by itself and then follows real time; the tempo is not the person's to set. */
   live: boolean;
+  /** The symbol the curves are measured against, if one was chosen. */
+  benchmark: string | null;
 }
 
 export interface OrderRecord {
@@ -76,6 +78,50 @@ export interface Curve {
   id: number;
   name: string;
   points: CurvePoint[];
+}
+
+export interface BenchmarkCurve {
+  symbol: string;
+  name: string;
+  currency: "EUR" | "USD";
+  points: CurvePoint[];
+}
+
+export interface Curves {
+  depots: Curve[];
+  benchmark: BenchmarkCurve | null;
+}
+
+export type Basis = "day" | "hour" | "5min";
+
+export interface Metrics {
+  basis: Basis | null;
+  periodsPerYear: number | null;
+  totalReturn: number | null;
+  volatility: number | null;
+  maxDrawdown: number | null;
+  sharpe: number | null;
+  unavailable?: string;
+}
+
+export interface Slice {
+  label: string;
+  value: number;
+  share: number;
+}
+
+export interface Evaluation {
+  depots: {
+    id: number;
+    name: string;
+    startedAt: number;
+    metrics: Metrics;
+    fees: { orders: number; commission: number; foreign: number; total: number; shareOfStart: number };
+    breakdown: { sector: Slice[]; country: Slice[]; currency: Slice[] };
+  }[];
+  correlation: { ids: number[]; basis: Basis | null; matrix: (number | null)[][] };
+  benchmark: { symbol: string; name: string; metrics: Metrics } | null;
+  note: string;
 }
 
 export interface AllocationLine {
