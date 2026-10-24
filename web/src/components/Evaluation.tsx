@@ -77,17 +77,17 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
       <section className="card" aria-label="Kennzahlen">
         <h2>Kennzahlen</h2>
         <div className="scroll">
-          <table className="positions num" data-testid="metrics">
+          <table className="positions num stacked" data-testid="metrics">
             <thead><tr><th>Depot</th><th>Seit</th><th>Rendite</th><th>Basis</th><th>Volatilität p. a.</th><th>Max. Rückgang</th><th>Sharpe</th></tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.key} data-testid={`metrics-${r.key}`}>
-                  <td>{r.name}{r.ghost && <span className="badge ghost">Geist</span>}</td><td>{r.since ?? "—"}</td>
-                  <td><Change ratio={r.m.totalReturn} /></td>
-                  <td>{basisLabel(r.m.basis)}</td>
-                  <td>{formatPercentPlain(r.m.volatility)}</td>
-                  <td>{formatPercentPlain(r.m.maxDrawdown)}</td>
-                  <td>{formatRatio(r.m.sharpe)}</td>
+                  <td>{r.name}{r.ghost && <span className="badge ghost">Geist</span>}</td><td data-label="Seit">{r.since ?? "—"}</td>
+                  <td data-label="Rendite"><Change ratio={r.m.totalReturn} /></td>
+                  <td data-label="Basis">{basisLabel(r.m.basis)}</td>
+                  <td data-label="Volatilität p. a.">{formatPercentPlain(r.m.volatility)}</td>
+                  <td data-label="Max. Rückgang">{formatPercentPlain(r.m.maxDrawdown)}</td>
+                  <td data-label="Sharpe">{formatRatio(r.m.sharpe)}</td>
                 </tr>
               ))}
             </tbody>
@@ -100,13 +100,13 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
           <>
             <h3>Korrelation der Depots</h3>
             <div className="scroll">
-              <table className="positions num" data-testid="correlation">
+              <table className="positions num stacked" data-testid="correlation">
                 <thead><tr><th />{data.depots.map((d) => <th key={d.id}>{d.name}{d.kind === "ghost" && <span className="badge ghost">Geist</span>}</th>)}</tr></thead>
                 <tbody>
                   {data.depots.map((d, i) => (
                     <tr key={d.id}>
                       <td>{d.name}{d.kind === "ghost" && <span className="badge ghost">Geist</span>}</td>
-                      {data.correlation.matrix[i].map((x, j) => <td key={j}>{formatRatio(x)}</td>)}
+                      {data.correlation.matrix[i].map((x, j) => <td key={j} data-label={data.depots[j].name}>{formatRatio(x)}</td>)}
                     </tr>
                   ))}
                 </tbody>
@@ -130,13 +130,13 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
       <section className="card" aria-label="Gebühren">
         <h2>Gebührenbilanz</h2>
         <div className="scroll">
-          <table className="positions num" data-testid="fees">
+          <table className="positions num stacked" data-testid="fees">
             <thead><tr><th>Depot</th><th>Orders</th><th>Provision</th><th>Auslandspauschale</th><th>Summe</th><th>vom Start</th></tr></thead>
             <tbody>
               {data.depots.map((d) => (
                 <tr key={d.id} data-testid={`fees-${d.id}`}>
-                  <td>{d.name}{d.kind === "ghost" && <span className="badge ghost">Geist</span>}</td><td>{d.fees.orders}</td><td>{formatEur(d.fees.commission)}</td>
-                  <td>{formatEur(d.fees.foreign)}</td><td>{formatEur(d.fees.total)}</td><td>{formatPercentPlain(d.fees.shareOfStart)}</td>
+                  <td>{d.name}{d.kind === "ghost" && <span className="badge ghost">Geist</span>}</td><td data-label="Orders">{d.fees.orders}</td><td data-label="Provision">{formatEur(d.fees.commission)}</td>
+                  <td data-label="Auslandspauschale">{formatEur(d.fees.foreign)}</td><td data-label="Summe">{formatEur(d.fees.total)}</td><td data-label="vom Start">{formatPercentPlain(d.fees.shareOfStart)}</td>
                 </tr>
               ))}
             </tbody>

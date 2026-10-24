@@ -105,17 +105,17 @@ export function Compare({ simulations, initial, theme }: Props) {
             ))}
           </ul>
           <div className="scroll">
-            <table className="positions num" data-testid="compare-table">
+            <table className="positions num stacked" data-testid="compare-table">
               <thead><tr><th>Simulation</th><th>Depot</th><th>Rendite</th><th>Größter Rückgang</th><th>Gebühren</th><th>Trades</th></tr></thead>
               <tbody>
                 {rows.map(({ sim, depot }) => (
                   <tr key={`${sim.id}-${depot.id}`} data-testid={`compare-row-${depot.id}`}>
                     <td>{sim.name}</td>
-                    <td>{depot.name}{depot.kind === "ghost" && <span className="badge ghost">Geist</span>}</td>
-                    <td><Pct value={depot.figures.returnPct} /></td>
-                    <td>{depot.figures.maxDrawdownPct === null ? "—" : <Pct value={depot.figures.maxDrawdownPct} />}</td>
-                    <td>{formatEur(depot.figures.fees)}</td>
-                    <td>{depot.figures.trades}</td>
+                    <td data-label="Depot">{depot.name}{depot.kind === "ghost" && <span className="badge ghost">Geist</span>}</td>
+                    <td data-label="Rendite"><Pct value={depot.figures.returnPct} /></td>
+                    <td data-label="Größter Rückgang">{depot.figures.maxDrawdownPct === null ? "—" : <Pct value={depot.figures.maxDrawdownPct} />}</td>
+                    <td data-label="Gebühren">{formatEur(depot.figures.fees)}</td>
+                    <td data-label="Trades">{depot.figures.trades}</td>
                   </tr>
                 ))}
               </tbody>

@@ -104,16 +104,16 @@ function JournalBody({ simulationId, data }: { simulationId: number; data: Data 
       <h3>Abgeschlossene Trades</h3>
       {data.trades.length === 0 ? <p className="muted">Noch kein Trade abgeschlossen. Ein Trade ist ein Kauf, der ganz oder teilweise verkauft wurde.</p> : (
         <div className="scroll">
-          <table className="positions num" data-testid="journal-trades">
+          <table className="positions num stacked" data-testid="journal-trades">
             <thead><tr><th>Wertpapier</th><th>Stück</th><th>Verkauft</th><th>Gehalten</th><th>Netto G/V</th><th>Notiz</th></tr></thead>
             <tbody>
               {data.trades.map((t) => (
                 <tr key={t.key} data-testid={`trade-${t.key}`}>
-                  <td>{t.symbol}</td><td>{t.qty}</td><td>{formatSimTime(t.closedSim)}</td><td>{formatDuration(t.holdSeconds)}</td>
-                  <td className={t.netPnl > 0 ? "up" : t.netPnl < 0 ? "down" : "muted"}>
+                  <td>{t.symbol}</td><td data-label="Stück">{t.qty}</td><td data-label="Verkauft">{formatSimTime(t.closedSim)}</td><td data-label="Gehalten">{formatDuration(t.holdSeconds)}</td>
+                  <td data-label="Netto G/V" className={t.netPnl > 0 ? "up" : t.netPnl < 0 ? "down" : "muted"}>
                     {signedEurArrow(t.netPnl)}{t.netPct !== null && <span> ({arrowOf(t.netPct)} {signedPercent(t.netPct / 100)})</span>}
                   </td>
-                  <td><NoteField simulationId={simulationId} trade={t} /></td>
+                  <td data-label="Notiz"><NoteField simulationId={simulationId} trade={t} /></td>
                 </tr>
               ))}
             </tbody>
@@ -134,15 +134,15 @@ function JournalBody({ simulationId, data }: { simulationId: number; data: Data 
       <h3>Zu früh verkauft?</h3>
       <p><strong data-testid="journal-note">{data.note}</strong></p>
       <div className="scroll">
-        <table className="positions num" data-testid="too-early">
+        <table className="positions num stacked" data-testid="too-early">
           <thead><tr><th>Nach</th><th>Verkäufe (n)</th><th>noch offen</th><th>Quote „zu früh“</th><th>Ø Kursänderung</th></tr></thead>
           <tbody>
             {data.tooEarly.map((h) => (
               <tr key={h.days} data-testid={`too-early-${h.days}`}>
                 <td>{h.days === 1 ? "1 Handelstag" : `${h.days} Handelstage`}</td>
-                <td>{h.n}</td><td>{h.open}</td>
-                <td>{h.rate === null ? "—" : `${formatPercentPlain(h.rate)} (${h.count} von ${h.n})`}</td>
-                <td className={h.avgMovePct === null ? "muted" : h.avgMovePct > 0 ? "up" : h.avgMovePct < 0 ? "down" : "muted"}>
+                <td data-label="Verkäufe (n)">{h.n}</td><td data-label="noch offen">{h.open}</td>
+                <td data-label="Quote „zu früh“">{h.rate === null ? "—" : `${formatPercentPlain(h.rate)} (${h.count} von ${h.n})`}</td>
+                <td data-label="Ø Kursänderung" className={h.avgMovePct === null ? "muted" : h.avgMovePct > 0 ? "up" : h.avgMovePct < 0 ? "down" : "muted"}>
                   {h.avgMovePct === null ? "—" : `${arrowOf(h.avgMovePct)} ${signedPercent(h.avgMovePct / 100)}`}
                 </td>
               </tr>

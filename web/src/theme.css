@@ -271,3 +271,15 @@ fieldset.choose { border: 1px solid var(--border); border-radius: 8px; display: 
 fieldset.choose label.check { display: flex; align-items: center; gap: 8px; }
 fieldset.choose label.check input { width: auto; }
 .note-inline { font-size: 0.85rem; align-self: center; }
+
+/* Paket G: on the phone the evaluation tables become one block per row */
+@media (max-width: 600px) {
+  .positions.stacked, .positions.stacked tbody, .positions.stacked tr, .positions.stacked td { display: block; }
+  .positions.stacked thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .positions.stacked tr { border-top: 1px solid var(--border); padding: 8px 0; }
+  .positions.stacked td { border: 0; padding: 2px 0; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; text-align: right; }
+  .positions.stacked td::before { content: attr(data-label); color: var(--muted); font-size: 0.8rem; text-align: left; flex: none; }
+  .positions.stacked td:first-child { font-weight: 600; justify-content: flex-start; padding-bottom: 4px; }
+  .positions.stacked td:first-child::before { content: none; }
+  .positions.stacked td .note { flex: 1; justify-content: flex-end; }
+}
