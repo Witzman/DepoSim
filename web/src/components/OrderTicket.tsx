@@ -5,6 +5,8 @@ import type { CostPreview, Instrument, OrderInput } from "../types.js";
 
 interface Props {
   simulationId: number;
+  /** The depot the order goes to; the first one while the snapshot is not there yet. */
+  depotId: number | undefined;
   instrument: Instrument | undefined;
   /** Changes whenever a new bar finished, so the preview follows the price. */
   priceKey: number | undefined;
@@ -13,7 +15,7 @@ interface Props {
   command: { side: "buy" | "sell"; n: number };
 }
 
-export function OrderTicket({ simulationId, instrument, priceKey, disabled, command }: Props) {
+export function OrderTicket({ simulationId, depotId, instrument, priceKey, disabled, command }: Props) {
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const [kind, setKind] = useState<"market" | "limit">("market");
   const [qty, setQty] = useState("1");
@@ -32,7 +34,7 @@ export function OrderTicket({ simulationId, instrument, priceKey, disabled, comm
 
   const order: OrderInput | null = instrument
     ? {
-        symbol: instrument.symbol, side, kind, qty: Number(qty),
+        symbol: instrument.symbol, side, kind, qty: Number(qty), depotId,
         ...(kind === "limit" ? { limitPrice: Number(limit) } : {}),
       }
     : null;

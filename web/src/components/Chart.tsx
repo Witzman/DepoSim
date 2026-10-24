@@ -3,16 +3,9 @@ import {
   type IChartApi, type ISeriesApi, type UTCTimestamp,
 } from "lightweight-charts";
 import { useEffect, useRef } from "react";
+import { tickMarkFormatter, timeFormatter } from "../chartTime.js";
 import type { Theme } from "../theme.js";
 import type { Bar } from "../types.js";
-
-const berlinTime = new Intl.DateTimeFormat("de-DE", {
-  timeZone: "Europe/Berlin", hourCycle: "h23", hour: "2-digit", minute: "2-digit",
-});
-const berlinDay = new Intl.DateTimeFormat("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit" });
-const berlinFull = new Intl.DateTimeFormat("de-DE", {
-  timeZone: "Europe/Berlin", hourCycle: "h23", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
-});
 
 const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
@@ -50,10 +43,9 @@ export function Chart({ bars, theme }: Props) {
       rightPriceScale: { borderColor: c.grid },
       timeScale: {
         borderColor: c.grid, timeVisible: true, secondsVisible: false,
-        tickMarkFormatter: (time: number, type: number) =>
-          type >= 3 ? berlinTime.format(time * 1000) : berlinDay.format(time * 1000),
+        tickMarkFormatter,
       },
-      localization: { timeFormatter: (time: number) => berlinFull.format(time * 1000) },
+      localization: { timeFormatter },
     });
     candles.current = api.addSeries(CandlestickSeries, {
       upColor: c.up, downColor: c.down, wickUpColor: c.up, wickDownColor: c.down, borderVisible: false,

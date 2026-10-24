@@ -70,6 +70,7 @@ test("an added title that nobody holds can be removed, and a title in the list i
   await expect(page.getByRole("option", { name: /AMZN/ })).toContainText("Neu hinzufügen");
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("watchlist").getByText("AMZN")).toBeVisible();
+  await expect(page.getByTestId("palette")).toBeHidden(); // Strg+K toggles: it must be closed before it is opened again
 
   await page.getByRole("button", { name: "AMZN entfernen" }).click();
   await expect(page.getByTestId("watchlist").getByText("AMZN")).toHaveCount(0);

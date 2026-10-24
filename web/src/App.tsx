@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  type Socket, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, getBars, getWatchlist, listSimulations,
-  openSocket, removeInstrument,
+  type Socket, addDepot, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, getBars, getWatchlist, listSimulations,
+  openSocket, removeDepot, removeInstrument, renameDepot,
 } from "./api.js";
+import { AllocationDialog } from "./components/AllocationDialog.js";
 import { Chart } from "./components/Chart.js";
 import { ClockBar } from "./components/ClockBar.js";
+import { Curves } from "./components/Curves.js";
 import { DepotPanel } from "./components/DepotPanel.js";
+import { DepotSwitch } from "./components/DepotSwitch.js";
 import { OrderTicket } from "./components/OrderTicket.js";
 import { OrdersPanel } from "./components/OrdersPanel.js";
 import { Palette } from "./components/Palette.js";
@@ -13,6 +16,7 @@ import { SimulationPicker } from "./components/SimulationPicker.js";
 import { Watchlist } from "./components/Watchlist.js";
 import { formatPrice } from "./format.js";
 import { pickInitial } from "./select.js";
+import { pickDepot } from "./view.js";
 import { useTheme } from "./theme.js";
 import type { Bar, Instrument, ServerMessage, Simulation, Snapshot, Tempo } from "./types.js";
 
@@ -50,6 +54,9 @@ export function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ticketCommand, setTicketCommand] = useState<{ side: "buy" | "sell"; n: number }>({ side: "buy", n: 0 });
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [view, setView] = useState<"trade" | "evaluation">("trade");
+  const [activeDepotId, setActiveDepotId] = useState<number | null>(null);
+  const [allocationOpen, setAllocationOpen] = useState(false);
   const socket = useRef<Socket | null>(null);
   const runningRef = useRef(false);
   const symbolRef = useRef(symbol);
@@ -77,7 +84,7 @@ export function App() {
     } else if (m.type === "tick") {
       setSnapshot((prev) =>
         prev && {
-          ...prev, running: m.running, depot: m.depot, prices: m.prices, fx: m.fx, venues: m.venues,
+          ...prev, running: m.running, depots: m.depots, prices: m.prices, fx: m.fx, venues: m.venues,
           liveLimit: m.liveLimit, delayS: m.delayS, phase: m.phase,
           simulation: { ...prev.simulation, simulationTime: m.simulationTime },
         },
@@ -195,6 +202,36 @@ export function App() {
     }
   }
 
+  async function newDepot() {
+    if (selectedId === null) return;
+    try {
+      const depot = await addDepot(selectedId);
+      setActiveDepotId(depot.id);
+      setNotice(null);
+    } catch (e) {
+      setNotice((e as Error).message);
+    }
+  }
+
+  async function renameActive(id: number, name: string) {
+    if (selectedId === null) return;
+    try {
+      await renameDepot(selectedId, id, name);
+    } catch (e) {
+      setNotice((e as Error).message);
+    }
+  }
+
+  async function removeActive(id: number) {
+    if (selectedId === null) return;
+    try {
+      await removeDepot(selectedId, id);
+      setActiveDepotId(null);
+    } catch (e) {
+      setNotice((e as Error).message);
+    }
+  }
+
   async function cancel(orderId: number) {
     if (selectedId === null) return;
     try {
@@ -209,6 +246,7 @@ export function App() {
   runningRef.current = snapshot?.running ?? false;
   const instrument = watchlist.find((i) => i.symbol === symbol);
   const price = snapshot?.prices[symbol];
+  const depot = snapshot ? pickDepot(snapshot.depots, activeDepotId) : undefined;
   const locked = live === null || live.endedAt !== null || snapshot === null;
 
   return (
@@ -255,6 +293,19 @@ export function App() {
                   onPause={() => socket.current?.send({ type: "pause" })}
                 />
               </section>
+              <div className="tabs" role="tablist" aria-label="Ansicht">
+                <button role="tab" className="btn" aria-selected={view === "trade"} aria-pressed={view === "trade"}
+                  onClick={() => setView("trade")}>Handel</button>
+                <button role="tab" className="btn" aria-selected={view === "evaluation"} aria-pressed={view === "evaluation"}
+                  onClick={() => setView("evaluation")}>Auswertung</button>
+              </div>
+              {snapshot && depot && (
+                <DepotSwitch depots={snapshot.depots} activeId={depot.id} disabled={locked}
+                  onSelect={setActiveDepotId} onAdd={newDepot} onRename={renameActive} onRemove={removeActive}
+                  onAllocate={() => setAllocationOpen(true)} />
+              )}
+              {view === "trade" ? (
+                <>
               <section className="card">
                 <div className="toolbar">
                   <select aria-label="Wertpapier" value={symbol} onChange={(e) => setSymbol(e.target.value)}>
@@ -267,12 +318,18 @@ export function App() {
                 <Chart bars={bars} theme={theme} />
               </section>
               <div className="trade-grid">
-                <OrderTicket simulationId={live.id} instrument={instrument} priceKey={price?.barT}
+                <OrderTicket simulationId={live.id} depotId={depot?.id} instrument={instrument} priceKey={price?.barT}
                   disabled={locked} command={ticketCommand} />
-                {snapshot && <DepotPanel depot={snapshot.depot} startCash={live.startCash} />}
+                {depot && <DepotPanel depot={depot} startCash={live.startCash} />}
               </div>
-              {snapshot && (
-                <OrdersPanel orders={snapshot.depot.orders} instruments={watchlist} disabled={locked} onCancel={cancel} />
+              {depot && (
+                <OrdersPanel orders={depot.orders} instruments={watchlist} disabled={locked} onCancel={cancel} />
+              )}
+                </>
+              ) : (
+                snapshot && (
+                  <Curves simulationId={live.id} depots={snapshot.depots} simulationTime={live.simulationTime} theme={theme} />
+                )
               )}
             </>
           ) : (
@@ -280,6 +337,10 @@ export function App() {
           )}
         </main>
       </div>
+      {live && depot && (
+        <AllocationDialog open={allocationOpen} simulationId={live.id} depotId={depot.id} depotName={depot.name}
+          instruments={watchlist} onClose={() => setAllocationOpen(false)} />
+      )}
       <Palette
         open={paletteOpen} instruments={watchlist} simulations={simulations} selectedId={selectedId}
         onClose={() => setPaletteOpen(false)} onPickInstrument={setSymbol} onPickSimulation={setSelectedId}

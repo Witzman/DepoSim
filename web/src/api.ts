@@ -1,4 +1,4 @@
-import type { Bar, ClientMessage, CostPreview, Instrument, OrderInput, SearchHit, ServerMessage, Simulation } from "./types.js";
+import type { AllocationLine, Bar, ClientMessage, CostPreview, Curve, Depot, Instrument, OrderInput, SearchHit, ServerMessage, Simulation } from "./types.js";
 
 /** An error with a message that can be shown to the person as it is. */
 export class ApiError extends Error {
@@ -61,6 +61,22 @@ export const placeOrder = async (id: number, o: OrderInput) =>
   (await request<{ orderId: number }>(`/api/simulations/${id}/orders`, json("POST", o))).orderId;
 export const cancelOrder = (id: number, orderId: number) =>
   request<void>(`/api/simulations/${id}/orders/${orderId}`, { method: "DELETE" });
+
+export const getCurves = (id: number) => request<{ depots: Curve[] }>(`/api/simulations/${id}/curves`);
+export const addDepot = (id: number, name?: string) =>
+  request<Depot>(`/api/simulations/${id}/depots`, json("POST", name === undefined ? {} : { name }));
+export const renameDepot = (id: number, depotId: number, name: string) =>
+  request<Depot>(`/api/simulations/${id}/depots/${depotId}`, json("PATCH", { name }));
+export const removeDepot = (id: number, depotId: number) =>
+  request<void>(`/api/simulations/${id}/depots/${depotId}`, { method: "DELETE" });
+export async function allocate(
+  id: number, depotId: number, weights: { symbol: string; percent: number }[], dryRun: boolean,
+): Promise<AllocationLine[]> {
+  const body = await request<{ lines: AllocationLine[] }>(
+    `/api/simulations/${id}/depots/${depotId}/allocate`, json("POST", { weights, dryRun }),
+  );
+  return body.lines;
+}
 
 /** The socket follows the page: ws for http, wss for https, the same host. */
 export function socketUrl(id: number, loc: { protocol: string; host: string }): string {

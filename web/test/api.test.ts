@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  ApiError, addInstrument, cancelOrder, createSimulation, deleteSimulation, getBars, listSimulations, parseServerMessage,
-  placeOrder, previewOrder, removeInstrument, searchInstruments, socketUrl,
+  ApiError, addDepot, addInstrument, allocate, cancelOrder, createSimulation, deleteSimulation, getBars, getCurves, listSimulations, parseServerMessage,
+  placeOrder, previewOrder, removeDepot, removeInstrument, renameDepot, searchInstruments, socketUrl,
 } from "../src/api.js";
 
 function stubFetch(status: number, body: unknown) {
@@ -158,5 +158,40 @@ describe("instrument search and watchlist", () => {
     const err = await removeInstrument("AAPL").catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.message).toMatch(/gehalten/);
+  });
+});
+
+describe("depots", () => {
+  it("adds, renames, deletes and allocates over the depot routes", async () => {
+    let fn = stubFetch(201, { id: 7, name: "Zweit" });
+    await addDepot(3, "Zweit");
+    expect(fn.mock.calls[0][0]).toBe("/api/simulations/3/depots");
+    expect(JSON.parse(String((fn.mock.calls[0][1] as RequestInit).body))).toEqual({ name: "Zweit" });
+
+    fn = stubFetch(200, { id: 7, name: "Neu" });
+    await renameDepot(3, 7, "Neu");
+    expect(fn.mock.calls[0][0]).toBe("/api/simulations/3/depots/7");
+    expect((fn.mock.calls[0][1] as RequestInit).method).toBe("PATCH");
+
+    fn = stubFetch(204, undefined);
+    await removeDepot(3, 7);
+    expect((fn.mock.calls[0][1] as RequestInit).method).toBe("DELETE");
+
+    fn = stubFetch(200, { lines: [{ symbol: "A", percent: 50, qty: 2, total: 100 }] });
+    const lines = await allocate(3, 7, [{ symbol: "A", percent: 50 }], true);
+    expect(lines).toHaveLength(1);
+    expect(fn.mock.calls[0][0]).toBe("/api/simulations/3/depots/7/allocate");
+    expect(JSON.parse(String((fn.mock.calls[0][1] as RequestInit).body))).toEqual({ weights: [{ symbol: "A", percent: 50 }], dryRun: true });
+  });
+
+  it("raises the server's reason when the last depot cannot go", async () => {
+    stubFetch(409, { error: "Das letzte Depot lässt sich nicht löschen." });
+    await expect(removeDepot(3, 7)).rejects.toThrow(/letzte Depot/);
+  });
+
+  it("reads the curves", async () => {
+    const fn = stubFetch(200, { depots: [{ id: 1, name: "Depot 1", points: [] }] });
+    expect((await getCurves(3)).depots).toHaveLength(1);
+    expect(fn.mock.calls[0][0]).toBe("/api/simulations/3/curves");
   });
 });

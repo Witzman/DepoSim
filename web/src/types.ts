@@ -60,6 +60,32 @@ export interface PositionView {
   value: number;
 }
 
+export interface Depot {
+  id: number;
+  simulationId: number;
+  name: string;
+  cash: number;
+}
+
+export interface CurvePoint {
+  t: number;
+  value: number;
+}
+
+export interface Curve {
+  id: number;
+  name: string;
+  points: CurvePoint[];
+}
+
+export interface AllocationLine {
+  symbol: string;
+  percent: number;
+  qty: number;
+  total: number;
+  skipped?: string;
+}
+
 export interface DepotView {
   id: number;
   name: string;
@@ -85,12 +111,14 @@ export interface OrderInput {
   kind: "market" | "limit";
   qty: number;
   limitPrice?: number;
+  /** The depot the order is for; the first one when left out. */
+  depotId?: number;
 }
 
 export interface Snapshot {
   simulation: Simulation;
   running: boolean;
-  depot: DepotView;
+  depots: DepotView[];
   prices: Record<string, { price: number; barT: number }>;
   fx: number | null;
   venues: Record<Venue, boolean>;
@@ -107,7 +135,7 @@ export type ServerMessage =
       simulationTime: number;
       newBars: Record<string, Bar[]>;
       running: boolean;
-      depot: DepotView;
+      depots: DepotView[];
       prices: Snapshot["prices"];
       fx: number | null;
       venues: Snapshot["venues"];
