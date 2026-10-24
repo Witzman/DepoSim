@@ -44,7 +44,7 @@ function setup(opts: SetupOpts = {}) {
 }
 
 const orderOf = (t: ReturnType<typeof setup>, orderId: number) =>
-  t.svc.snapshot(t.id).depot.orders.find((o) => o.id === orderId)!;
+  t.svc.snapshot(t.id).depots[0].orders.find((o) => o.id === orderId)!;
 
 describe("start", () => {
   it("loads the start day of every instrument and of the exchange rate", async () => {
@@ -101,7 +101,7 @@ describe("instruments added while the service runs", () => {
     t.registry.add(NOBAR);
     const res = t.svc.placeOrder(t.id, t.depotId, { symbol: "NOBAR.DE", side: "buy", kind: "market", qty: 1 });
     expect(res).toEqual({ ok: false, reason: expect.stringMatching(/keinen Kurs/) });
-    expect(t.svc.snapshot(t.id).depot.orders).toEqual([]);
+    expect(t.svc.snapshot(t.id).depots[0].orders).toEqual([]);
     expect(t.store.symbolInUse("NOBAR.DE")).toBe(false);
   });
 
@@ -155,8 +155,8 @@ describe("placeOrder", () => {
     expect(o).toMatchObject({ status: "filled", gross: 10905, commission: 490, foreignFee: 0, filledSim: t.sim.startAt });
     expect(o.fillPrice).toBeCloseTo(109.0545, 6);
     const snap = t.svc.snapshot(t.id);
-    expect(snap.depot.cash).toBe(1_000_000 - 11395);
-    expect(snap.depot.positions).toEqual([{ symbol: "SAP.DE", qty: 1, cost: 11395, value: 10900 }]);
+    expect(snap.depots[0].cash).toBe(1_000_000 - 11395);
+    expect(snap.depots[0].positions).toEqual([{ symbol: "SAP.DE", qty: 1, cost: 11395, value: 10900 }]);
   });
 
   it("rejects what validateOrder rejects, says why, and stores no order", async () => {
@@ -164,7 +164,7 @@ describe("placeOrder", () => {
     await t.svc.start(t.id);
     const r = t.svc.placeOrder(t.id, t.depotId, { symbol: "SAP.DE", side: "buy", kind: "market", qty: 0 });
     expect(r).toMatchObject({ ok: false, reason: expect.stringMatching(/Menge/) });
-    expect(t.svc.snapshot(t.id).depot.orders).toEqual([]);
+    expect(t.svc.snapshot(t.id).depots[0].orders).toEqual([]);
   });
 
   it("rejects an unknown symbol and an ended simulation", async () => {
@@ -182,13 +182,13 @@ describe("placeOrder", () => {
     expect(r.ok).toBe(true);
     const id = (r as { orderId: number }).orderId;
     expect(orderOf(t, id).status).toBe("open");
-    expect(t.svc.snapshot(t.id).depot.cash).toBe(1_000_000);
+    expect(t.svc.snapshot(t.id).depots[0].cash).toBe(1_000_000);
 
     t.svc.setTempo(t.id, 60);
     const res = t.svc.tick(t.id, 1000);
     expect(res.simulationTime).toBe(D0 + 7 * H + 60);
     expect(orderOf(t, id)).toMatchObject({ status: "filled", gross: 9980, commission: 490 });
-    expect(t.svc.snapshot(t.id).depot.cash).toBe(1_000_000 - 10470);
+    expect(t.svc.snapshot(t.id).depots[0].cash).toBe(1_000_000 - 10470);
   });
 
   it("buys a USD instrument at the exchange rate of that time and pays the foreign fee", async () => {
@@ -199,7 +199,7 @@ describe("placeOrder", () => {
     expect(orderOf(t, (r as { orderId: number }).orderId)).toMatchObject({
       status: "filled", gross: 28246, commission: 490, foreignFee: 1490,
     });
-    expect(t.svc.snapshot(t.id).depot.cash).toBe(1_000_000 - 30226);
+    expect(t.svc.snapshot(t.id).depots[0].cash).toBe(1_000_000 - 30226);
   });
 
   it("sells a held position and removes it", async () => {
@@ -209,8 +209,8 @@ describe("placeOrder", () => {
     const r = t.svc.placeOrder(t.id, t.depotId, { symbol: "SAP.DE", side: "sell", kind: "market", qty: 1 });
     expect(r.ok).toBe(true);
     const snap = t.svc.snapshot(t.id);
-    expect(snap.depot.positions).toEqual([]);
-    expect(snap.depot.cash).toBe(1_000_000 - 11395 + 10405);
+    expect(snap.depots[0].positions).toEqual([]);
+    expect(snap.depots[0].cash).toBe(1_000_000 - 11395 + 10405);
   });
 
   it("cancels an open order but not a filled one", async () => {
@@ -248,9 +248,9 @@ describe("tick", () => {
     expect(orderOf(t, id).status).toBe("open");
     t.svc.tick(t.id, 2000); // bar 15 (close 105, low 104.5) triggers
     expect(orderOf(t, id)).toMatchObject({ status: "filled", gross: 10500, commission: 490, fillPrice: 105 });
-    expect(t.svc.snapshot(t.id).depot.cash).toBe(1_000_000 - 10990);
+    expect(t.svc.snapshot(t.id).depots[0].cash).toBe(1_000_000 - 10990);
     t.svc.tick(t.id, 5000); // later bars are lower still: the order is already filled
-    expect(t.svc.snapshot(t.id).depot.positions[0].qty).toBe(1);
+    expect(t.svc.snapshot(t.id).depots[0].positions[0].qty).toBe(1);
   });
 
   it("does not evaluate a bar twice when the time has not moved", async () => {
@@ -273,7 +273,7 @@ describe("tick", () => {
     t.svc.tick(t.id, 7000);
     expect(orderOf(t, (a as { orderId: number }).orderId).status).toBe("filled");
     expect(orderOf(t, (b as { orderId: number }).orderId).status).toBe("rejected");
-    expect(t.svc.snapshot(t.id).depot.cash).toBe(30_000 - 10990);
+    expect(t.svc.snapshot(t.id).depots[0].cash).toBe(30_000 - 10990);
   });
 
   it("rejects an open sell at fill time when its fees would take the cash below zero", async () => {
@@ -286,8 +286,8 @@ describe("tick", () => {
     t.svc.tick(t.id, 7000); // bar 15 reaches the limit: gross 10,500 cents, commission 20,000 cents
     expect(orderOf(t, id).status).toBe("rejected");
     const snap = t.svc.snapshot(t.id);
-    expect(snap.depot.cash).toBe(1000);
-    expect(snap.depot.positions).toEqual([{ symbol: "SAP.DE", qty: 1, cost: 100, value: expect.any(Number) }]);
+    expect(snap.depots[0].cash).toBe(1000);
+    expect(snap.depots[0].positions).toEqual([{ symbol: "SAP.DE", qty: 1, cost: 100, value: expect.any(Number) }]);
   });
 
   it("jumps over the hours when every market is closed to the next bar", async () => {
@@ -339,7 +339,7 @@ describe("tick", () => {
     spy.mockRestore();
     expect(t.store.getSimulation(t.id)?.simulationTime).toBe(t.sim.startAt);
     expect(orderOf(t, id).status).toBe("open");
-    expect(t.svc.snapshot(t.id).depot.cash).toBe(1_000_000);
+    expect(t.svc.snapshot(t.id).depots[0].cash).toBe(1_000_000);
     t.svc.tick(t.id, 7000); // and the same bars are still there to be evaluated afterwards
     expect(orderOf(t, id).status).toBe("filled");
   });
@@ -375,7 +375,7 @@ describe("snapshot", () => {
     expect(snap.prices["AAPL"]).toBeUndefined();
     expect(snap.fx).toBe(1.1);
     expect(snap.venues).toEqual({ XETRA: true, US: false });
-    expect(snap.depot.value).toBe(1_000_000 - 11395 + 10900);
+    expect(snap.depots[0].value).toBe(1_000_000 - 11395 + 10900);
     expect(snap.running).toBe(false);
     t.svc.run(t.id);
     expect(t.svc.snapshot(t.id).running).toBe(true);
@@ -582,7 +582,7 @@ describe("the data horizon", () => {
 
     const order = orderOf(t, (placed as { orderId: number }).orderId);
     expect(order).toMatchObject({ status: "filled", fillPrice: 85, filledSim: D0 + 7 * H + 36 * 60 });
-    expect(t.svc.snapshot(t.id).depot.positions).toEqual([expect.objectContaining({ symbol: "SAP.DE", qty: 1 })]);
+    expect(t.svc.snapshot(t.id).depots[0].positions).toEqual([expect.objectContaining({ symbol: "SAP.DE", qty: 1 })]);
   });
 
   it("has no horizon, and so no live edge, before any bar is known", () => {
@@ -646,5 +646,66 @@ describe("loadMore at the data horizon", () => {
     t.all["SAP.DE"] = whole.filter((b) => b.t < T0730 + 60); // the bar of 07:30 has arrived
     t.clock.now = T0730 + 120;
     await expect(t.svc.loadMore(t.id)).resolves.toBe(true);
+  });
+});
+
+describe("several depots", () => {
+  it("lists every depot in the snapshot", () => {
+    const t = setup();
+    t.store.createDepot(t.id, "Zweit");
+    expect(t.svc.snapshot(t.id).depots.map((d) => d.name)).toEqual(["Depot 1", "Zweit"]);
+  });
+
+  it("trades each depot on its own cash and positions", async () => {
+    const t = setup();
+    await t.svc.start(t.id);
+    const second = t.store.createDepot(t.id, "Zweit");
+    expect(t.svc.placeOrder(t.id, second.id, { symbol: "SAP.DE", side: "buy", kind: "market", qty: 1 }).ok).toBe(true);
+    const [first, other] = t.svc.snapshot(t.id).depots;
+    expect(first.cash).toBe(1_000_000);
+    expect(first.positions).toEqual([]);
+    expect(other.cash).toBe(1_000_000 - 11395);
+    expect(other.positions).toHaveLength(1);
+  });
+
+  it("previews against the cash of the chosen depot", async () => {
+    const t = setup({ startCash: 30_000 });
+    await t.svc.start(t.id);
+    const second = t.store.createDepot(t.id, "Zweit");
+    t.store.saveBalance(second.id, 1_000, new Map());
+    const order = { symbol: "SAP.DE", side: "buy", kind: "market", qty: 1 } as const;
+    const own = t.svc.previewOrder(t.id, order);
+    expect(own.ok && own.problem).toBeFalsy();
+    expect(t.svc.previewOrder(t.id, order, second.id)).toMatchObject({ ok: true, problem: expect.any(String) });
+  });
+
+  it("writes a curve point per depot when the clock crosses a minute, and none inside a minute", async () => {
+    const t = setup();
+    await t.svc.start(t.id);
+    const second = t.store.createDepot(t.id, "Zweit");
+    t.svc.tick(t.id, 30_000); // 30 s at tempo 1: still inside the minute
+    expect(t.store.valueCurve(t.depotId)).toHaveLength(1);
+    t.svc.tick(t.id, 60_000);
+    const curve = t.store.valueCurve(t.depotId);
+    expect(curve).toHaveLength(2);
+    expect(curve[1].value).toBe(1_000_000);
+    expect(t.store.valueCurve(second.id)).toHaveLength(2);
+  });
+
+  it("adds depots up to the limit and not to an ended simulation", () => {
+    const t = setup();
+    for (let n = 2; n <= 8; n++) expect(t.svc.addDepot(t.id)).toMatchObject({ ok: true, depot: { name: `Depot ${n}` } });
+    expect(t.svc.addDepot(t.id)).toEqual({ ok: false, reason: "Mehr als 8 Depots gibt es nicht." });
+    const u = setup();
+    u.store.endSimulation(u.id);
+    expect(u.svc.addDepot(u.id)).toEqual({ ok: false, reason: "Die Simulation ist beendet." });
+  });
+
+  it("removes a depot but never the last one", () => {
+    const t = setup();
+    const second = t.store.createDepot(t.id, "Zweit");
+    expect(t.svc.removeDepot(t.id, second.id)).toEqual({ ok: true });
+    expect(t.svc.removeDepot(t.id, t.depotId)).toEqual({ ok: false, reason: "Das letzte Depot lässt sich nicht löschen." });
+    expect(t.svc.removeDepot(t.id, 9999)).toEqual({ ok: false, reason: "Unbekanntes Depot." });
   });
 });

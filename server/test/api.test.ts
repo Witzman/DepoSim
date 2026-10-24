@@ -248,8 +248,8 @@ describe("websocket", () => {
     const { msgs } = await connect(app, id);
     await until(() => msgs.length >= 1);
     await post(app, `/api/simulations/${id}/orders`, { symbol: "SAP.DE", side: "buy", kind: "market", qty: 1 });
-    await until(() => msgs.some((m) => m.type === "snapshot" && m.depot.orders.length === 1));
-    expect(msgs.at(-1).depot.positions[0]).toMatchObject({ symbol: "SAP.DE", qty: 1 });
+    await until(() => msgs.some((m) => m.type === "snapshot" && m.depots[0].orders.length === 1));
+    expect(msgs.at(-1).depots[0].positions[0]).toMatchObject({ symbol: "SAP.DE", qty: 1 });
   });
 
   it("looks for more data at the end of the data, then pauses with a notice when there is none", async () => {

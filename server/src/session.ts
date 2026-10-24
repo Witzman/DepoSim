@@ -1,4 +1,4 @@
-import type { Instrument, Venue } from "./config.js";
+import { type Instrument, MAX_DEPOTS, type Venue } from "./config.js";
 import type { InstrumentRegistry } from "./instruments.js";
 import type { Archive } from "./data/archive.js";
 import { type Bar, MarketDataError } from "./data/marketdata.js";
@@ -8,7 +8,7 @@ import {
 } from "./domain/clock.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
 import type { Cent } from "./domain/money.js";
-import type { OrderRecord, Simulation, Store } from "./store.js";
+import type { Depot, OrderRecord, Simulation, Store } from "./store.js";
 
 const DAY = 86400;
 const LOOKAHEAD_DAYS = 7;
@@ -49,10 +49,20 @@ export interface PositionView {
   value: Cent;
 }
 
+export interface DepotSnapshot {
+  id: number;
+  name: string;
+  cash: Cent;
+  value: Cent;
+  positions: PositionView[];
+  orders: OrderRecord[];
+}
+
 export interface Snapshot {
   simulation: Simulation;
   running: boolean;
-  depot: { id: number; name: string; cash: Cent; value: Cent; positions: PositionView[]; orders: OrderRecord[] };
+  /** Every depot of the simulation, in the order they were made. */
+  depots: DepotSnapshot[];
   prices: Record<string, { price: number; barT: number }>;
   fx: number | null;
   venues: Record<Venue, boolean>;
@@ -236,6 +246,12 @@ export class SessionService {
         if (changed) this.store.saveBalance(depot.id, state.cash, state.positions);
       }
       this.store.setSimulationTime(id, target);
+      // One curve point per depot whenever the clock passes a minute boundary.
+      if (Math.floor(target / 60) > Math.floor(sOld / 60)) {
+        for (const depot of this.store.listDepots(id)) {
+          this.store.recordValue(depot.id, target, depotValue(this.store.loadDepot(depot.id), this.refsAt(target)));
+        }
+      }
     });
 
     return { simulationTime: target, newBars, endOfData, waitingForData, liveEdge };
@@ -287,19 +303,36 @@ export class SessionService {
   }
 
   /** What the order would cost at the current price, with the same numbers a fill would use. */
-  previewOrder(id: number, o: NewOrder): PreviewResult {
+  previewOrder(id: number, o: NewOrder, depotId?: number): PreviewResult {
     const sim = this.sim(id);
     const inst = this.registry.get(o.symbol);
     if (!inst) return { ok: false, reason: `Unbekanntes Wertpapier ${o.symbol}.` };
     const ref = this.refAt(inst, sim.simulationTime);
     if (!ref) return { ok: false, reason: `Für ${o.symbol} gibt es noch keinen Kurs.` };
 
-    const state = this.store.loadDepot(this.store.listDepots(id)[0].id);
+    const depot = this.store.listDepots(id).find((d) => d.id === depotId) ?? this.store.listDepots(id)[0];
+    const state = this.store.loadDepot(depot.id);
     const checked = validateOrder(state, o, ref, sim.fees);
     const priceable = Number.isInteger(o.qty) && o.qty > 0 && (o.kind === "market" || (o.limitPrice ?? 0) > 0);
     if (!priceable) return { ok: false, reason: checked.ok ? "Ungültiger Auftrag." : checked.reason };
     const cost = previewCost(o.side, o.qty, ref, o.kind, o.limitPrice, sim.fees);
     return checked.ok ? { ok: true, cost } : { ok: true, cost, problem: checked.reason };
+  }
+
+  addDepot(id: number, name?: string): { ok: true; depot: Depot } | { ok: false; reason: string } {
+    const sim = this.sim(id);
+    if (sim.endedAt !== null) return { ok: false, reason: "Die Simulation ist beendet." };
+    const count = this.store.listDepots(id).length;
+    if (count >= MAX_DEPOTS) return { ok: false, reason: `Mehr als ${MAX_DEPOTS} Depots gibt es nicht.` };
+    return { ok: true, depot: this.store.createDepot(id, name ?? `Depot ${count + 1}`) };
+  }
+
+  removeDepot(id: number, depotId: number): { ok: true } | { ok: false; reason: string } {
+    const depots = this.store.listDepots(id);
+    if (!depots.some((d) => d.id === depotId)) return { ok: false, reason: "Unbekanntes Depot." };
+    if (depots.length === 1) return { ok: false, reason: "Das letzte Depot lässt sich nicht löschen." };
+    this.store.deleteDepot(depotId);
+    return { ok: true };
   }
 
   cancelOrder(id: number, orderId: number): { ok: true } | { ok: false; reason: string } {
@@ -326,18 +359,26 @@ export class SessionService {
   snapshot(id: number): Snapshot {
     const simulation = this.sim(id);
     const s = simulation.simulationTime;
-    const depot = this.store.listDepots(id)[0];
-    const state = this.store.loadDepot(depot.id);
 
     const prices: Snapshot["prices"] = {};
-    const refs = new Map<string, Ref>();
     for (const inst of this.instruments) {
       const bar = this.archive.lastCompleteBar(inst.symbol, s);
-      if (!bar) continue;
-      prices[inst.symbol] = { price: bar.c, barT: bar.t };
-      const ref = this.refAt(inst, s);
-      if (ref) refs.set(inst.symbol, ref);
+      if (bar) prices[inst.symbol] = { price: bar.c, barT: bar.t };
     }
+    const refs = this.refsAt(s);
+    const depots = this.store.listDepots(id).map((depot): DepotSnapshot => {
+      const state = this.store.loadDepot(depot.id);
+      return {
+        id: depot.id,
+        name: depot.name,
+        cash: state.cash,
+        value: depotValue(state, refs),
+        positions: [...state.positions].map(([symbol, pos]) => ({
+          symbol, qty: pos.qty, cost: pos.cost, value: positionValue(pos, refs.get(symbol)),
+        })),
+        orders: state.orders,
+      };
+    });
 
     const limitL = liveLimit(this.now(), this.delayS);
     const lag = limitL - s;
@@ -351,16 +392,7 @@ export class SessionService {
     return {
       simulation,
       running: this.isRunning(id),
-      depot: {
-        id: depot.id,
-        name: depot.name,
-        cash: state.cash,
-        value: depotValue(state, refs),
-        positions: [...state.positions].map(([symbol, pos]) => ({
-          symbol, qty: pos.qty, cost: pos.cost, value: positionValue(pos, refs.get(symbol)),
-        })),
-        orders: state.orders,
-      },
+      depots,
       prices,
       fx: this.archive.lastCompleteBar(this.fx, s)?.c ?? null,
       venues: { XETRA: this.venueOpen("XETRA", s), US: this.venueOpen("US", s) },
@@ -380,6 +412,16 @@ export class SessionService {
     for (const symbol of [...this.instruments.map((i) => i.symbol), this.fx]) {
       await this.archive.ensureDay(symbol, dayStartT);
     }
+  }
+
+  /** The reference price of every instrument that has one at `s`. */
+  private refsAt(s: number): Map<string, Ref> {
+    const refs = new Map<string, Ref>();
+    for (const inst of this.instruments) {
+      const ref = this.refAt(inst, s);
+      if (ref) refs.set(inst.symbol, ref);
+    }
+    return refs;
   }
 
   /** The last known price of an instrument, with the exchange rate for USD. */

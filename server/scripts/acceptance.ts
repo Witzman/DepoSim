@@ -114,7 +114,7 @@ async function main() {
     const bought = await http("POST", `/api/simulations/${simId}/orders`, { symbol: "SAP.DE", side: "buy", kind: "market", qty: 1 });
     check(bought.status === 201, `Kauf: HTTP ${bought.status} ${bought.json?.error ?? ""}`);
     await a.waitFor(
-      (m) => m.type === "snapshot" && m.depot.orders.some((o: any) => o.id === bought.json.orderId && o.status === "filled"),
+      (m) => m.type === "snapshot" && m.depots[0].orders.some((o: any) => o.id === bought.json.orderId && o.status === "filled"),
       5000, "Kauf ausgeführt",
     );
     ok("Kauf ausgeführt");
@@ -130,9 +130,9 @@ async function main() {
     const paused = await a.waitFor((m) => m.type === "snapshot" && m.running === false, 5000, "Pause", sinceMark);
     const rec = {
       time: paused.simulation.simulationTime,
-      cash: paused.depot.cash,
-      positions: JSON.stringify(paused.depot.positions),
-      orders: JSON.stringify(paused.depot.orders),
+      cash: paused.depots[0].cash,
+      positions: JSON.stringify(paused.depots[0].positions),
+      orders: JSON.stringify(paused.depots[0].orders),
     };
     ok(`pausiert bei +${rec.time - startAt} s, Guthaben ${(rec.cash / 100).toFixed(2)} €`);
     a.close();
@@ -143,9 +143,9 @@ async function main() {
     const again = await b.waitFor((m) => m.type === "snapshot", 10_000, "Snapshot nach dem Neuverbinden");
     check(again.simulation.simulationTime === rec.time, "die Simulationszeit hat sich verändert");
     check(again.running === false, "die Simulation läuft ohne Zutun");
-    check(again.depot.cash === rec.cash, "das Guthaben hat sich verändert");
-    check(JSON.stringify(again.depot.positions) === rec.positions, "die Positionen haben sich verändert");
-    check(JSON.stringify(again.depot.orders) === rec.orders, "die Aufträge haben sich verändert");
+    check(again.depots[0].cash === rec.cash, "das Guthaben hat sich verändert");
+    check(JSON.stringify(again.depots[0].positions) === rec.positions, "die Positionen haben sich verändert");
+    check(JSON.stringify(again.depots[0].orders) === rec.orders, "die Aufträge haben sich verändert");
     await sleep(2000);
     check(!b.msgs.some((m) => m.type === "tick"), "nach dem Neuverbinden laufen Ticks");
     ok("Zeit, Guthaben, Positionen und Aufträge gleich, nichts läuft");
