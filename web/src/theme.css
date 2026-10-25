@@ -598,3 +598,10 @@ input.mini { width: 4.5em; }
 .heat th, .heat td, table.episodes th, table.episodes td { padding: 3px 5px; text-align: right; white-space: nowrap; }
 .heat th[scope="row"], table.episodes th, table.episodes td:not(.num) { text-align: left; }
 .heat td { border: 1px solid var(--surface); }
+.outlook .warn-note { border-left: 4px solid var(--series-5); padding: 6px 10px; background: color-mix(in srgb, var(--series-5) 12%, transparent); }
+.outlook .narrow-input { width: 8em; }
+.outlook label { display: inline-flex; gap: 6px; align-items: center; }
+.rolling-svg .fan-outer { fill: color-mix(in srgb, var(--series-1) 14%, transparent); stroke: none; }
+.rolling-svg .fan-inner { fill: color-mix(in srgb, var(--series-1) 30%, transparent); stroke: none; }
+.outlook .fan-swatch-inner, .outlook .fan-swatch-outer { height: 10px; border: 0; background: color-mix(in srgb, var(--series-1) 30%, transparent); }
+.outlook .fan-swatch-outer { background: color-mix(in srgb, var(--series-1) 14%, transparent); }

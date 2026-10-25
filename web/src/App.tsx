@@ -8,6 +8,7 @@ import { BackfillDialog } from "./components/BackfillDialog.js";
 import { Compare } from "./components/Compare.js";
 import { Journal } from "./components/Journal.js";
 import { Dividends } from "./components/Dividends.js";
+import { Outlook } from "./components/Outlook.js";
 import { Rolling } from "./components/Rolling.js";
 import { EventStrip } from "./components/EventStrip.js";
 import { ScenarioGoals, useScenarioResult } from "./components/ScenarioGoals.js";
@@ -640,6 +641,7 @@ export function App() {
                     <Evaluation simulationId={live.id} activeDepotId={depot.id} running={snapshot.running}
                       benchmark={live.benchmark} rules={live.rules} />
                     <Rolling simulationId={live.id} depot={depot} running={snapshot.running} theme={theme} />
+                    <Outlook simulationId={live.id} depot={depot} running={snapshot.running} benchmark={live.benchmark} />
                     <Dividends simulationId={live.id} depot={depot} running={snapshot.running} />
                     <Journal simulationId={live.id} depot={depot} running={snapshot.running} daily={live.resolution === "day"} />
                     <Compare simulations={simulations} initial={[live.id]} theme={theme} />
