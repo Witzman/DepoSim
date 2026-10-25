@@ -215,7 +215,8 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
 
       ws.on("close", () => {
         set.delete(ws);
-        if (set.size === 0) {
+        // After a restore or a deletion `clients` may already hold a newer set for this id: that one stays.
+        if (set.size === 0 && clients.get(id) === set) {
           clients.delete(id);
           stopLoop(id);
         }

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { type BackupService, BackupError, restoreInto } from "./backup.js";
 import { ExchangeError, barsCsv, exportSimulation, importSimulation, ordersCsv, valuesCsv } from "./exchange.js";
 import type { Db } from "./db.js";
-import { DEFAULT_DAYS, MAX_DAYS, type Backfill } from "./backfill.js";
+import { DEFAULT_DAYS, MAX_DAYS, REACH_DAYS, type Backfill } from "./backfill.js";
 import { FX_SYMBOL, type Instrument, SOURCELESS_SUFFIXES, VENUES } from "./config.js";
 import type { Archive } from "./data/archive.js";
 import type { DailyArchive } from "./data/dailyarchive.js";
@@ -149,8 +149,8 @@ const archiveExportQuery = z.object({
   to: z.coerce.number().int().positive(),
 });
 
-/** The largest upload (a backup or a simulation file). The archive is not in them, so this is far above any real size. */
-const UPLOAD_LIMIT = 100 * 1024 * 1024;
+/** The largest upload (a backup or a simulation file). The archive is not in them, so this is far above any real size; the container has 256 MB. */
+const UPLOAD_LIMIT = 32 * 1024 * 1024;
 
 const invalid = (reply: FastifyReply, err: z.ZodError) => {
   const issue = err.issues[0];
@@ -421,6 +421,10 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     }
     if (!daily && startAt !== undefined && startAt > session.currentLiveLimit()) {
       return reply.code(400).send({ error: "Der Startzeitpunkt liegt nach der Live-Grenze (jetzt minus Zeitversatz)." });
+    }
+    // The source serves minute bars for the last 30 days only: further back it would be 19 calls for nothing, and empty days stored for good.
+    if (!daily && !body.data.live && startAt !== undefined && startAt < now() - REACH_DAYS * 86400) {
+      return reply.code(400).send({ error: `Minutenkurse gibt es nur für die letzten ${REACH_DAYS} Tage. Für einen früheren Start nimm Tageskurse.` });
     }
     if (startAt === undefined) {
       try {

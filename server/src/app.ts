@@ -136,6 +136,17 @@ export function buildApp(opts: AppOptions): FastifyInstance {
     db.close();
   });
 
+  // A browser sends the login of this site along with a request that a page of another site started (the WebSocket
+  // included). Such a request names its own site in `Origin`; one that does not match the host it was sent to is refused.
+  // Requests without an Origin (curl, the acceptance script, a plain navigation) pass: they cannot come from another page.
+  app.addHook("onRequest", async (req, reply) => {
+    const origin = req.headers.origin;
+    if (origin === undefined) return;
+    let host = "";
+    try { host = new URL(origin).host; } catch { /* "null" and the like: refused below */ }
+    if (host !== req.headers.host) return reply.code(403).send({ error: "Anfrage von einer fremden Seite." });
+  });
+
   app.register(fastifyWebsocket);
   app.register(async (instance) => {
     instance.get("/ws/simulations/:id", { websocket: true }, (socket, req) => {

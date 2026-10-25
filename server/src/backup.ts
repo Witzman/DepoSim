@@ -8,7 +8,7 @@ import { describeError } from "./errors.js";
 /** Tables of the price archive: it can be fetched again (for 30 days), so a backup leaves it out. */
 export const ARCHIVE_TABLES = ["bars", "fetched_days", "bar_flags", "daily_bars", "dividends", "daily_fetched", "fx_daily", "fx_fetched", "job_runs", "source_stats"];
 /** What a restore replaces, in the order they are written (parents first). */
-const USER_TABLES = ["simulations", "instruments", "depots", "orders", "positions", "depot_values", "journal_notes"];
+const USER_TABLES = ["simulations", "instruments", "depots", "orders", "positions", "depot_values", "journal_notes", "cash_events", "hint_prefs"];
 
 export class BackupError extends Error {
   constructor(message: string) {
@@ -240,6 +240,7 @@ export async function restoreInto(db: Db, data: Buffer, beforeApply?: () => Prom
         db.exec("delete from simulations; delete from instruments;"); // depots, orders, ... follow by cascade
         for (const table of USER_TABLES) {
           const have = new Set(columnsOf(db, "restore_src", table));
+          if (have.size === 0) continue; // a backup older than this table has nothing to bring back
           const cols = columnsOf(db, "main", table).filter((c) => have.has(c)).join(", ");
           db.exec(`insert into main.${table} (${cols}) select ${cols} from restore_src.${table}`);
         }

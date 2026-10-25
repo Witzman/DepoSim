@@ -53,3 +53,15 @@ describe("basisLabel", () => {
     expect(basisLabel(null)).toBe("—");
   });
 });
+
+describe("parseEuro", () => {
+  it("reads German and plain notation, and never mistakes a decimal point for a thousands separator", async () => {
+    const { parseEuro } = await import("../src/format.js");
+    expect(parseEuro("1.500,50")).toBe(1500.5);
+    expect(parseEuro("1500.5")).toBe(1500.5);
+    expect(parseEuro("801.5")).toBe(801.5);
+    expect(parseEuro("  ")).toBeNull();
+    expect(parseEuro("abc")).toBeNull();
+    expect(parseEuro("-3")).toBeNull();
+  });
+});

@@ -20,4 +20,6 @@ COPY --from=build /app/build-time ./build-time
 RUN mkdir -p /data && chown node:node /data
 USER node
 EXPOSE 80
+# Answers only while the process serves; /healthz is the one URL without the login.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD wget -qO- http://127.0.0.1:${PORT}/healthz >/dev/null || exit 1
 CMD ["node", "server/dist/main.js"]

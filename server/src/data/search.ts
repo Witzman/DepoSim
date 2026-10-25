@@ -1,5 +1,5 @@
 import type { Instrument } from "../config.js";
-import { MarketDataError } from "./marketdata.js";
+import { MarketDataError, timeoutSignal } from "./marketdata.js";
 
 export interface SearchHit extends Instrument {
   kind: "EQUITY" | "ETF";
@@ -36,7 +36,7 @@ export function createYahooSearch(fetchFn: typeof fetch = fetch, now: () => numb
       const url = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q.trim())}&quotesCount=10&newsCount=0`;
       let res: Response;
       try {
-        res = await fetchFn(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+        res = await fetchFn(url, { headers: { "User-Agent": "Mozilla/5.0" }, signal: timeoutSignal() });
       } catch (err) {
         throw new MarketDataError("network", `search for ${q} failed: ${(err as Error).message}`);
       }

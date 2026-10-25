@@ -1,6 +1,9 @@
 import { z } from "zod";
 import type { Db } from "./db.js";
 import { RELAXED } from "./domain/rules.js";
+import { parseAutoPause } from "./domain/autopause.js";
+import { scenarioById } from "./domain/scenario.js";
+import { parseTaxSettings } from "./domain/tax.js";
 
 export const FORMAT = "deposim-simulation";
 export const VERSION = 1;
@@ -47,6 +50,11 @@ const fileShape = z.object({
     // Added after version 1 shipped (#27, #54): files without them are minute simulations with the relaxed rules.
     resolution: z.enum(["minute", "day"]).optional(),
     rules: z.record(z.string(), z.unknown()).optional(),
+    // Added later still (the scenario, the end of it, the auto-pause and tax settings): a file without them has none.
+    scenarioId: z.string().nullable().optional(),
+    endAt: int.nullable().optional(),
+    autoPause: z.unknown().optional(),
+    tax: z.unknown().optional(),
   }),
   depots: z.array(z.object({
     name: z.string().min(1).max(40),
@@ -65,6 +73,7 @@ export type SimulationFile = z.infer<typeof fileShape>;
 interface SimRow {
   id: number; name: string; start_at: number; simulation_time: number; tempo: number; start_cash: number;
   fees_json: string; created_at: number; ended_at: number | null; live: number; benchmark: string | null; rules_json: string; resolution: string;
+  scenario_id: string | null; end_at: number | null; auto_pause: string | null; tax: string | null;
 }
 interface OrderRow {
   id: number; symbol: string; side: string; kind: string; qty: number; limit_price: number | null; status: string;
@@ -88,6 +97,8 @@ export function exportSimulation(db: Db, id: number, now: number): SimulationFil
       fees: JSON.parse(sim.fees_json) as Record<string, unknown>, createdAt: sim.created_at, endedAt: sim.ended_at,
       live: sim.live === 1, benchmark: sim.benchmark, resolution: sim.resolution === "day" ? "day" : "minute",
       rules: JSON.parse(sim.rules_json) as Record<string, unknown>,
+      scenarioId: sim.scenario_id, endAt: sim.end_at,
+      autoPause: sim.auto_pause === null ? null : JSON.parse(sim.auto_pause), tax: sim.tax === null ? null : JSON.parse(sim.tax),
     },
     depots: depots.map((d) => ({
       name: d.name, cash: d.cash, kind: d.kind,
@@ -155,10 +166,13 @@ export function importSimulation(db: Db, raw: unknown, known: (symbol: string) =
     const name = freeName(db, s.name);
     const id = Number(
       db.prepare(
-        "insert into simulations (name, start_at, simulation_time, tempo, start_cash, fees_json, created_at, ended_at, live, benchmark, rules_json, resolution) " +
-          "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "insert into simulations (name, start_at, simulation_time, tempo, start_cash, fees_json, created_at, ended_at, live, benchmark, rules_json, resolution, scenario_id, end_at, auto_pause, tax) " +
+          "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       ).run(name, s.startAt, s.simulationTime, s.tempo, s.startCash, JSON.stringify(s.fees), Math.floor(now), s.endedAt, s.live ? 1 : 0, s.benchmark,
-        JSON.stringify(s.rules ?? RELAXED), s.resolution ?? "minute")
+        JSON.stringify(s.rules ?? RELAXED), s.resolution ?? "minute",
+        // A scenario this version does not know cannot be judged: the round then plays as a free one.
+        s.scenarioId && scenarioById(s.scenarioId) ? s.scenarioId : null, s.scenarioId && scenarioById(s.scenarioId) ? s.endAt ?? null : null,
+        s.autoPause == null ? null : JSON.stringify(parseAutoPause(s.autoPause)), s.tax == null ? null : JSON.stringify(parseTaxSettings(s.tax)))
         .lastInsertRowid,
     );
     const orderIds = new Map<number, number>();

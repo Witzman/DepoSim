@@ -8,6 +8,10 @@ export interface Bar {
   v: number;
 }
 
+/** The longest an answer from a source may take, headers and body: a hung call must not hold the serial queue for good. */
+export const REQUEST_TIMEOUT_MS = 20_000;
+export const timeoutSignal = (): AbortSignal => AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+
 export type MarketDataErrorKind = "rate_limited" | "no_data" | "bad_shape" | "network";
 
 export class MarketDataError extends Error {

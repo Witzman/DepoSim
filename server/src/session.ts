@@ -678,7 +678,7 @@ export class SessionService {
   }
 
   setHintPref(id: number, rule: string, patch: { enabled?: boolean; hidden?: boolean; levels?: number[] }): { ok: true } | { ok: false; reason: string } {
-    if (!(rule in HINT_RULES)) return { ok: false, reason: "Unbekannte Regel." };
+    if (!Object.hasOwn(HINT_RULES, rule)) return { ok: false, reason: "Unbekannte Regel." };
     const r = rule as HintRule;
     if (patch.levels !== undefined) {
       const want = HINT_RULES[r].defaults.length;
@@ -1251,6 +1251,9 @@ export class SessionService {
       return { ok: false, reason: "Das letzte Depot lässt sich nicht löschen." };
     }
     this.store.deleteDepot(depotId);
+    // SQLite may give the id (and the ids of its orders) to the next depot: nothing worked out for the old one may be shown for it.
+    this.excursionCache.clear();
+    this.derivedCache.clear();
     return { ok: true };
   }
 

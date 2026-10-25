@@ -168,7 +168,7 @@ export function createJobs(deps: {
   function enqueue(d: JobDef, trigger: "plan" | "hand") {
     queue.push({ def: d, trigger, slot: lastSlot(d) });
     // One at a time, in order: the next job starts only when the one before has ended.
-    draining = draining.then(drain);
+    draining = draining.then(drain).catch(() => undefined);
   }
 
   async function drain() {
@@ -176,26 +176,33 @@ export function createJobs(deps: {
       const { def, trigger, slot } = queue.shift()!;
       if (trigger === "plan" && def.usesSource && deps.liveBusy()) continue; // still due at the next look
       currentName = def.name;
-      const id = Number(insert.run(def.name, trigger, slot, Math.floor(now())).lastInsertRowid);
-      let status: RunStatus = "ok";
-      let message: string | null = null;
-      let counts: string | null = null;
-      let error: string | null = null;
+      // Whatever goes wrong here, even in the log table itself, ends this one job and not the scheduler: a rejected
+      // chain would never run another job, and `void tick()` would turn it into an unhandled rejection.
       try {
-        const out = await def.run({
-          slot,
-          shouldStop: () => (stopping ? "Der Server wird beendet" : def.usesSource && deps.liveBusy() ? "Eine Live-Simulation läuft" : null),
-        });
-        status = out.status;
-        message = out.message;
-        counts = out.counts ? JSON.stringify(out.counts) : null;
+        const id = Number(insert.run(def.name, trigger, slot, Math.floor(now())).lastInsertRowid);
+        let status: RunStatus = "ok";
+        let message: string | null = null;
+        let counts: string | null = null;
+        let error: string | null = null;
+        try {
+          const out = await def.run({
+            slot,
+            shouldStop: () => (stopping ? "Der Server wird beendet" : def.usesSource && deps.liveBusy() ? "Eine Live-Simulation läuft" : null),
+          });
+          status = out.status;
+          message = out.message;
+          counts = out.counts ? JSON.stringify(out.counts) : null;
+        } catch (err) {
+          status = "error";
+          error = describeError(err);
+        }
+        finish.run(Math.floor(now()), status, message, counts, error, id);
+        deps.log?.(`Auftrag ${def.name}: ${STATUS_LABELS[status]}${message ? `, ${message}` : ""}${error ? `, ${error}` : ""}`, status !== "error");
       } catch (err) {
-        status = "error";
-        error = describeError(err);
+        deps.log?.(`Auftrag ${def.name}: das Protokoll ließ sich nicht schreiben: ${describeError(err)}`, false);
+      } finally {
+        currentName = null;
       }
-      finish.run(Math.floor(now()), status, message, counts, error, id);
-      deps.log?.(`Auftrag ${def.name}: ${STATUS_LABELS[status]}${message ? `, ${message}` : ""}${error ? `, ${error}` : ""}`, status !== "error");
-      currentName = null;
     }
   }
 

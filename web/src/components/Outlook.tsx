@@ -1,19 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { getCurves } from "../api.js";
-import { formatEur, formatPercentPlain } from "../format.js";
+import { formatEur, formatPercentPlain, parseEuro } from "../format.js";
 import { dailyReturns, DEFAULT_SEED, HORIZON_YEARS, MIN_HISTORY_DAYS, type McInput, type McResult, type Method } from "../monteCarlo.js";
 import { useMonteCarlo } from "../useMonteCarlo.js";
 import type { Curves, DepotView } from "../types.js";
 
 const REFRESH_MS = 8000;
-
-/** Reads a euro amount typed by a person ("1.500,50" or "1500.5"); null when it is empty or not a number. */
-export function parseEuro(text: string): number | null {
-  const t = text.trim();
-  if (t === "") return null;
-  const n = Number(t.includes(",") ? t.replace(/\./g, "").replace(",", ".") : t);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
 
 /** The fan of the paths: median line, bands for 10 to 90 and 5 to 95 percent. A text summary stands for the picture. */
 function Fan({ r, years }: { r: McResult; years: number }) {

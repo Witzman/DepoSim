@@ -167,6 +167,7 @@ create table if not exists hint_prefs (
   levels_json text,
   primary key (simulation_id, rule)
 );
+create index if not exists depots_simulation on depots (simulation_id);
 create table if not exists orders (
   id integer primary key,
   depot_id integer not null references depots (id) on delete cascade,
@@ -183,6 +184,9 @@ create table if not exists orders (
   commission integer,
   foreign_fee integer
 );
+create index if not exists orders_depot on orders (depot_id);
+create index if not exists orders_symbol_status on orders (symbol, status);
+create index if not exists bars_t on bars (t);
 `;
 
 export function openDb(path: string): Db {

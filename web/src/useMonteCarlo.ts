@@ -12,6 +12,7 @@ export function useMonteCarlo(input: McInput | null): { result: Out | null; busy
   const [state, setState] = useState<{ result: Out | null; busy: boolean }>({ result: null, busy: false });
   const worker = useRef<Worker | null>(null);
   const sent = useRef(0);
+  const [failed, setFailed] = useState(0);
 
   useEffect(() => {
     if (typeof Worker === "undefined") return;
@@ -21,6 +22,8 @@ export function useMonteCarlo(input: McInput | null): { result: Out | null; busy
         if (e.data.seq !== sent.current) return; // stale
         setState({ result: e.data.result, busy: false });
       };
+      // A worker script that cannot be loaded fails later, as an event: compute inline from then on.
+      w.onerror = () => { w.terminate(); worker.current = null; setFailed((n) => n + 1); };
       worker.current = w;
       return () => { w.terminate(); worker.current = null; };
     } catch {
@@ -38,7 +41,7 @@ export function useMonteCarlo(input: McInput | null): { result: Out | null; busy
     } else {
       setState({ result: simulate(input), busy: false });
     }
-  }, [input]);
+  }, [input, failed]);
 
   return state;
 }

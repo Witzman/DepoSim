@@ -92,7 +92,7 @@ describe("simulations", () => {
 
   it("answers 502 with the reason when no instrument has prices for the day", async () => {
     const app = make();
-    const res = await post(app, "/api/simulations", { name: "x", startAt: D0 - 30 * 86400 });
+    const res = await post(app, "/api/simulations", { name: "x", startAt: D0 - 3 * 86400 });
     expect(res.statusCode).toBe(502);
     expect(res.json().error).toMatch(/keine Kurse/);
   });

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { getTax, putTax } from "../api.js";
 import { DISCLAIMER, FUND_LABEL, frictionText, holdText } from "../taxText.js";
-import { basisLabel, formatEur, formatPercentPlain, formatRatio, signedEur, signedPercent } from "../format.js";
+import { basisLabel, formatEur, parseEuro, formatPercentPlain, formatRatio, signedEur, signedPercent } from "../format.js";
 import type { DepotView, FundType, TaxReport } from "../types.js";
 import { Hint } from "./Hint.js";
 
@@ -93,8 +93,8 @@ export function TaxCard({ simulationId, depot, running }: Props) {
               <input inputMode="decimal" value={allowance} placeholder={String(data.rules.allowance).replace(".", ",")} className="narrow-input" data-testid="tax-allowance"
                 onChange={(e) => setAllowance(e.target.value)}
                 onBlur={() => {
-                  const n = allowance.trim() === "" ? null : Number(allowance.replace(/\./g, "").replace(",", "."));
-                  if (n === null || (Number.isFinite(n) && n >= 0)) void save({ allowance: n });
+                  const n = parseEuro(allowance);
+                  if (n !== null || allowance.trim() === "") void save({ allowance: n });
                 }} />
             </label>
           </div>

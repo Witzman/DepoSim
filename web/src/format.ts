@@ -45,3 +45,11 @@ export function formatDuration(seconds: number | null): string {
 export const arrowOf = (n: number) => (n > 0 ? "▲" : n < 0 ? "▼" : "•");
 /** Euro cents with arrow and sign: "▲ +10,00 €". */
 export const signedEurArrow = (cents: number) => `${arrowOf(cents)} ${signedEur(cents)}`;
+
+/** Reads a euro amount typed by a person ("1.500,50" or "1500.5"); null when it is empty or not a number. */
+export function parseEuro(text: string): number | null {
+  const t = text.trim();
+  if (t === "") return null;
+  const n = Number(t.includes(",") ? t.replace(/\./g, "").replace(",", ".") : t);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}

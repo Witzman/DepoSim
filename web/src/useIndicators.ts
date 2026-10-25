@@ -15,6 +15,7 @@ export function useIndicators(bars: Ohlcv[], config: IndicatorConfig): { result:
   const keys = useRef(new Map<number, string>());
   const worker = useRef<Worker | null>(null);
   const sent = useRef(0);
+  const [failed, setFailed] = useState(0);
 
   useEffect(() => {
     if (typeof Worker === "undefined") return;
@@ -25,6 +26,8 @@ export function useIndicators(bars: Ohlcv[], config: IndicatorConfig): { result:
         setState({ result: e.data.result, seq: e.data.seq, key: keys.current.get(e.data.seq) ?? "" });
         keys.current.clear();
       };
+      // A worker script that cannot be loaded (an old build's file after a deploy) fails later, as an event: compute inline from then on.
+      w.onerror = () => { w.terminate(); worker.current = null; setFailed((n) => n + 1); };
       worker.current = w;
       return () => { w.terminate(); worker.current = null; };
     } catch {
@@ -43,7 +46,7 @@ export function useIndicators(bars: Ohlcv[], config: IndicatorConfig): { result:
     } else {
       setState({ result: compute(bars.map((b) => b.c), config, bars), seq, key });
     }
-  }, [bars, config]);
+  }, [bars, config, failed]);
 
   return state;
 }

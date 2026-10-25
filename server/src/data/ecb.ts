@@ -1,4 +1,4 @@
-import { MarketDataError } from "./marketdata.js";
+import { MarketDataError, timeoutSignal } from "./marketdata.js";
 
 /** One publication day of the ECB euro reference rates: units of foreign currency per 1 EUR. */
 export interface EcbRow {
@@ -48,7 +48,7 @@ export function createEcb(fetchFn: typeof fetch = fetch): EcbSource {
     async fetch(range) {
       let res: Response;
       try {
-        res = await fetchFn(BASE + FILES[range]);
+        res = await fetchFn(BASE + FILES[range], { signal: timeoutSignal() });
       } catch (err) {
         throw new MarketDataError("network", `request to the ECB failed: ${(err as Error).message}`);
       }

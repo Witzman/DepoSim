@@ -1,4 +1,4 @@
-import { type Bar, type DailyData, type DailySeries, type MarketData, MarketDataError } from "./marketdata.js";
+import { type Bar, type DailyData, type DailySeries, type MarketData, MarketDataError, timeoutSignal } from "./marketdata.js";
 
 const isNumberArray = (a: unknown): a is (number | null)[] => Array.isArray(a);
 
@@ -6,7 +6,7 @@ const isNumberArray = (a: unknown): a is (number | null)[] => Array.isArray(a);
 async function chartResult(fetchFn: typeof fetch, symbol: string, url: string): Promise<any> {
   let res: Response;
   try {
-    res = await fetchFn(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    res = await fetchFn(url, { headers: { "User-Agent": "Mozilla/5.0" }, signal: timeoutSignal() });
   } catch (err) {
     throw new MarketDataError("network", `request for ${symbol} failed: ${(err as Error).message}`);
   }

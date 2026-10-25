@@ -171,8 +171,8 @@ export function createBackfill(deps: {
     start(days = DEFAULT_DAYS) {
       const reason = blocked();
       if (reason) return { ok: false, reason };
+      const planned = plan(days); // before the flag: a plan that throws must not leave "running" set for good
       running = true;
-      const planned = plan(days);
       job = { running: true, startedAt: Math.floor(now()), finishedAt: null, done: 0, total: planned.length, report: null };
       const mine = job;
       current = work(days, planned, mine);
