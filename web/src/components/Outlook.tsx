@@ -4,6 +4,7 @@ import { formatEur, formatPercentPlain, parseEuro } from "../format.js";
 import { dailyReturns, DEFAULT_SEED, HORIZON_YEARS, MIN_HISTORY_DAYS, type McInput, type McResult, type Method } from "../monteCarlo.js";
 import { useMonteCarlo } from "../useMonteCarlo.js";
 import type { Curves, DepotView } from "../types.js";
+import { poll } from "../poll.js";
 
 const REFRESH_MS = 8000;
 
@@ -70,8 +71,8 @@ export function Outlook({ simulationId, depot, running, benchmark }: Props) {
     let alive = true;
     const load = () => getCurves(simulationId).then((c) => { if (alive) setCurves(c); }).catch(() => undefined);
     load();
-    const timer = running ? setInterval(load, REFRESH_MS) : undefined;
-    return () => { alive = false; if (timer) clearInterval(timer); };
+    const stop = running ? poll(load, REFRESH_MS) : undefined;
+    return () => { alive = false; stop?.(); };
   }, [simulationId, running, filled]);
 
   const own = useMemo(() => dailyReturns(curves?.depots.find((d) => d.id === depot.id)?.points ?? []), [curves, depot.id]);

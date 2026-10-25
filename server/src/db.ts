@@ -4,6 +4,16 @@ import { RELAXED } from "./domain/rules.js";
 
 export type Db = Database.Database;
 
+const statements = new WeakMap<Db, Map<string, Database.Statement>>();
+/** A prepared statement for the SQL text, made once per connection: compiling it on every call showed up in the tick. */
+export function prep(db: Db, sql: string): Database.Statement {
+  let m = statements.get(db);
+  if (!m) statements.set(db, (m = new Map()));
+  let st = m.get(sql);
+  if (!st) m.set(sql, (st = db.prepare(sql)));
+  return st;
+}
+
 const RULES_DEFAULT_JSON = JSON.stringify(RELAXED);
 
 const SCHEMA = `

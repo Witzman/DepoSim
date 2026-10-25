@@ -16,3 +16,8 @@ export function describeError(err: unknown): string {
   }
   return `Unerwarteter Fehler: ${err instanceof Error ? err.message : String(err)}`;
 }
+
+/** For a response or a message to the page: the text of a source error is meant for people, the text of any other error is not (paths, SQL). */
+export function publicError(err: unknown): string {
+  return err instanceof MarketDataError ? describeError(err) : "Unerwarteter Fehler. Näheres steht im Protokoll des Servers.";
+}

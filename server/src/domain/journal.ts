@@ -122,6 +122,33 @@ export interface OpenLot {
   cost: Cent;
 }
 
+/** A split that was booked on a depot: from `t` on, one share is `numerator / denominator` shares. */
+export interface BookedSplit {
+  symbol: string;
+  t: number;
+  numerator: number;
+  denominator: number;
+}
+
+/**
+ * The orders as the shares are counted after the splits that were booked later: a purchase before a 4:1 split counts four times
+ * the pieces at a quarter of the price, the money stays what it was. Without it a sale of the new pieces would find only the old
+ * ones in the first-in-first-out queue, and the rest of the sale would be missing from every figure. Pure.
+ */
+export function adjustForSplits(orders: JournalOrder[], splits: BookedSplit[]): JournalOrder[] {
+  if (splits.length === 0) return orders;
+  return orders.map((o) => {
+    let qty = o.qty;
+    let price = o.fillPrice;
+    for (const sp of splits) {
+      if (sp.symbol !== o.symbol || sp.t <= o.filledSim) continue;
+      qty = Math.max(1, Math.floor((qty * sp.numerator) / sp.denominator + 1e-9));
+      price = (price * sp.denominator) / sp.numerator;
+    }
+    return qty === o.qty ? o : { ...o, qty, fillPrice: price };
+  });
+}
+
 export const MIN_TRADES = 5;
 /** Later close above sale price times this counts as "too early". */
 export const TOO_EARLY_FACTOR = 1.02;

@@ -1,4 +1,4 @@
-import type { Db } from "./db.js";
+import { type Db, prep } from "./db.js";
 import { type TaxSettings, parseTaxSettings } from "./domain/tax.js";
 import type { Cent } from "./domain/money.js";
 import type { FeeConfig } from "./domain/fees.js";
@@ -108,6 +108,8 @@ export interface Store {
   createSimulation(input: NewSimulation): Simulation;
   getSimulation(id: number): Simulation | undefined;
   listSimulations(): Simulation[];
+  /** The ids of the simulations that are live and not ended: asked often, so it does not read and parse every row. */
+  liveIds(): number[];
   endSimulation(id: number): void;
   deleteSimulation(id: number): void;
   listDepots(simulationId: number): Depot[];
@@ -226,13 +228,13 @@ const toSimulation = (r: SimulationRow): Simulation => ({
 export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
   const now = opts.now ?? (() => Math.floor(Date.now() / 1000));
 
-  const insertSimulation = db.prepare(
+  const insertSimulation = prep(db, 
     "insert into simulations (name, start_at, simulation_time, tempo, start_cash, fees_json, created_at, live, rules_json, resolution, scenario_id, end_at, benchmark) " +
       "values (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
-  const insertDepot = db.prepare("insert into depots (simulation_id, name, cash) values (?, 'Depot 1', ?)");
-  const recordPoint = db.prepare("insert or replace into depot_values (depot_id, t, value) values (?, ?, ?)");
-  const selectOne = db.prepare("select * from simulations where id = ?");
+  const insertDepot = prep(db, "insert into depots (simulation_id, name, cash) values (?, 'Depot 1', ?)");
+  const recordPoint = prep(db, "insert or replace into depot_values (depot_id, t, value) values (?, ?, ?)");
+  const selectOne = prep(db, "select * from simulations where id = ?");
   const create = db.transaction((input: NewSimulation) => {
     const id = Number(
       insertSimulation.run(
@@ -254,45 +256,46 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
   return {
     createSimulation: (input) => getSimulation(create(input))!,
     getSimulation,
+    liveIds: () => (prep(db, "select id from simulations where live = 1 and ended_at is null").all() as { id: number }[]).map((r) => r.id),
     listSimulations: () =>
-      (db.prepare("select * from simulations order by id").all() as SimulationRow[]).map(toSimulation),
+      (prep(db, "select * from simulations order by id").all() as SimulationRow[]).map(toSimulation),
     endSimulation: (id) => {
-      db.prepare("update simulations set ended_at = ? where id = ?").run(now(), id);
+      prep(db, "update simulations set ended_at = ? where id = ?").run(now(), id);
     },
     deleteSimulation: (id) => {
-      db.prepare("delete from simulations where id = ?").run(id);
+      prep(db, "delete from simulations where id = ?").run(id);
     },
     setSimulationTime: (id, simulationTime) => {
-      db.prepare("update simulations set simulation_time = ? where id = ?").run(simulationTime, id);
+      prep(db, "update simulations set simulation_time = ? where id = ?").run(simulationTime, id);
     },
     setBenchmark: (id, symbol) => {
-      db.prepare("update simulations set benchmark = ? where id = ?").run(symbol, id);
+      prep(db, "update simulations set benchmark = ? where id = ?").run(symbol, id);
     },
     setAutoPause: (id, prefs) => {
-      db.prepare("update simulations set auto_pause = ? where id = ?").run(JSON.stringify(prefs), id);
+      prep(db, "update simulations set auto_pause = ? where id = ?").run(JSON.stringify(prefs), id);
     },
     setTax: (id, settings) => {
-      db.prepare("update simulations set tax = ? where id = ?").run(JSON.stringify(settings), id);
+      prep(db, "update simulations set tax = ? where id = ?").run(JSON.stringify(settings), id);
     },
     setTempo: (id, tempo) => {
-      db.prepare("update simulations set tempo = ? where id = ?").run(tempo, id);
+      prep(db, "update simulations set tempo = ? where id = ?").run(tempo, id);
     },
     loadDepot: (depotId) => {
-      const cash = (db.prepare("select cash from depots where id = ?").get(depotId) as { cash: number }).cash;
+      const cash = (prep(db, "select cash from depots where id = ?").get(depotId) as { cash: number }).cash;
       const positions = new Map<string, { qty: number; cost: Cent }>();
-      for (const r of db.prepare("select symbol, qty, cost from positions where depot_id = ?").all(depotId) as {
+      for (const r of prep(db, "select symbol, qty, cost from positions where depot_id = ?").all(depotId) as {
         symbol: string; qty: number; cost: number;
       }[]) {
         positions.set(r.symbol, { qty: r.qty, cost: r.cost });
       }
-      const orders = (db.prepare("select * from orders where depot_id = ? order by id").all(depotId) as OrderRow[]).map(toOrder);
+      const orders = (prep(db, "select * from orders where depot_id = ? order by id").all(depotId) as OrderRow[]).map(toOrder);
       return { cash, positions, orders };
     },
     saveBalance: (depotId, cash, positions) => {
       db.transaction(() => {
-        db.prepare("update depots set cash = ? where id = ?").run(cash, depotId);
-        db.prepare("delete from positions where depot_id = ?").run(depotId);
-        const insert = db.prepare("insert into positions (depot_id, symbol, qty, cost) values (?, ?, ?, ?)");
+        prep(db, "update depots set cash = ? where id = ?").run(cash, depotId);
+        prep(db, "delete from positions where depot_id = ?").run(depotId);
+        const insert = prep(db, "insert into positions (depot_id, symbol, qty, cost) values (?, ?, ?, ?)");
         for (const [symbol, pos] of positions) insert.run(depotId, symbol, pos.qty, pos.cost);
       })();
     },
@@ -306,12 +309,12 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
           .run(depotId, o.symbol, o.side, o.kind, o.qty, o.limitPrice ?? null, createdSim).lastInsertRowid,
       ),
     markFilled: (orderId, f) => {
-      db.prepare(
+      prep(db, 
         "update orders set status = 'filled', filled_sim = ?, fill_price = ?, gross = ?, commission = ?, foreign_fee = ? where id = ?",
       ).run(f.filledSim, f.fillPrice, f.gross, f.commission, f.foreignFee, orderId);
     },
     setOrderStatus: (orderId, status) => {
-      db.prepare("update orders set status = ? where id = ?").run(status, orderId);
+      prep(db, "update orders set status = ? where id = ?").run(status, orderId);
     },
     symbolInUse: (symbol) =>
       db
@@ -329,7 +332,7 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
       db.transaction((): Depot => {
         const sim = getSimulation(simulationId)!;
         const id = Number(
-          db.prepare("insert into depots (simulation_id, name, cash) values (?, ?, ?)").run(simulationId, name, sim.startCash)
+          prep(db, "insert into depots (simulation_id, name, cash) values (?, ?, ?)").run(simulationId, name, sim.startCash)
             .lastInsertRowid,
         );
         recordPoint.run(id, sim.simulationTime, sim.startCash);
@@ -338,68 +341,68 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
     createGhostDepot: (simulationId, name, cash, positions, t, value) =>
       db.transaction((): Depot => {
         const id = Number(
-          db.prepare("insert into depots (simulation_id, name, cash, kind) values (?, ?, ?, 'ghost')").run(simulationId, name, cash)
+          prep(db, "insert into depots (simulation_id, name, cash, kind) values (?, ?, ?, 'ghost')").run(simulationId, name, cash)
             .lastInsertRowid,
         );
-        const insert = db.prepare("insert into positions (depot_id, symbol, qty, cost) values (?, ?, ?, ?)");
+        const insert = prep(db, "insert into positions (depot_id, symbol, qty, cost) values (?, ?, ?, ?)");
         for (const [symbol, pos] of positions) insert.run(id, symbol, pos.qty, pos.cost);
         recordPoint.run(id, t, value);
         return { id, simulationId, name, cash, kind: "ghost" };
       })(),
     notes: (simulationId) =>
       Object.fromEntries(
-        (db.prepare("select trade_key, text from journal_notes where simulation_id = ?").all(simulationId) as {
+        (prep(db, "select trade_key, text from journal_notes where simulation_id = ?").all(simulationId) as {
           trade_key: string; text: string;
         }[]).map((r) => [r.trade_key, r.text]),
       ),
     setNote: (simulationId, tradeKey, text, at) => {
       if (text === "") {
-        db.prepare("delete from journal_notes where simulation_id = ? and trade_key = ?").run(simulationId, tradeKey);
+        prep(db, "delete from journal_notes where simulation_id = ? and trade_key = ?").run(simulationId, tradeKey);
         return;
       }
-      db.prepare("insert or replace into journal_notes (simulation_id, trade_key, text, updated_at) values (?, ?, ?, ?)")
+      prep(db, "insert or replace into journal_notes (simulation_id, trade_key, text, updated_at) values (?, ?, ?, ?)")
         .run(simulationId, tradeKey, text, at);
     },
     hintPrefs: (simulationId) =>
       Object.fromEntries(
-        (db.prepare("select rule, enabled, hidden, levels_json from hint_prefs where simulation_id = ?").all(simulationId) as {
+        (prep(db, "select rule, enabled, hidden, levels_json from hint_prefs where simulation_id = ?").all(simulationId) as {
           rule: string; enabled: number; hidden: number; levels_json: string | null;
         }[]).map((r) => [r.rule, { enabled: r.enabled === 1, hidden: r.hidden === 1, levels: r.levels_json ? (JSON.parse(r.levels_json) as number[]) : null }]),
       ),
     setHintPref: (simulationId, rule, patch) => {
-      const row = db.prepare("select enabled, hidden, levels_json from hint_prefs where simulation_id = ? and rule = ?").get(simulationId, rule) as
+      const row = prep(db, "select enabled, hidden, levels_json from hint_prefs where simulation_id = ? and rule = ?").get(simulationId, rule) as
         { enabled: number; hidden: number; levels_json: string | null } | undefined;
       const enabled = patch.enabled ?? (row ? row.enabled === 1 : true);
       const hidden = patch.hidden ?? (row ? row.hidden === 1 : false);
       const levels = patch.levels !== undefined ? patch.levels : row?.levels_json ? (JSON.parse(row.levels_json) as number[]) : null;
-      db.prepare("insert or replace into hint_prefs (simulation_id, rule, enabled, hidden, levels_json) values (?, ?, ?, ?, ?)")
+      prep(db, "insert or replace into hint_prefs (simulation_id, rule, enabled, hidden, levels_json) values (?, ?, ?, ?, ?)")
         .run(simulationId, rule, enabled ? 1 : 0, hidden ? 1 : 0, levels ? JSON.stringify(levels) : null);
     },
     addBooking: (depotId, b) =>
-      db.prepare("insert or ignore into cash_events (depot_id, t, kind, symbol, ref, amount, text) values (?, ?, ?, ?, ?, ?, ?)")
+      prep(db, "insert or ignore into cash_events (depot_id, t, kind, symbol, ref, amount, text) values (?, ?, ?, ?, ?, ?, ?)")
         .run(depotId, b.t, b.kind, b.symbol, b.ref, b.amount, b.text).changes > 0,
     bookings: (depotId) =>
-      db.prepare("select t, kind, symbol, ref, amount, text from cash_events where depot_id = ? order by t, symbol").all(depotId) as Booking[],
+      prep(db, "select t, kind, symbol, ref, amount, text from cash_events where depot_id = ? order by t, symbol").all(depotId) as Booking[],
     splitOpenOrders: (depotId, symbol, numerator, denominator) => {
-      const rows = db.prepare("select id, qty, limit_price from orders where depot_id = ? and symbol = ? and status = 'open'")
+      const rows = prep(db, "select id, qty, limit_price from orders where depot_id = ? and symbol = ? and status = 'open'")
         .all(depotId, symbol) as { id: number; qty: number; limit_price: number | null }[];
-      const update = db.prepare("update orders set qty = ?, limit_price = ? where id = ?");
+      const update = prep(db, "update orders set qty = ?, limit_price = ? where id = ?");
       for (const r of rows) {
         const s = splitOrder(r.qty, r.limit_price ?? undefined, numerator, denominator);
         update.run(s.qty, s.limitPrice ?? null, r.id);
       }
     },
     deleteDepot: (depotId) => {
-      db.prepare("delete from depots where id = ?").run(depotId);
+      prep(db, "delete from depots where id = ?").run(depotId);
     },
     renameDepot: (depotId, name) => {
-      db.prepare("update depots set name = ? where id = ?").run(name, depotId);
+      prep(db, "update depots set name = ? where id = ?").run(name, depotId);
     },
     recordValue: (depotId, t, value) => {
       recordPoint.run(depotId, t, value);
     },
     valueCurve: (depotId, maxPoints = 800) => {
-      const rows = db.prepare("select t, value from depot_values where depot_id = ? order by t").all(depotId) as {
+      const rows = prep(db, "select t, value from depot_values where depot_id = ? order by t").all(depotId) as {
         t: number; value: number;
       }[];
       if (rows.length <= maxPoints) return rows;
@@ -411,7 +414,7 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
       return out.reverse();
     },
     listDepots: (simulationId) =>
-      (db.prepare("select id, simulation_id, name, cash, kind from depots where simulation_id = ? order by id")
+      (prep(db, "select id, simulation_id, name, cash, kind from depots where simulation_id = ? order by id")
         .all(simulationId) as { id: number; simulation_id: number; name: string; cash: number; kind: DepotKind }[]).map((r) => ({
         id: r.id,
         simulationId: r.simulation_id,

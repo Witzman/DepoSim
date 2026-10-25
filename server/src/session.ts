@@ -25,7 +25,7 @@ import { type Behavior, analyzeBehavior } from "./domain/behavior.js";
 import { type TaxEvent, type TaxTimeline, type YearTax, holdTax, taxAt, taxTimeline } from "./domain/tax.js";
 import { type FundType, FUND_TYPES, TAX_RULES, allowanceFor, effectiveRate } from "./domain/taxrules.js";
 import { type Excursion, type ExcursionBars, type ExcursionSummary, openExcursion, summarize, tradeExcursion } from "./domain/excursions.js";
-import { type Journal, type JournalOrder, type JournalTrade, type OpenLot, buildJournalCore } from "./domain/journal.js";
+import { type BookedSplit, type Journal, type JournalOrder, type JournalTrade, type OpenLot, adjustForSplits, buildJournalCore } from "./domain/journal.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
 import type { Cent } from "./domain/money.js";
 import { applySplit, dividendCredit, showsSplit, splitOrder } from "./domain/events.js";
@@ -413,6 +413,7 @@ export class SessionService {
     this.runCache.clear();
     this.excursionCache.clear();
     this.derivedCache.clear();
+    this.eventsCache.clear();
   }
 
   /** Forgets what is kept in memory for a simulation that is deleted: SQLite may give its id to the next one. */
@@ -421,6 +422,7 @@ export class SessionService {
     this.carry.delete(id);
     this.runCache.delete(id);
     this.lastOpen.delete(id);
+    this.eventsCache.clear();
     // Depot ids can come back too, and nothing tells which depots a simulation had: drop the figures worked out from prices.
     this.excursionCache.clear();
     this.derivedCache.clear();
@@ -830,6 +832,19 @@ export class SessionService {
    */
   marketEvents(id: number, symbols: string[]): MarketEvent[] {
     const sim = this.sim(id);
+    // The page asks again at every change of the day or of the shown title; the answer is the same until the clock or the data moves.
+    const cacheKey = `${id}|${sim.simulationTime}|${this.dataVersion}|${[...new Set(symbols)].sort().join(",")}`;
+    const kept = this.eventsCache.get(cacheKey);
+    if (kept) return kept;
+    const out = this.marketEventsUncached(sim, symbols);
+    if (this.eventsCache.size >= 40) this.eventsCache.clear();
+    this.eventsCache.set(cacheKey, out);
+    return out;
+  }
+
+  private eventsCache = new Map<string, MarketEvent[]>();
+
+  private marketEventsUncached(sim: Simulation, symbols: string[]): MarketEvent[] {
     const day = sim.resolution === "day";
     const from = sim.startAt - (day ? 366 : 30) * DAY;
     const out: MarketEvent[] = [];
@@ -932,7 +947,7 @@ export class SessionService {
    * target to the second, also when the market is shut there. A daily simulation knows one jump, the next trading day.
    * `symbol` names the market whose hours the target follows (the shown symbol); Xetra if none.
    */
-  jump(id: number, kind: JumpKind, symbol?: string): JumpResult | { ok: false; reason: string } {
+  jump(id: number, kind: JumpKind, symbol?: string, maxSpanS?: number): JumpResult | { ok: false; reason: string } {
     const sim = this.sim(id);
     if (sim.endedAt !== null) return { ok: false, reason: "Die Simulation ist beendet." };
     if (sim.live) return { ok: false, reason: "Im Livebetrieb gibt es keine Sprünge: Die Zeit ist die Gegenwart." };
@@ -961,18 +976,23 @@ export class SessionService {
       target = Math.min(stop, sim.endAt ?? Infinity);
     }
 
-    return this.playTo(id, target);
+    return this.playTo(id, target, maxSpanS);
   }
 
-  /** Plays the clock on towards `target` in steps of one finished bar; see `jump` for where it stops. */
-  playTo(id: number, target: number): JumpResult {
+  /**
+   * Plays the clock on towards `target` in steps of one finished bar; see `jump` for where it stops. With `maxSpanS` it plays
+   * at most that much simulated time and returns with `simulationTime` short of `target` and nothing in `stopped`: the caller
+   * asks again. Every step is a database transaction on the one thread, so a long jump is played in pieces with room between them.
+   */
+  playTo(id: number, target: number, maxSpanS?: number): JumpResult {
     const sim = this.sim(id);
     const from = sim.simulationTime;
+    const stopAt = maxSpanS === undefined ? target : Math.min(target, from + maxSpanS);
     const merged: Record<string, Bar[]> = {};
     let time = from;
     let stopped: JumpResult["stopped"] = null;
-    for (let guard = 0; time < target && guard < 20_000; guard++) {
-      const to = Math.min(target, this.nextBarEnd(time) ?? target);
+    for (let guard = 0; time < stopAt && guard < 20_000; guard++) {
+      const to = Math.min(stopAt, this.nextBarEnd(time) ?? stopAt);
       const r = this.tick(id, 0, to);
       for (const [sym, bars] of Object.entries(r.newBars)) (merged[sym] ??= []).push(...bars);
       const moved = r.simulationTime > time;
@@ -1015,6 +1035,7 @@ export class SessionService {
   /** Called when bars were added to the archive after the fact (the backfill). */
   dataChanged(): void {
     this.dataVersion++;
+    this.eventsCache.clear();
     this.excursionCache.clear();
     this.derivedCache.clear();
   }
@@ -1077,6 +1098,17 @@ export class SessionService {
    * The trades, open lots and bookings of a depot without reading a single price: enough for the trade keys and the tax, and
    * cheap. The "too early" and behaviour figures that need prices come from `journal`.
    */
+  /** The splits booked on a depot, with their ratio from the events table. */
+  private bookedSplits(bookings: Booking[]): BookedSplit[] {
+    const out: BookedSplit[] = [];
+    for (const b of bookings) {
+      if (b.kind !== "split") continue;
+      const sp = this.events?.splits(b.symbol, b.ref, b.ref)[0];
+      if (sp) out.push({ symbol: b.symbol, t: b.t, numerator: sp.numerator, denominator: sp.denominator });
+    }
+    return out;
+  }
+
   private bookedTrades(id: number, depotId: number) {
     const sim = this.sim(id);
     const filled: JournalOrder[] = [];
@@ -1085,8 +1117,9 @@ export class SessionService {
       filled.push({ id: o.id, symbol: o.symbol, side: o.side, qty: o.qty, fillPrice: o.fillPrice, filledSim: o.filledSim, gross: o.gross ?? 0, commission: o.commission ?? 0, foreignFee: o.foreignFee ?? 0 });
     }
     const noBars = { lastCompleteBar: () => undefined, nextBarAfter: () => undefined };
-    const { journal, openLots } = buildJournalCore({ orders: filled, s: sim.simulationTime, bars: noBars, notes: {} });
-    return { trades: journal.trades, open: journal.open, openLots, bookings: this.store.bookings(depotId) };
+    const bookings = this.store.bookings(depotId);
+    const { journal, openLots } = buildJournalCore({ orders: adjustForSplits(filled, this.bookedSplits(bookings)), s: sim.simulationTime, bars: noBars, notes: {} });
+    return { trades: journal.trades, open: journal.open, openLots, bookings };
   }
 
   /** Trades, hit rate, holding time and "too early" of one depot, computed now from its filled orders. */
@@ -1101,7 +1134,9 @@ export class SessionService {
       });
     }
     const bars = sim.resolution === "day" ? this.dailyBars() : this.archive;
-    const { journal, contexts, openLots } = buildJournalCore({ orders: filled, s: sim.simulationTime, bars, notes: this.store.notes(id) });
+    const bookings = this.store.bookings(depotId);
+    const adjusted = adjustForSplits(filled, this.bookedSplits(bookings));
+    const { journal, contexts, openLots } = buildJournalCore({ orders: adjusted, s: sim.simulationTime, bars, notes: this.store.notes(id) });
     // Behaviour and excursions do not depend on the notes: the same time, orders, bookings and prices give the same figures.
     const key = `${id}:${depotId}:${sim.simulationTime}:${filled.length}:${filled.at(-1)?.id ?? 0}:${sim.benchmark ?? ""}:${this.dataVersion}`;
     let derived = this.derivedCache.get(key);
@@ -1109,14 +1144,14 @@ export class SessionService {
       const curve = this.store.valueCurve(depotId, EVALUATION_POINTS);
       const meanValue = curve.length === 0 ? null : curve.reduce((a, p) => a + p.value, 0) / curve.length;
       derived = {
-        behavior: analyzeBehavior({ orders: filled, trades: journal.trades, contexts, s: sim.simulationTime, bars, meanValue, intraday: sim.resolution !== "day", zoneOf: (symbol) => this.zoneOf(symbol) }),
+        behavior: analyzeBehavior({ orders: adjusted, trades: journal.trades, contexts, s: sim.simulationTime, bars, meanValue, intraday: sim.resolution !== "day", zoneOf: (symbol) => this.zoneOf(symbol) }),
         excursions: this.excursions(sim, depotId, journal.trades, openLots),
       };
       if (this.derivedCache.size > 50) this.derivedCache.clear();
       this.derivedCache.set(key, derived);
     }
     const { behavior, excursions } = derived;
-    return { ...journal, bookings: this.store.bookings(depotId), depotId, simulationTime: sim.simulationTime, behavior, excursions };
+    return { ...journal, bookings, depotId, simulationTime: sim.simulationTime, behavior, excursions };
   }
 
   /**
@@ -1322,6 +1357,7 @@ export class SessionService {
     const curves = this.store.listDepots(id).map((d) => ({ depot: d, points: this.store.valueCurve(d.id, EVALUATION_POINTS) }));
     const inst = sim.benchmark ? this.registry.get(sim.benchmark) : undefined;
     const benchSeries = this.benchmarkSeries(sim, EVALUATION_POINTS);
+    const seriesOfTitle = new Map<string, Point[]>();
     const depots = curves.map(({ depot, points }) => {
       const state = this.store.loadDepot(depot.id);
       const held = [...state.positions].map(([symbol, pos]) => ({ symbol, value: positionValue(pos, refs.get(symbol)) }));
@@ -1334,7 +1370,7 @@ export class SessionService {
         vsBenchmark: benchSeries ? relativeTo(points, benchSeries) : null,
         fees: feeLedger(state.orders, sim.startCash),
         breakdown: breakdown(held, state.cash, this.instruments),
-        diversification: diversify(this.heldSeries(sim, held, state.positions)),
+        diversification: diversify(this.heldSeries(sim, held, state.positions, seriesOfTitle)),
       };
     });
     const benchmark: Evaluation["benchmark"] = inst && benchSeries
@@ -1485,7 +1521,9 @@ export class SessionService {
    * The held positions with their prices in EUR from the start of the simulation up to its time and
    * not a minute beyond. A USD price is divided by the rate of the same minute (the last one known).
    */
-  private heldSeries(sim: Simulation, held: { symbol: string; value: Cent }[], positions: DepotState["positions"]): HeldSeries[] {
+  private heldSeries(
+    sim: Simulation, held: { symbol: string; value: Cent }[], positions: DepotState["positions"], shared?: Map<string, Point[]>,
+  ): HeldSeries[] {
     const from = sim.startAt - 59;
     const to = sim.simulationTime - 59;
     let rates: Map<number, number> | undefined;
@@ -1494,12 +1532,19 @@ export class SessionService {
       if (!positions.has(h.symbol)) continue;
       const inst = this.registry.get(h.symbol);
       if (!inst) continue;
+      // The price series of a title does not depend on the depot: with several depots it is read once per request.
+      const known = shared?.get(h.symbol);
+      if (known) {
+        out.push({ symbol: h.symbol, value: h.value, points: known });
+        continue;
+      }
       if (sim.resolution === "day") {
         const points: Point[] = [];
         for (const b of this.daily?.between(h.symbol, sim.startAt, sim.simulationTime) ?? []) {
           const rate = inst.currency === "USD" ? this.fxRate?.("USD", isoDay(b.t)) : 1;
           if (rate !== undefined) points.push({ t: b.t + DAY, value: b.c / rate });
         }
+        shared?.set(h.symbol, points);
         out.push({ symbol: h.symbol, value: h.value, points });
         continue;
       }
@@ -1517,6 +1562,7 @@ export class SessionService {
       } else {
         points = bars.map((b) => ({ t: b.t + 60, value: b.c }));
       }
+      shared?.set(h.symbol, points);
       out.push({ symbol: h.symbol, value: h.value, points });
     }
     return out;
@@ -1638,7 +1684,8 @@ export class SessionService {
       if (inst.currency === "EUR") {
         ref = { price: bar.o, currency: "EUR" };
       } else {
-        const eurUsd = this.fxRate?.("USD", isoDay(bar.t));
+        // The ECB rate of the day is published at 16:00: an order filled at the open cannot know it, it gets the one before.
+        const eurUsd = this.fxRate?.("USD", isoDay(bar.t - DAY));
         if (eurUsd === undefined) continue;
         ref = { price: bar.o, currency: "USD", eurUsd };
       }

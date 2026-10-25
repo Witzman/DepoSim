@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { getRolling } from "../api.js";
 import { formatPercentPlain, formatRatio, signedPercent } from "../format.js";
 import type { Analysis, DepotView, RollingResult } from "../types.js";
+import { poll } from "../poll.js";
 
 const REFRESH_MS = 8000;
 type Measure = "vol" | "sharpe" | "ret";
@@ -130,8 +131,8 @@ export function Rolling({ simulationId, depot, running }: Props) {
     let alive = true;
     const load = () => getRolling(simulationId, depot.id).then((d) => { if (alive) { setData(d); setFailed(false); } }).catch(() => { if (alive) setFailed(true); });
     load();
-    const timer = running ? setInterval(load, REFRESH_MS) : undefined;
-    return () => { alive = false; if (timer) clearInterval(timer); };
+    const stop = running ? poll(load, REFRESH_MS) : undefined;
+    return () => { alive = false; stop?.(); };
   }, [simulationId, depot.id, running, filled]);
 
   const usable = useMemo(() => data?.depot.rolling.filter((r) => r.points.length > 0).map((r) => r.window) ?? [], [data]);

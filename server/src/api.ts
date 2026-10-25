@@ -16,7 +16,7 @@ import { JUMP_REFUSED, applyRules, resolveRules } from "./domain/rules.js";
 import { parseAutoPause } from "./domain/autopause.js";
 import { parseTaxSettings } from "./domain/tax.js";
 import { SCENARIOS, scenarioById } from "./domain/scenario.js";
-import { describeError } from "./errors.js";
+import { publicError } from "./errors.js";
 import type { Fx } from "./fx.js";
 import type { Health } from "./health.js";
 import type { Jobs } from "./jobs.js";
@@ -163,6 +163,11 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     const id = Number((params as { id?: string }).id);
     return Number.isInteger(id) ? store.getSimulation(id) : undefined;
   };
+  /** The answer for an unexpected error is generic; the error itself goes to the log. */
+  const reported = (err: unknown) => {
+    app.log.error(err);
+    return publicError(err);
+  };
   const notFound = (reply: FastifyReply) => reply.code(404).send({ error: "Unbekannte Simulation." });
 
   app.get("/api/venues", async () =>
@@ -259,7 +264,7 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
       const { name, data } = await backup.snapshot();
       return attachment(reply, "application/vnd.sqlite3", name).send(data);
     } catch (err) {
-      return reply.code(500).send({ error: `Die Sicherung ist fehlgeschlagen: ${describeError(err)}` });
+      return reply.code(500).send({ error: `Die Sicherung ist fehlgeschlagen: ${reported(err)}` });
     }
   });
 
@@ -278,11 +283,12 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
         try {
           before = await backup.preRestore();
         } catch (err) {
-          throw new BackupError(`Der aktuelle Stand konnte nicht gesichert werden: ${describeError(err)}`);
+          throw new BackupError(`Der aktuelle Stand konnte nicht gesichert werden: ${reported(err)}`);
         }
         hub.stopAll();
         session.reset();
       });
+      instruments.invalidate(); // the table of added instruments was replaced underneath it
       return { ...result, savedBefore: before };
     } catch (err) {
       if (err instanceof BackupError) return reply.code(400).send({ error: `${err.message} Nichts wurde geändert.` });
@@ -314,7 +320,7 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
 
   /** A rate limit of a source is 429, any other failure of it is 502. */
   const sourceFailed = (reply: FastifyReply, err: unknown) =>
-    reply.code(err instanceof MarketDataError && err.kind === "rate_limited" ? 429 : 502).send({ error: describeError(err) });
+    reply.code(err instanceof MarketDataError && err.kind === "rate_limited" ? 429 : 502).send({ error: reported(err) });
   const shown = (i: Instrument) => ({
     symbol: i.symbol, name: i.name, currency: i.currency, venue: i.venue, added: instruments.isAdded(i.symbol),
   });
@@ -434,7 +440,7 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
       try {
         startAt = await session.resolveLiveStart();
       } catch (err) {
-        return reply.code(502).send({ error: describeError(err) });
+        return reply.code(502).send({ error: reported(err) });
       }
     }
     const rules = scenario ? resolveRules(scenario.preset) : resolveRules(body.data.preset, body.data.rules);
@@ -452,7 +458,7 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
       await session.start(sim.id);
     } catch (err) {
       store.deleteSimulation(sim.id);
-      return reply.code(502).send({ error: describeError(err) });
+      return reply.code(502).send({ error: reported(err) });
     }
     return reply.code(201).send(store.getSimulation(sim.id));
   });

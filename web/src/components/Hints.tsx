@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { getHints, setHintPref } from "../api.js";
 import { entryOf } from "../glossary.js";
 import type { HintRule, HintsResult } from "../types.js";
+import { poll } from "../poll.js";
 
 const REFRESH_MS = 5000;
 
@@ -37,8 +38,8 @@ export function Hints({ simulationId, depotId, running, showCard, version, setti
     let current = true;
     const run = () => getHints(simulationId, depotId).then((d) => { if (current) { setData(d); setError(null); onCount(d.hints.length); } }).catch((e: Error) => current && setError(e.message));
     void run();
-    const timer = running ? setInterval(run, REFRESH_MS) : undefined;
-    return () => { current = false; if (timer) clearInterval(timer); };
+    const stop = running ? poll(run, REFRESH_MS) : undefined;
+    return () => { current = false; stop?.(); };
   }, [simulationId, depotId, running, version]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {

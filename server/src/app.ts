@@ -103,7 +103,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   const longterm = createLongterm({
     db, source: dailySource, now: nowS, minGapMs: opts.minGapMs, fx,
   });
-  const hub = createHub(session, store, opts.tickMs ?? 250, opts.liveRefreshS ?? 60);
+  const hub = createHub(session, store, opts.tickMs ?? 250, opts.liveRefreshS ?? 60, (err) => app.log.error(err));
 
   const app = Fastify({ logger: process.env.NODE_ENV !== "test" });
   const backup = createBackupService({
@@ -116,7 +116,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   // The scheduler owns every timed job: collection, repair, daily prices, rates, backup, upkeep.
   const jobs = createJobs({
     db, now: nowS, settings: opts.jobSettings ?? { enabled: true, overrides: {} },
-    liveBusy: () => store.listSimulations().some((s) => s.live && s.endedAt === null && session.isRunning(s.id)),
+    liveBusy: () => store.liveIds().some((id) => session.isRunning(id)),
     log: (text, ok) => (ok ? app.log.info(text) : app.log.error(text)),
     defs: buildJobDefs({
       db, archive, backfill, instruments, longterm, fx, backup, backupOn: opts.backupDir !== undefined, now: nowS, gapMs: opts.jobGapMs ?? 0,

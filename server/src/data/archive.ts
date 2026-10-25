@@ -1,4 +1,4 @@
-import type { Db } from "../db.js";
+import { type Db, prep } from "../db.js";
 import { type Bar, type MarketData, MarketDataError } from "./marketdata.js";
 import { BLOCKING_KINDS, type Flag, type FlagKind, checkBar, compareToDaily, findOrderProblems, findSpikes } from "../domain/quality.js";
 
@@ -57,9 +57,9 @@ export function createArchive(db: Db, source: MarketData, opts: ArchiveOptions =
   const minGapMs = opts.minGapMs ?? 500;
   const now = opts.now ?? (() => Date.now() / 1000);
 
-  const selectDay = db.prepare("select complete from fetched_days where symbol = ? and day_start = ?");
-  const insertBar = db.prepare("insert or ignore into bars (symbol, t, o, h, l, c, v) values (?, ?, ?, ?, ?, ?, ?)");
-  const markDay = db.prepare(
+  const selectDay = prep(db, "select complete from fetched_days where symbol = ? and day_start = ?");
+  const insertBar = prep(db, "insert or ignore into bars (symbol, t, o, h, l, c, v) values (?, ?, ?, ?, ?, ?, ?)");
+  const markDay = prep(db, 
     "insert into fetched_days (symbol, day_start, complete) values (?, ?, ?) " +
       "on conflict (symbol, day_start) do update set complete = excluded.complete",
   );
@@ -68,13 +68,13 @@ export function createArchive(db: Db, source: MarketData, opts: ArchiveOptions =
     markDay.run(symbol, dayStartT, complete);
   });
 
-  const insertFlag = db.prepare("insert or replace into bar_flags (symbol, t, kind, detail) values (?, ?, ?, ?)");
-  const dailyOf = db.prepare("select c from daily_bars where symbol = ? and day = ?");
-  const rangeBars = db.prepare("select t, o, h, l, c, v from bars where symbol = ? and t >= ? and t < ? order by t");
-  const tailBars = db.prepare("select t, o, h, l, c, v from bars where symbol = ? and t < ? order by t desc limit ?");
-  const headBars = db.prepare("select t, o, h, l, c, v from bars where symbol = ? and t >= ? order by t limit 1");
+  const insertFlag = prep(db, "insert or replace into bar_flags (symbol, t, kind, detail) values (?, ?, ?, ?)");
+  const dailyOf = prep(db, "select c from daily_bars where symbol = ? and day = ?");
+  const rangeBars = prep(db, "select t, o, h, l, c, v from bars where symbol = ? and t >= ? and t < ? order by t");
+  const tailBars = prep(db, "select t, o, h, l, c, v from bars where symbol = ? and t < ? order by t desc limit ?");
+  const headBars = prep(db, "select t, o, h, l, c, v from bars where symbol = ? and t >= ? order by t limit 1");
   const spikeKinds = "('spike', 'daily')";
-  const clearFlags = db.prepare(`delete from bar_flags where symbol = ? and t >= ? and t < ? and kind in ${spikeKinds}`);
+  const clearFlags = prep(db, `delete from bar_flags where symbol = ? and t >= ? and t < ? and kind in ${spikeKinds}`);
   const tolerance = opts.dailyTolerance ?? (() => 0.01);
 
   const recheck = db.transaction((symbol: string, fromT: number, toT: number): RecheckResult => {
@@ -204,7 +204,7 @@ export function createArchive(db: Db, source: MarketData, opts: ArchiveOptions =
     recheck: (symbol, fromT, toT) => recheck(symbol, fromT, toT),
 
     flagsBetween(symbol, fromT, toT, kinds) {
-      const rows = db.prepare("select t, kind, detail from bar_flags where symbol = ? and t >= ? and t < ? order by t, kind").all(symbol, fromT, toT) as Flag[];
+      const rows = prep(db, "select t, kind, detail from bar_flags where symbol = ? and t >= ? and t < ? order by t, kind").all(symbol, fromT, toT) as Flag[];
       return kinds ? rows.filter((r) => kinds.includes(r.kind)) : rows;
     },
 

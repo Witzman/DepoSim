@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getArchiveInfo, getCoverage, getDataStatus, getFlags, getGaps, getJobs, getSources, runJob } from "../api.js";
 import { CALL_COLUMNS, LIGHT_WORD, STATE_WORD, ago, dayLong, formatBytes, until, utcTime } from "../data.js";
+import { poll } from "../poll.js";
 import { CoverageGrid } from "./CoverageGrid.js";
 import type { ArchiveInfo, Coverage, DataStatus, FlagReport, GapReport, JobsOverview, SourceSummary } from "../types.js";
 
@@ -50,8 +51,8 @@ export function DataView({ onChanged, onClose }: Props) {
   useEffect(() => {
     alive.current = true;
     void load();
-    const timer = setInterval(() => void load(), REFRESH_MS);
-    return () => { alive.current = false; clearInterval(timer); };
+    const stop = poll(load, REFRESH_MS);
+    return () => { alive.current = false; stop(); };
   }, [load]);
 
   useEffect(() => {

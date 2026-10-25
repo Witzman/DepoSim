@@ -1,6 +1,6 @@
 import type { WebSocket } from "ws";
 import { z } from "zod";
-import { describeError } from "./errors.js";
+import { publicError } from "./errors.js";
 import { PAUSE_REFUSED, TEMPO_REFUSED } from "./domain/rules.js";
 import type { Bar } from "./data/marketdata.js";
 import type { JumpKind } from "./domain/clock.js";
@@ -14,6 +14,9 @@ const message = z.discriminatedUnion("type", [
   z.object({ type: z.literal("tempo"), tempo: z.union([z.literal(1), z.literal(5), z.literal(30), z.literal(60), z.literal(120), z.literal(300)]) }),
   z.object({ type: z.literal("jump"), to: z.enum(["candle", "hour", "close", "open", "day"]), symbol: z.string().max(20).optional() }),
 ]);
+
+/** How much simulated time one piece of a jump plays before the event loop gets a turn. */
+const JUMP_PIECE_S = 2 * 3600;
 
 /** The longest stretch of real time one tick may account for. */
 export const MAX_TICK_MS = 1000;
@@ -35,7 +38,7 @@ interface Loop {
  * The clients of each simulation and the one loop that drives its clock. A loop runs only
  * while a client is connected and the simulation is running; the last client leaving pauses it.
  */
-export function createHub(session: SessionService, store: Store, tickMs: number, liveRefreshS: number) {
+export function createHub(session: SessionService, store: Store, tickMs: number, liveRefreshS: number, log?: (err: unknown) => void) {
   const clients = new Map<number, Set<WebSocket>>();
   const loops = new Map<number, Loop>();
   // When the prices may be fetched again, per simulation. It outlives a pause: pressing Start
@@ -149,7 +152,8 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
       }
     } catch (err) {
       stopLoop(id);
-      broadcast(id, { type: "notice", text: describeError(err) });
+      log?.(err);
+      broadcast(id, { type: "notice", text: publicError(err) });
       broadcast(id, snapshotMessage(id));
     } finally {
       loop.busy = false;
@@ -259,8 +263,17 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
      */
     async jump(id: number, kind: JumpKind, symbol?: string): Promise<JumpResult | { ok: false; reason: string }> {
       stopLoop(id);
-      let r = session.jump(id, kind, symbol);
+      let r = session.jump(id, kind, symbol, JUMP_PIECE_S);
       if (!r.ok) return r;
+      // A long jump is played in pieces, and the loop gets a turn between them: the other clocks and requests do not wait for all of it.
+      while (r.stopped === null && r.simulationTime < r.target) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (loops.has(id)) break; // the person pressed Start in between: the running clock goes on from here
+        const next = session.playTo(id, r.target, JUMP_PIECE_S);
+        const newBars: Record<string, Bar[]> = { ...r.newBars };
+        for (const [sym, bars] of Object.entries(next.newBars)) newBars[sym] = [...(newBars[sym] ?? []), ...bars];
+        r = { ...next, newBars };
+      }
       // The archive holds the days that were loaded so far. Running out of bars on the way is a reason to fetch the next
       // day, as the running clock does, not to stop; only when nothing more comes does the jump end at the data.
       for (let tries = 0; tries < 12 && r.stopped?.rule === "data"; tries++) {

@@ -136,7 +136,7 @@ export function createBackfill(deps: {
         return `${v.name} ist gerade geöffnet. Nachladen ist nur bei geschlossenen Märkten möglich.`;
       }
     }
-    if (store.listSimulations().some((s) => s.live && s.endedAt === null && session.isRunning(s.id))) {
+    if (store.liveIds().some((id) => session.isRunning(id))) {
       return "Eine Live-Simulation läuft. Bitte zuerst pausieren oder beenden.";
     }
     if (running) return "Es läuft bereits ein Nachladen.";

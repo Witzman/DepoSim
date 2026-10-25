@@ -408,9 +408,12 @@ export function App() {
   const price = snapshot?.prices[symbol];
   const depot = snapshot ? pickDepot(snapshot.depots, activeDepotId) : undefined;
   const isGhost = depot?.kind === "ghost";
-  const fills = useMemo<Fill[]>(() => (depot?.orders ?? []).flatMap((o) =>
+  // The chart rebuilds its markers when this list changes: it is made again only when a fill of the shown symbol came or went.
+  const fillList: Fill[] = (depot?.orders ?? []).flatMap((o) =>
     o.status === "filled" && o.symbol === symbol && o.filledSim !== undefined && o.fillPrice !== undefined
-      ? [{ t: o.filledSim, side: o.side, price: o.fillPrice, qty: o.qty }] : []), [depot?.orders, symbol]);
+      ? [{ t: o.filledSim, side: o.side, price: o.fillPrice, qty: o.qty }] : []);
+  const fillKey = fillList.map((f) => `${f.t}:${f.side}:${f.price}:${f.qty}`).join("|");
+  const fills = useMemo<Fill[]>(() => fillList, [fillKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // Dividends, splits and gaps of the shown symbol and of what the depot holds. Fetched when the day turns; nothing is newer than the clock.
   const [marketEvents, setMarketEvents] = useState<MarketEvent[]>([]);
   const heldKey = depot ? depot.positions.map((p) => p.symbol).sort().join(",") : "";

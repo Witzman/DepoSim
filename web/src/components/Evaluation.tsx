@@ -6,6 +6,7 @@ import { formatSimTime } from "../time.js";
 import { Hint } from "./Hint.js";
 import { PRESET_LABEL, describeRules } from "../rules.js";
 import type { Diversification, Evaluation as Data, Metrics, Rules, Slice } from "../types.js";
+import { poll } from "../poll.js";
 
 const REFRESH_MS = 5000;
 const seriesColor = (i: number) => `var(--series-${(i % 8) + 1})`;
@@ -125,8 +126,8 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark, ru
         .then((d) => current && (setData(d), setError(null)))
         .catch((e: Error) => current && setError(e.message));
     void load();
-    const timer = running ? setInterval(load, REFRESH_MS) : undefined;
-    return () => { current = false; if (timer) clearInterval(timer); };
+    const stop = running ? poll(load, REFRESH_MS) : undefined;
+    return () => { current = false; stop?.(); };
   }, [simulationId, running, benchmark]);
 
   if (error) return <p className="banner error" role="alert">{error}</p>;

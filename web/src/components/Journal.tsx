@@ -7,6 +7,7 @@ import { formatSimTime } from "../time.js";
 import { tradeStats } from "../risk.js";
 import { Hint } from "./Hint.js";
 import type { DepotView, Journal as Data, JournalTrade } from "../types.js";
+import { poll } from "../poll.js";
 
 const REFRESH_MS = 5000;
 export const NOTE_MAX = 500;
@@ -79,8 +80,8 @@ export function Journal({ simulationId, depot, running, daily = false }: Props) 
         .then((d) => current && (setData(d), setError(null)))
         .catch((e: Error) => current && setError(e.message));
     void load();
-    const timer = running ? setInterval(load, REFRESH_MS) : undefined;
-    return () => { current = false; if (timer) clearInterval(timer); };
+    const stop = running ? poll(load, REFRESH_MS) : undefined;
+    return () => { current = false; stop?.(); };
   }, [simulationId, depot.id, ghost, running, fills]);
 
   return (

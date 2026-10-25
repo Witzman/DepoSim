@@ -4,6 +4,7 @@ import { DISCLAIMER, FUND_LABEL, frictionText, holdText } from "../taxText.js";
 import { basisLabel, formatEur, parseEuro, formatPercentPlain, formatRatio, signedEur, signedPercent } from "../format.js";
 import type { DepotView, FundType, TaxReport } from "../types.js";
 import { Hint } from "./Hint.js";
+import { poll } from "../poll.js";
 
 const REFRESH_MS = 8000;
 const DATE = new Intl.DateTimeFormat("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", year: "numeric" });
@@ -59,8 +60,8 @@ export function TaxCard({ simulationId, depot, running }: Props) {
     let alive = true;
     const load = () => getTax(simulationId, depot.id).then((d) => { if (alive) { setData(d); setError(null); } }).catch((e: Error) => { if (alive) setError(e.message); });
     void load();
-    const timer = running ? setInterval(load, REFRESH_MS) : undefined;
-    return () => { alive = false; if (timer) clearInterval(timer); };
+    const stop = running ? poll(load, REFRESH_MS) : undefined;
+    return () => { alive = false; stop?.(); };
   }, [simulationId, depot.id, ghost, running, fills, version]);
 
   useEffect(() => {

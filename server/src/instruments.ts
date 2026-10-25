@@ -32,24 +32,39 @@ export class InstrumentRegistry {
     private readonly seed: Instrument[],
   ) {}
 
-  list(): Instrument[] {
+  private cache: { list: Instrument[]; bySymbol: Map<string, Instrument>; added: Set<string> } | null = null;
+
+  /** Forget what was read: the table was changed from outside (a restore). `add` and `remove` do it themselves. */
+  invalidate(): void {
+    this.cache = null;
+  }
+
+  private read() {
+    if (this.cache) return this.cache;
     const added = this.db
       .prepare("select symbol, name, currency, venue, sector, kind from instruments order by position")
       .all() as Row[];
-    return [
+    const list = [
       ...this.seed,
       ...added.map(({ sector, kind, ...rest }): Instrument => ({
         ...rest, ...(kind ? { kind } : {}), ...(sector ? { sector } : {}),
       })),
     ];
+    const bySymbol = new Map<string, Instrument>();
+    for (const i of list) if (!bySymbol.has(i.symbol)) bySymbol.set(i.symbol, i);
+    return (this.cache = { list, bySymbol, added: new Set(added.map((r) => r.symbol)) });
+  }
+
+  list(): Instrument[] {
+    return this.read().list;
   }
 
   get(symbol: string): Instrument | undefined {
-    return this.list().find((i) => i.symbol === symbol);
+    return this.read().bySymbol.get(symbol);
   }
 
   isAdded(symbol: string): boolean {
-    return this.db.prepare("select 1 from instruments where symbol = ?").get(symbol) !== undefined;
+    return this.read().added.has(symbol);
   }
 
   /** Adding what is already there changes nothing. */
@@ -64,6 +79,7 @@ export class InstrumentRegistry {
     this.db
       .prepare("insert into instruments (symbol, name, currency, venue, position, sector, kind) values (?, ?, ?, ?, ?, ?, ?)")
       .run(inst.symbol, inst.name, inst.currency, inst.venue, next, inst.sector ?? null, inst.kind ?? null);
+    this.invalidate();
   }
 
   remove(symbol: string): void {
@@ -73,5 +89,6 @@ export class InstrumentRegistry {
     if (this.db.prepare("delete from instruments where symbol = ?").run(symbol).changes === 0) {
       throw new RegistryError("unknown", `Unbekanntes Wertpapier ${symbol}.`);
     }
+    this.invalidate();
   }
 }

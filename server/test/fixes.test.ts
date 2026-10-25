@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import { openDb } from "../src/db.js";
 import { DEFAULT_FEES } from "../src/domain/fees.js";
+import { MarketDataError } from "../src/data/marketdata.js";
+import { describeError, publicError } from "../src/errors.js";
 import { createStore } from "../src/store.js";
 import { type JobDef, createJobs } from "../src/jobs.js";
 import { AAPL, D0, D1, H, SAP, makeSource } from "./fakes.js";
@@ -189,5 +191,61 @@ describe("the light", () => {
     clock.t = D1 + 4 * H;
     expect(await cell()).toMatchObject({ today: false });
     expect((await app.inject({ url: "/api/data/status" })).json().gapCells).toBeGreaterThan(early);
+  });
+});
+
+describe("what a person is told about an error", () => {
+  it("keeps the words for a source error and hides the text of anything else", () => {
+    const secret = new Error("SQLITE_CANTOPEN: unable to open /data/deposim.sqlite");
+    expect(publicError(secret)).not.toMatch(/sqlite|data/i);
+    expect(describeError(secret)).toMatch(/SQLITE_CANTOPEN/); // the job log keeps the detail
+    expect(publicError(new MarketDataError("rate_limited", "x"))).toBe(describeError(new MarketDataError("rate_limited", "x")));
+  });
+});
+
+describe("the list of instruments after a restore", () => {
+  it("reads the table again, because the restore replaced it", async () => {
+    const { app, side } = make();
+    const names = async () => (await app.inject({ url: "/api/watchlist" })).json().map((i: { symbol: string }) => i.symbol);
+    expect(await names()).toEqual(["SAP.DE", "AAPL"]); // read once, now cached
+    side.prepare("insert into instruments (symbol, name, currency, venue, position) values ('MSFT', 'Microsoft', 'USD', 'US', 1)").run();
+    const file = (await app.inject({ url: "/api/backup" })).rawPayload;
+    const restored = await app.inject({ method: "POST", url: "/api/backup/restore?confirm=ja", payload: file, headers: { "content-type": "application/octet-stream" } });
+    expect(restored.statusCode).toBe(200);
+    expect(await names()).toEqual(["SAP.DE", "AAPL", "MSFT"]);
+  });
+});
+
+describe("a long jump", () => {
+  it("can be played in pieces: a piece stops short of the target without saying why, and the next one goes on", async () => {
+    const { app } = make();
+    const id = (await post(app, "/api/simulations", { name: "Sprung", startAt: START })).json().id as number;
+    const first = app.session.jump(id, "hour", undefined, 600);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.simulationTime).toBeLessThan(first.target);
+    expect(first.simulationTime).toBeLessThanOrEqual(START + 600);
+    expect(first.stopped).toBeNull();
+    const second = app.session.playTo(id, first.target, 600);
+    expect(second.simulationTime).toBeGreaterThan(first.simulationTime);
+  });
+});
+
+describe("the journal and a split", () => {
+  it("counts the pieces bought before a split as the pieces after it, so that a sale of all of them closes all of them", async () => {
+    const { adjustForSplits, buildJournal } = await import("../src/domain/journal.js");
+    const buy = { id: 1, symbol: "X", side: "buy" as const, qty: 10, fillPrice: 100, filledSim: 1000, gross: 100_000, commission: 0, foreignFee: 0 };
+    const sell = { id: 2, symbol: "X", side: "sell" as const, qty: 20, fillPrice: 60, filledSim: 3000, gross: 120_000, commission: 0, foreignFee: 0 };
+    const bars = { lastCompleteBar: () => undefined, nextBarAfter: () => undefined };
+    const plain = buildJournal({ orders: [buy, sell], s: 4000, bars, notes: {} });
+    expect(plain.trades[0].qty).toBe(10); // half of the sale has no purchase to close
+    const split = adjustForSplits([buy, sell], [{ symbol: "X", t: 2000, numerator: 2, denominator: 1 }]);
+    expect(split[0]).toMatchObject({ qty: 20, fillPrice: 50, gross: 100_000 });
+    expect(split[1]).toBe(sell); // after the split: unchanged
+    const fixed = buildJournal({ orders: split, s: 4000, bars, notes: {} });
+    expect(fixed.trades).toHaveLength(1);
+    expect(fixed.trades[0]).toMatchObject({ qty: 20, netPnl: 20_000 });
+    expect(adjustForSplits([buy], [])).toEqual([buy]);
+    expect(adjustForSplits([buy], [{ symbol: "Y", t: 2000, numerator: 2, denominator: 1 }])[0]).toBe(buy);
   });
 });

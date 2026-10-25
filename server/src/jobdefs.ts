@@ -86,7 +86,11 @@ export function buildJobDefs(deps: {
       name: "tageskurse", label: "Tageskurse und Ausschüttungen", at: "03:30", usesSource: true,
       async run() {
         const started = longterm.start();
-        if (!started.ok) return { status: "aborted", message: started.reason };
+        // Started by hand and still going: wait for that run instead of failing and being asked again every 30 s.
+        if (!started.ok) {
+          await longterm.settled();
+          return { status: "ok", message: "Das Laden lief schon (von Hand gestartet); sein Ergebnis gilt." };
+        }
         await longterm.settled();
         const job = longterm.status();
         const n = (s: string) => job.items.filter((i) => i.status === s).length;

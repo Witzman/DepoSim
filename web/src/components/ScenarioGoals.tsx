@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getResult } from "../api.js";
 import { starText } from "../scenarioStars.js";
 import type { ScenarioResult } from "../types.js";
+import { poll } from "../poll.js";
 
 /** How often the goals are looked at while the clock runs; the evaluation is not free. */
 const REFRESH_MS = 4000;
@@ -14,8 +15,8 @@ export function useScenarioResult(simulationId: number, active: boolean, running
     let alive = true;
     const load = () => getResult(simulationId).then((r) => { if (alive) setResult(r); }).catch(() => {});
     load();
-    const timer = running && !ended ? setInterval(load, REFRESH_MS) : undefined;
-    return () => { alive = false; if (timer) clearInterval(timer); };
+    const stop = running && !ended ? poll(load, REFRESH_MS) : undefined;
+    return () => { alive = false; stop?.(); };
   }, [simulationId, active, running, ended]);
   return result;
 }

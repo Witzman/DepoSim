@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getDividends } from "../api.js";
 import { formatEur, formatPercentPlain, formatPrice, signedPercent } from "../format.js";
 import type { DepotView, DividendCalendar } from "../types.js";
+import { poll } from "../poll.js";
 
 const REFRESH_MS = 5000;
 const KEY = "deposim.withholding";
@@ -43,8 +44,8 @@ export function Dividends({ simulationId, depot, running }: Props) {
     let alive = true;
     const load = () => getDividends(simulationId, depot.id).then((d) => { if (alive) { setData(d); setFailed(false); } }).catch(() => { if (alive) setFailed(true); });
     load();
-    const timer = running ? setInterval(load, REFRESH_MS) : undefined;
-    return () => { alive = false; if (timer) clearInterval(timer); };
+    const stop = running ? poll(load, REFRESH_MS) : undefined;
+    return () => { alive = false; stop?.(); };
   }, [simulationId, depot.id, running, credited]);
 
   const rate = WITHHOLDING.find((w) => w.id === taxId)?.rate ?? 0;

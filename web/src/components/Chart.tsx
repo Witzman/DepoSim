@@ -26,14 +26,17 @@ function colors() {
 }
 
 /** A bar marked as an outlier (#50) is drawn hollow: no fill, only the outline in the colour of its direction. */
-const candle = (b: Bar) => {
+type Palette = { up: string; down: string };
+/** Read once per batch of bars: asking the page for a computed style for each of 20,000 bars is what made a change of timeframe slow. */
+const palette = (): Palette => ({ up: css("--up"), down: css("--down") });
+const candle = (b: Bar, p: Palette) => {
   const base = { time: b.t as UTCTimestamp, open: b.o, high: b.h, low: b.l, close: b.c };
   if (!b.flagged) return base;
-  const edge = b.c >= b.o ? css("--up") : css("--down");
+  const edge = b.c >= b.o ? p.up : p.down;
   return { ...base, color: "rgba(0,0,0,0)", borderColor: edge, wickColor: edge };
 };
-const volume = (b: Bar) => ({
-  time: b.t as UTCTimestamp, value: b.v, color: (b.c >= b.o ? css("--up") : css("--down")) + "66",
+const volume = (b: Bar, p: Palette) => ({
+  time: b.t as UTCTimestamp, value: b.v, color: (b.c >= b.o ? p.up : p.down) + "66",
 });
 
 /** A filled order of the open depot, shown on the chart. */
@@ -285,20 +288,21 @@ export function Chart({ bars: raw, prefs: view, onPrefs, fills, events = [], lea
     const key = `${simulationId}|${symbol}|${view.timeframe}|${view.type}`;
     const changed = key !== dataKey.current;
     if (changed) { dataKey.current = key; lastT.current = null; }
+    const pal = palette();
     const at = lastT.current === null ? -1 : display.findIndex((b) => b.t === lastT.current);
     // Earlier history arriving (a longer stretch was fetched) cannot be added by updates: the data is set anew.
     const grewLeft = firstT.current !== null && display.length > 0 && display[0].t < firstT.current;
     if (at >= 0 && !grewLeft) {
       // the newest candle may still be growing: it is updated again, later ones are added
       for (const b of display.slice(at)) {
-        candles.current.update(candle(b));
+        candles.current.update(candle(b, pal));
         closeLine.current.update({ time: b.t as UTCTimestamp, value: b.c });
-        volumes.current.update(volume(b));
+        volumes.current.update(volume(b, pal));
       }
     } else {
-      candles.current.setData(display.map(candle));
+      candles.current.setData(display.map((b) => candle(b, pal)));
       closeLine.current.setData(display.map((b) => ({ time: b.t as UTCTimestamp, value: b.c })));
-      volumes.current.setData(display.map(volume));
+      volumes.current.setData(display.map((b) => volume(b, pal)));
       if (changed || !grewLeft) chart.current?.timeScale().scrollToRealTime();
     }
     lastT.current = display.length ? display[display.length - 1].t : null;
@@ -332,7 +336,8 @@ export function Chart({ bars: raw, prefs: view, onPrefs, fills, events = [], lea
       rightPriceScale: { borderColor: c.border },
       timeScale: { borderColor: c.border },
     });
-    volumes.current?.setData(display.map(volume)); // the bars carry their colour
+    const pal = palette();
+    volumes.current?.setData(display.map((b) => volume(b, pal))); // the bars carry their colour
   }, [theme]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Indicators are rebuilt as a whole whenever a result arrives (bars, periods, theme).
