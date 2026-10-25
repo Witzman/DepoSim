@@ -88,6 +88,46 @@ export interface Simulation {
   rules: Rules;
   /** `day`: one step is a trading day (daily prices); tempo is days per second. */
   resolution: "minute" | "day";
+  /** The scenario it plays, if any; the clock stops at `endAt`. */
+  scenarioId: string | null;
+  endAt: number | null;
+}
+
+export interface ScenarioGoal {
+  role: "main" | "bonus";
+  kind: "endValue" | "beatBenchmark" | "maxDrawdown" | "fees";
+}
+
+export interface Scenario {
+  id: string;
+  title: string;
+  story: string;
+  difficulty: "leicht" | "mittel" | "schwer";
+  resolution: "minute" | "day";
+  startAt: number;
+  endAt: number;
+  startCash: number;
+  preset: "relaxed" | "realistic" | "hardcore";
+  symbols: string[];
+  benchmark: string | null;
+  goals: ScenarioGoal[];
+}
+
+export interface GoalResult {
+  kind: ScenarioGoal["kind"];
+  role: "main" | "bonus";
+  label: string;
+  met: boolean;
+  /** What was reached, in words with the real number, or "—". */
+  actual: string;
+}
+
+export interface ScenarioResult {
+  scenarioId: string;
+  title: string;
+  finished: boolean;
+  stars: number;
+  goals: GoalResult[];
 }
 
 export type RulePreset = "relaxed" | "realistic" | "hardcore" | "custom";

@@ -7,6 +7,7 @@ import { AllocationDialog } from "./components/AllocationDialog.js";
 import { BackfillDialog } from "./components/BackfillDialog.js";
 import { Compare } from "./components/Compare.js";
 import { Journal } from "./components/Journal.js";
+import { ScenarioGoals, ScenarioResultDialog, useScenarioResult } from "./components/ScenarioGoals.js";
 import { OrderbookPanel } from "./components/Orderbook.js";
 import { Chart, type Fill } from "./components/Chart.js";
 import { CHART_PREFS_KEY, RAW_LIMIT, defaultChartPrefs, parseChartPrefs, type ChartPrefs } from "./bars.js";
@@ -407,6 +408,16 @@ export function App() {
   }, [depot?.orders]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (view === "evaluation") markSeen("evaluation"); }, [view]);
   const locked = live === null || live.endedAt !== null || snapshot === null;
+  const scenarioResult = useScenarioResult(live?.id ?? 0, !!live?.scenarioId, snapshot?.running ?? false, live?.endedAt != null);
+  const [resultOpen, setResultOpen] = useState(false);
+  // The dialog opens when a scenario ends while it is on screen, not whenever an old one is picked.
+  const endedBefore = useRef<{ id: number; ended: boolean } | null>(null);
+  useEffect(() => {
+    const now = live ? { id: live.id, ended: live.endedAt !== null } : null;
+    const before = endedBefore.current;
+    if (now && before && before.id === now.id && !before.ended && now.ended && live?.scenarioId) setResultOpen(true);
+    endedBefore.current = now;
+  }, [live?.id, live?.endedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className={`app${narrow && live ? " with-bar" : ""}`}>
@@ -497,6 +508,7 @@ export function App() {
                   onPause={() => socket.current?.send({ type: "pause" })}
                 />
               </section>
+              {scenarioResult && <ScenarioGoals result={scenarioResult} onShowResult={() => setResultOpen(true)} />}
               <div className="tabs" role="tablist" aria-label="Ansicht">
                 <button role="tab" className="btn" aria-selected={view === "trade"}
                   onClick={() => setView("trade")}>Handel</button>
@@ -581,6 +593,7 @@ export function App() {
           )}
         </main>
       </div>
+      <ScenarioResultDialog result={scenarioResult} open={resultOpen} onClose={() => setResultOpen(false)} />
       {live && depot && (
         <AllocationDialog open={allocationOpen} simulationId={live.id} depotId={depot.id} depotName={depot.name}
           instruments={watchlist} onClose={() => setAllocationOpen(false)} />

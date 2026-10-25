@@ -546,3 +546,11 @@ aside.guide {
 @media (prefers-reduced-motion: reduce) { .guide-pulse { animation: none; } }
 html[data-motion="reduced"] .guide-pulse { animation: none; }
 @media (max-width: 700px) { aside.guide { bottom: 64px; left: 8px; width: min(94vw, 300px); } }
+
+.scenarios { display: grid; gap: 6px; }
+.scenario-card .scenario-story { display: block; margin-top: 4px; }
+.stars { letter-spacing: 1px; color: var(--accent); }
+.goal-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.goal-list li[data-met="true"] { color: var(--up); }
+.stars.big { font-size: 2rem; margin: 0; }
+.scenario-goals .toolbar { gap: 12px; }

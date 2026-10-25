@@ -14,6 +14,7 @@ import { CLOCK_STOPPED_REFUSED } from "./domain/rules.js";
 import { closedDayReason } from "./domain/venues.js";
 import { type Diversification, type HeldSeries, diversify } from "./domain/diversification.js";
 import { HINT_ORDER, HINT_RULES, type Hint, type HintRule, type RuleConfig, defaultConfig, evaluateHints, orderNotes } from "./domain/hints.js";
+import { type GoalOutcome, evaluateGoals, scenarioById } from "./domain/scenario.js";
 import { type Orderbook, buildOrderbook } from "./domain/orderbook.js";
 import { type Journal, type JournalOrder, buildJournal } from "./domain/journal.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
@@ -155,6 +156,15 @@ export interface Comparison {
 }
 
 export const COMPARE_POINTS = 400;
+
+export interface ScenarioResult extends GoalOutcome {
+  scenarioId: string;
+  title: string;
+  finished: boolean;
+  simulationTime: number;
+  endAt: number | null;
+  depotId: number;
+}
 
 export interface HintsResult {
   depotId: number;
@@ -335,10 +345,10 @@ export class SessionService {
       carryOut = step.carry;
       advanced = true;
     }
-    const capped = Math.min(raw, limitL);
+    const capped = Math.min(raw, limitL, sim.endAt ?? Infinity);
     const skipped = skipClosed(capped, symbols, this.archive);
     const endOfData = skipped === undefined;
-    const target0 = skipped === undefined ? capped : Math.min(skipped, limitL);
+    const target0 = skipped === undefined ? capped : Math.min(skipped, limitL, sim.endAt ?? Infinity);
 
     const horizon = this.horizon();
     const liveEdge = horizon !== undefined && limitL - horizon <= LIVE_EDGE_S;
@@ -372,6 +382,8 @@ export class SessionService {
         if (changed) this.store.saveBalance(depot.id, state.cash, state.positions);
       }
       this.store.setSimulationTime(id, target);
+      // A scenario ends where it says: the clock stops, nothing later is shown.
+      if (sim.endAt !== null && target >= sim.endAt) this.store.endSimulation(id);
       // One curve point per depot whenever the clock passes a minute boundary.
       if (Math.floor(target / 60) > Math.floor(sOld / 60)) {
         for (const depot of this.store.listDepots(id)) {
@@ -380,7 +392,7 @@ export class SessionService {
       }
     });
 
-    return { simulationTime: target, newBars, endOfData, waitingForData, liveEdge };
+    return { simulationTime: target, newBars, endOfData: endOfData || (sim.endAt !== null && target >= sim.endAt), waitingForData, liveEdge };
   }
 
   /** The end of the newest bar of any instrument (the exchange rate is left out), if there is one. */
@@ -607,6 +619,22 @@ export class SessionService {
       };
     });
     return { id, name: sim.name, startAt: sim.startAt, simulationTime: sim.simulationTime, depots };
+  }
+
+  /** The goals of the scenario against the first normal depot: while it runs "on course", at the end the stars. */
+  result(id: number): ScenarioResult | undefined {
+    const sim = this.sim(id);
+    const scenario = sim.scenarioId ? scenarioById(sim.scenarioId) : undefined;
+    if (!scenario) return undefined;
+    const ev = this.evaluation(id);
+    const depot = this.firstNormal(id);
+    const row = ev.depots.find((d) => d.id === depot.id) ?? ev.depots[0];
+    const finalValue = depotValue(this.store.loadDepot(depot.id), this.refsAt(sim.simulationTime, sim.resolution === "day"));
+    const outcome = evaluateGoals(scenario, {
+      startCash: sim.startCash, finalValue, maxDrawdown: row.metrics.maxDrawdown, depotReturn: row.metrics.totalReturn,
+      benchmarkReturn: ev.benchmark?.metrics.totalReturn ?? null, fees: row.fees.total,
+    });
+    return { scenarioId: scenario.id, title: scenario.title, finished: sim.endedAt !== null, simulationTime: sim.simulationTime, endAt: sim.endAt, depotId: depot.id, ...outcome };
   }
 
   /** Trades, hit rate, holding time and "too early" of one depot, computed now from its filled orders. */
@@ -969,6 +997,11 @@ export class SessionService {
       });
       if (next.length === 0) { endOfData = true; break; }
       const dayT = Math.min(...next.map((x) => x.bar.t));
+      if (sim.endAt !== null && dayT >= sim.endAt) {
+        this.store.endSimulation(id);
+        endOfData = true;
+        break;
+      }
       const today = next.filter((x) => x.bar.t === dayT).sort((a, b) => a.symbol.localeCompare(b.symbol));
       const end = dayT + DAY;
       const eventsOf = this.eventsFor(today);
@@ -990,6 +1023,18 @@ export class SessionService {
       });
       for (const { symbol, bar } of today) (newBars[symbol] ??= []).push(bar);
       sim = this.sim(id);
+      // The last day before the end of a scenario ends the simulation.
+      if (sim.endAt !== null) {
+        const more = this.instruments.some((i) => {
+          const b = this.daily?.nextAfter(i.symbol, end - 1);
+          return b !== undefined && b.t < sim.endAt!;
+        });
+        if (!more) {
+          this.store.endSimulation(id);
+          endOfData = true;
+          break;
+        }
+      }
     }
     return { simulationTime: sim.simulationTime, newBars, endOfData, waitingForData: false, liveEdge: false };
   }

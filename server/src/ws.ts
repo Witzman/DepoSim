@@ -70,6 +70,13 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
       const result: TickResult = session.tick(id, realMs);
       const { simulation: _simulation, ...rest } = session.snapshot(id);
       broadcast(id, { type: "tick", simulationTime: result.simulationTime, newBars: result.newBars, ...rest });
+      if (store.getSimulation(id)?.endedAt != null) {
+        // A scenario reached its end: the clock stops, the result is the next thing to look at.
+        stopLoop(id);
+        broadcast(id, { type: "notice", text: "Das Szenario ist zu Ende. Das Ergebnis steht im Dialog." });
+        broadcast(id, snapshotMessage(id));
+        return;
+      }
       if (result.endOfData || result.waitingForData) {
         // The clock cannot go on without newer prices. Look for them, but not oftener than
         // liveRefreshS: 19 calls to the price source for every look.
@@ -159,7 +166,10 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
           const result = session.stepDays(id, 1);
           const { simulation: _s, ...rest } = session.snapshot(id);
           broadcast(id, { type: "tick", simulationTime: result.simulationTime, newBars: result.newBars, ...rest });
-          if (result.endOfData) broadcast(id, { type: "notice", text: "Ende der Daten: für die Zeit danach gibt es noch keine Kurse." });
+          if (store.getSimulation(id)?.endedAt != null) {
+            broadcast(id, { type: "notice", text: "Das Szenario ist zu Ende. Das Ergebnis steht im Dialog." });
+            broadcast(id, snapshotMessage(id));
+          } else if (result.endOfData) broadcast(id, { type: "notice", text: "Ende der Daten: für die Zeit danach gibt es noch keine Kurse." });
         } else if (parsed.type === "run") {
           if (store.getSimulation(id)?.endedAt != null) {
             send(ws, { type: "notice", text: "Die Simulation ist beendet." });

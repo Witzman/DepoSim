@@ -23,6 +23,9 @@ export interface Simulation {
   rules: Rules;
   /** `minute`: one step is a bar of one minute. `day`: one step is a trading day, from daily prices. */
   resolution: "minute" | "day";
+  /** The scenario it plays, if any; the clock stops at `endAt` and the simulation ends. */
+  scenarioId: string | null;
+  endAt: number | null;
 }
 
 /** A ghost is a frozen copy of a depot that never trades; it is only valued at market. */
@@ -45,6 +48,9 @@ export interface NewSimulation {
   /** Absent: relaxed. */
   rules?: Rules;
   resolution?: "minute" | "day";
+  scenarioId?: string;
+  endAt?: number;
+  benchmark?: string;
 }
 
 /** An order as stored: the order itself plus when it was placed and how it filled. */
@@ -181,6 +187,8 @@ interface SimulationRow {
   benchmark: string | null;
   rules_json: string;
   resolution: "minute" | "day";
+  scenario_id: string | null;
+  end_at: number | null;
 }
 
 const toSimulation = (r: SimulationRow): Simulation => ({
@@ -197,14 +205,16 @@ const toSimulation = (r: SimulationRow): Simulation => ({
   benchmark: r.benchmark,
   rules: { ...RELAXED, ...(JSON.parse(r.rules_json) as Partial<Rules>) },
   resolution: r.resolution === "day" ? "day" : "minute",
+  scenarioId: r.scenario_id,
+  endAt: r.end_at,
 });
 
 export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
   const now = opts.now ?? (() => Math.floor(Date.now() / 1000));
 
   const insertSimulation = db.prepare(
-    "insert into simulations (name, start_at, simulation_time, tempo, start_cash, fees_json, created_at, live, rules_json, resolution) " +
-      "values (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
+    "insert into simulations (name, start_at, simulation_time, tempo, start_cash, fees_json, created_at, live, rules_json, resolution, scenario_id, end_at, benchmark) " +
+      "values (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const insertDepot = db.prepare("insert into depots (simulation_id, name, cash) values (?, 'Depot 1', ?)");
   const recordPoint = db.prepare("insert or replace into depot_values (depot_id, t, value) values (?, ?, ?)");
@@ -214,6 +224,7 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
       insertSimulation.run(
         input.name, input.startAt, input.startAt, input.startCash, JSON.stringify(input.fees), now(), input.live ? 1 : 0,
         JSON.stringify(input.rules ?? RELAXED), input.resolution ?? "minute",
+        input.scenarioId ?? null, input.endAt ?? null, input.benchmark ?? null,
       ).lastInsertRowid,
     );
     const depotId = Number(insertDepot.run(id, input.startCash).lastInsertRowid);

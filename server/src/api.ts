@@ -13,6 +13,7 @@ import { MarketDataError } from "./data/marketdata.js";
 import type { InstrumentSearch } from "./data/search.js";
 import { DEFAULT_FEES } from "./domain/fees.js";
 import { applyRules, resolveRules } from "./domain/rules.js";
+import { SCENARIOS, scenarioById } from "./domain/scenario.js";
 import { describeError } from "./errors.js";
 import type { Fx } from "./fx.js";
 import type { Health } from "./health.js";
@@ -33,6 +34,8 @@ const createBody = z
     startCash: z.number().int().positive().optional(),
     /** `day`: one step is a trading day, from daily prices (any start since 2019-11); `minute` is the default. */
     resolution: z.enum(["minute", "day"]).optional(),
+    /** A scenario sets the period, the capital, the rules and the benchmark itself. */
+    scenarioId: z.string().optional(),
     preset: z.enum(["relaxed", "realistic", "hardcore"]).optional(),
     /** Single switches on top of the preset. */
     rules: z.object({
@@ -44,7 +47,7 @@ const createBody = z
       maxPositions: z.number().int().min(1).max(50).nullable().optional(),
     }).strict().optional(),
   })
-  .refine((b) => b.live === true || b.startAt !== undefined, {
+  .refine((b) => b.live === true || b.startAt !== undefined || b.scenarioId !== undefined, {
     message: "Ohne Livebetrieb braucht die Simulation einen Startzeitpunkt.",
     path: ["startAt"],
   });
@@ -385,8 +388,14 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
   app.post("/api/simulations", async (req, reply) => {
     const body = createBody.safeParse(req.body);
     if (!body.success) return invalid(reply, body.error);
-    let startAt = body.data.startAt;
-    const daily = body.data.resolution === "day";
+    const scenario = body.data.scenarioId === undefined ? undefined : scenarioById(body.data.scenarioId);
+    if (body.data.scenarioId !== undefined && !scenario) return reply.code(400).send({ error: "Unbekanntes Szenario." });
+    if (scenario && body.data.live) return reply.code(400).send({ error: "Ein Szenario kennt keinen Livebetrieb." });
+    if (scenario?.benchmark && !instruments.get(scenario.benchmark)) {
+      return reply.code(400).send({ error: `Der Maßstab ${scenario.benchmark} dieses Szenarios fehlt in der Watchlist.` });
+    }
+    let startAt = scenario ? scenario.startAt : body.data.startAt;
+    const daily = scenario ? scenario.resolution === "day" : body.data.resolution === "day";
     if (daily && body.data.live) return reply.code(400).send({ error: "Eine Tageskurs-Simulation kennt keinen Livebetrieb." });
     if (daily && startAt !== undefined) {
       startAt = Math.floor(startAt / 86400) * 86400; // a day starts at midnight UTC
@@ -405,11 +414,12 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
         return reply.code(502).send({ error: describeError(err) });
       }
     }
-    const rules = resolveRules(body.data.preset, body.data.rules);
+    const rules = scenario ? resolveRules(scenario.preset) : resolveRules(body.data.preset, body.data.rules);
     const sim = store.createSimulation({
       name: body.data.name,
       startAt,
-      startCash: body.data.startCash ?? DEFAULT_START_CASH,
+      startCash: scenario ? scenario.startCash : (body.data.startCash ?? DEFAULT_START_CASH),
+      ...(scenario ? { scenarioId: scenario.id, endAt: scenario.endAt, ...(scenario.benchmark ? { benchmark: scenario.benchmark } : {}) } : {}),
       fees: applyRules(DEFAULT_FEES, rules),
       live: body.data.live === true,
       rules,
@@ -567,6 +577,18 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     if (!body.success) return invalid(reply, body.error);
     const done = session.setHintPref(sim.id, (req.params as { rule: string }).rule, body.data);
     return done.ok ? reply.code(204).send() : reply.code(400).send({ error: done.reason });
+  });
+
+  app.get("/api/scenarios", async () => SCENARIOS.map((s) => ({
+    id: s.id, title: s.title, story: s.story, difficulty: s.difficulty, resolution: s.resolution, startAt: s.startAt, endAt: s.endAt,
+    startCash: s.startCash, preset: s.preset, symbols: s.symbols, benchmark: s.benchmark,
+    goals: [{ role: "main", ...s.main }, ...s.bonus.map((g) => ({ role: "bonus", ...g }))],
+  })));
+
+  app.get("/api/simulations/:id/result", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    return session.result(sim.id) ?? reply.code(404).send({ error: "Diese Simulation hat kein Szenario." });
   });
 
   app.get("/api/simulations/:id/journal", async (req, reply) => {

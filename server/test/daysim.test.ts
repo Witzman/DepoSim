@@ -237,3 +237,77 @@ describe("export and import", () => {
     expect(t.store.getSimulation(made.id)).toMatchObject({ resolution: "minute", rules: { preset: "relaxed" } });
   });
 });
+
+describe("scenarios", () => {
+  /** Every weekday from the first day asked for to the last, 100 rising by half a point a day, with a dip in the middle. */
+  const weekdays = (): DailyData => ({
+    async daily(_symbol, fromT, toT) {
+      const bars: { day: string; o: number; h: number; l: number; c: number; v: number }[] = [];
+      let n = 0;
+      for (let t = Math.ceil(fromT / DAY) * DAY; t < Math.min(toT, Date.parse("2024-01-01T00:00:00Z") / 1000); t += DAY) {
+        if ([0, 6].includes(new Date(t * 1000).getUTCDay())) continue;
+        const c = 100 + n * 0.05;
+        bars.push({ day: isoOf(t), o: c, h: c + 1, l: c - 1, c, v: 100 });
+        n++;
+      }
+      return { bars, dividends: [], splits: [] };
+    },
+  });
+
+  async function scenarioApp(instruments = [SAP, { symbol: "EUNL.DE", name: "iShares", currency: "EUR" as const, venue: "XETRA" as const }]) {
+    const { source } = makeSource();
+    const app = buildApp({ dbPath: ":memory:", marketData: source, dailyData: weekdays(), instruments, now: () => Date.parse("2026-10-24T12:00:00Z") / 1000, minGapMs: 0, tickMs: 20 });
+    open.push(app);
+    await app.ready();
+    return app;
+  }
+
+  it("lists the scenarios with their goals", async () => {
+    const app = await scenarioApp();
+    const list = (await app.inject({ url: "/api/scenarios" })).json();
+    expect(list.length).toBeGreaterThanOrEqual(3);
+    expect(list[0]).toMatchObject({ id: "corona-crash-2020", resolution: "day", goals: [{ role: "main", kind: "beatBenchmark" }, { role: "bonus" }, { role: "bonus" }] });
+  });
+
+  it("starts at the scenario's beginning with its capital, rules and benchmark, and refuses a missing benchmark", async () => {
+    const app = await scenarioApp();
+    const res = await app.inject({ method: "POST", url: "/api/simulations", payload: { name: "S", scenarioId: "rallye-2023" } });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ scenarioId: "rallye-2023", resolution: "day", benchmark: "EUNL.DE", startAt: Date.parse("2023-01-02T00:00:00Z") / 1000, rules: { preset: "relaxed" } });
+    const bare = await scenarioApp([SAP]);
+    const refused = await bare.inject({ method: "POST", url: "/api/simulations", payload: { name: "S", scenarioId: "rallye-2023" } });
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json().error).toMatch(/Maßstab EUNL\.DE/);
+    expect((await app.inject({ method: "POST", url: "/api/simulations", payload: { name: "S", scenarioId: "nope" } })).statusCode).toBe(400);
+  });
+
+  it("ends at its end date, shows no bar past it, and gives the result with stars", async () => {
+    const app = await scenarioApp();
+    const sim = (await app.inject({ method: "POST", url: "/api/simulations", payload: { name: "S", scenarioId: "rallye-2023" } })).json();
+    const depotId = app.session.defaultDepotId(sim.id);
+    app.session.placeOrder(sim.id, depotId, { symbol: "EUNL.DE", side: "buy", kind: "market", qty: 90 });
+    const early = (await app.inject({ url: `/api/simulations/${sim.id}/result` })).json();
+    expect(early.finished).toBe(false);
+    expect(early.goals).toHaveLength(3);
+
+    const r = app.session.stepDays(sim.id, 500);
+    expect(r.endOfData).toBe(true);
+    const after = app.session.snapshot(sim.id).simulation;
+    expect(after.endedAt).not.toBeNull();
+    expect(after.simulationTime).toBeLessThanOrEqual(sim.endAt + 86400);
+    const bars = (await app.inject({ url: `/api/simulations/${sim.id}/bars?symbol=EUNL.DE&limit=20000` })).json().bars;
+    expect(bars.every((b: any) => b.t < sim.endAt)).toBe(true);
+
+    const result = (await app.inject({ url: `/api/simulations/${sim.id}/result` })).json();
+    expect(result.finished).toBe(true);
+    expect(result.goals[0].actual).toMatch(/€/);
+    expect(result.stars).toBeGreaterThanOrEqual(0);
+    expect(result.stars).toBeLessThanOrEqual(3);
+  });
+
+  it("says a free simulation has no result", async () => {
+    const app = await scenarioApp();
+    const sim = (await app.inject({ method: "POST", url: "/api/simulations", payload: { name: "F", startAt: Date.parse("2022-03-01T00:00:00Z") / 1000, resolution: "day" } })).json();
+    expect((await app.inject({ url: `/api/simulations/${sim.id}/result` })).statusCode).toBe(404);
+  });
+});
