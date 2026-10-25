@@ -599,6 +599,15 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     return session.result(sim.id) ?? reply.code(404).send({ error: "Diese Simulation hat kein Szenario." });
   });
 
+  app.get("/api/simulations/:id/events", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    const raw = (req.query as { symbols?: unknown }).symbols;
+    const symbols = typeof raw === "string" ? raw.split(",").map((x) => x.trim()).filter(Boolean) : [];
+    if (symbols.length === 0 || symbols.length > 40) return reply.code(400).send({ error: "symbols: ein bis 40 Kürzel, durch Komma getrennt." });
+    return session.marketEvents(sim.id, symbols);
+  });
+
   app.get("/api/simulations/:id/dividends", async (req, reply) => {
     const sim = simulationOf(req.params);
     if (!sim) return notFound(reply);

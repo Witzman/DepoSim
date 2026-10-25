@@ -1,5 +1,5 @@
 import type {
-  AllocationLine, ArchiveInfo, FlagReport, BackfillJob, BackupStatus, Coverage, DataStatus, GapReport, HintsResult, JobsOverview, SourceSummary, Bar, ClientMessage, CompareResult, CostPreview, Curves, Depot, DividendCalendar, Evaluation, Instrument, Journal, JournalNoteResult,
+  AllocationLine, ArchiveInfo, FlagReport, BackfillJob, BackupStatus, Coverage, DataStatus, GapReport, HintsResult, JobsOverview, SourceSummary, Bar, ClientMessage, CompareResult, CostPreview, Curves, Depot, DividendCalendar, Evaluation, Instrument, Journal, JournalNoteResult, MarketEvent,
   Longterm, LongtermJob, MissingList, OrderInput, Orderbook, RunSummary, Scenario, ScenarioResult, SearchHit, ServerMessage, Simulation, Rules, VenueInfo,
 } from "./types.js";
 
@@ -55,6 +55,8 @@ export const createSimulation = (body: {
 }) =>
   request<Simulation>("/api/simulations", json("POST", body));
 export const getScenarios = () => request<Scenario[]>("/api/scenarios");
+export const getMarketEvents = (id: number, symbols: string[]) =>
+  request<MarketEvent[]>(`/api/simulations/${id}/events?symbols=${encodeURIComponent(symbols.join(","))}`);
 export const getDividends = (id: number, depotId: number) =>
   request<DividendCalendar>(`/api/simulations/${id}/dividends?depotId=${depotId}`);
 export const getRuns = () => request<RunSummary[]>("/api/runs");

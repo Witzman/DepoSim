@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  type Socket, addDepot, addGhost, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, getBackupStatus, getBars, getDataStatus, getRun, getWatchlist, listSimulations,
+  type Socket, addDepot, addGhost, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, getBackupStatus, getBars, getDataStatus, getMarketEvents, getRun, getWatchlist, listSimulations,
   openSocket, removeDepot, setBenchmark, removeInstrument, renameDepot,
 } from "./api.js";
 import { AllocationDialog } from "./components/AllocationDialog.js";
@@ -8,6 +8,7 @@ import { BackfillDialog } from "./components/BackfillDialog.js";
 import { Compare } from "./components/Compare.js";
 import { Journal } from "./components/Journal.js";
 import { Dividends } from "./components/Dividends.js";
+import { EventStrip } from "./components/EventStrip.js";
 import { ScenarioGoals, useScenarioResult } from "./components/ScenarioGoals.js";
 import { RunBook } from "./components/RunBook.js";
 import { RunCardDialog } from "./components/RunCardDialog.js";
@@ -44,7 +45,7 @@ import { canGhost, pickDepot } from "./view.js";
 import type { CommandId } from "./palette.js";
 import { useNarrow } from "./useNarrow.js";
 import { useTheme } from "./theme.js";
-import type { BackupStatus, Bar, DataStatus, Instrument, RunSummary, ServerMessage, Simulation, Snapshot, Tempo } from "./types.js";
+import type { BackupStatus, Bar, DataStatus, Instrument, MarketEvent, RunSummary, ServerMessage, Simulation, Snapshot, Tempo } from "./types.js";
 
 const SELECTED_KEY = "deposim-selected";
 
@@ -294,6 +295,7 @@ export function App() {
       const sim = await endSimulation(id);
       setSimulations((prev) => prev.map((s) => (s.id === id ? sim : s)));
       setCardId(id); // ending a round always shows its card
+      feedback("roundEnd");
     } catch (e) {
       setNotice((e as Error).message);
     }
@@ -391,6 +393,30 @@ export function App() {
   const fills = useMemo<Fill[]>(() => (depot?.orders ?? []).flatMap((o) =>
     o.status === "filled" && o.symbol === symbol && o.filledSim !== undefined && o.fillPrice !== undefined
       ? [{ t: o.filledSim, side: o.side, price: o.fillPrice, qty: o.qty }] : []), [depot?.orders, symbol]);
+  // Dividends, splits and gaps of the shown symbol and of what the depot holds. Fetched when the day turns; nothing is newer than the clock.
+  const [marketEvents, setMarketEvents] = useState<MarketEvent[]>([]);
+  const heldKey = depot ? depot.positions.map((p) => p.symbol).sort().join(",") : "";
+  const eventDay = live ? Math.floor(live.simulationTime / 86400) : 0;
+  const seenEvents = useRef<{ sim: number; keys: Set<string> } | null>(null);
+  useEffect(() => {
+    if (!live || !symbol) { setMarketEvents([]); return; }
+    const symbols = [...new Set([symbol, ...(heldKey ? heldKey.split(",") : [])])];
+    let alive = true;
+    getMarketEvents(live.id, symbols).then((list) => {
+      if (!alive) return;
+      setMarketEvents(list);
+      const before = seenEvents.current;
+      const keys = new Set(list.map((e) => e.key));
+      seenEvents.current = { sim: live.id, keys };
+      if (!before || before.sim !== live.id) return; // the first look at a simulation only remembers
+      const fresh = list.filter((e) => !before.keys.has(e.key));
+      if (fresh.length === 0) return;
+      setNotice(fresh.length === 1 ? fresh[0].text : `${fresh.length} neue Ereignisse: ${fresh.map((e) => e.text).join(" · ")}`);
+      feedback("event");
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [live?.id, symbol, heldKey, eventDay]); // eslint-disable-line react-hooks/exhaustive-deps
+  const symbolEvents = useMemo(() => marketEvents.filter((e) => e.symbol === symbol), [marketEvents, symbol]);
   // The signals follow what the server did with the orders: an order that fills, a limit that is reached, one that is refused.
   const seenOrders = useRef<{ key: string; status: Map<number, string> } | null>(null);
   useEffect(() => {
@@ -427,7 +453,7 @@ export function App() {
   useEffect(() => {
     const now = live ? { id: live.id, ended: live.endedAt !== null } : null;
     const before = endedBefore.current;
-    if (now && before && before.id === now.id && !before.ended && now.ended) setCardId(now.id);
+    if (now && before && before.id === now.id && !before.ended && now.ended) { setCardId(now.id); feedback("roundEnd"); }
     endedBefore.current = now;
   }, [live?.id, live?.endedAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const runBookVersion = [...simulations.filter((s) => s.endedAt !== null).map((s) => s.id), live?.endedAt != null ? `live${live.id}` : ""].join(",");
@@ -552,7 +578,7 @@ export function App() {
               ) : view === "trade" ? (
                 <>
               <section className="card">
-<Chart bars={bars} prefs={shownPrefs} timeframes={dayMode ? ["1d"] : undefined} onPrefs={changeChartPrefs} fills={fills} theme={theme}
+<Chart bars={bars} prefs={shownPrefs} timeframes={dayMode ? ["1d"] : undefined} onPrefs={changeChartPrefs} fills={fills} events={symbolEvents} theme={theme}
                   simulationId={live.id} symbol={symbol}
                   lead={(
                     <div className="lead">
@@ -564,6 +590,7 @@ export function App() {
                       )}
                     </div>
                   )} />
+                <EventStrip events={symbolEvents} symbol={symbol} />
               </section>
               <div className="trade-grid">
                 <div className="stack">

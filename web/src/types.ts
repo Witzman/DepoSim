@@ -130,6 +130,17 @@ export interface ScenarioResult {
   goals: GoalResult[];
 }
 
+/** GET /api/simulations/:id/events?symbols= : dividends, splits and gaps, up to the simulation time. */
+export interface MarketEvent {
+  key: string;
+  kind: "dividend" | "split" | "gap";
+  symbol: string;
+  day: string;
+  /** Time of the first bar of the day, where a marker sits; null when no bar of that day is known. */
+  t: number | null;
+  text: string;
+}
+
 /** GET /api/simulations/:id/dividends */
 export interface DividendCalendar {
   today: string;

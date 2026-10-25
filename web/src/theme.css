@@ -572,3 +572,9 @@ html[data-motion="reduced"] .guide-pulse { animation: none; }
 .div-past { margin-top: 4px; gap: 2px; }
 .dividends label.inline { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; font-size: 0.85em; }
 table.plain { border-collapse: collapse; } table.plain th, table.plain td { padding: 2px 12px 2px 0; text-align: left; } table.plain .num { text-align: right; }
+.event-strip { margin-top: 8px; }
+.event-strip .chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.event-strip .chip { border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; font-size: 0.85em; }
+.event-strip .chip .mark { font-weight: 700; margin-right: 2px; }
+.event-strip .ev-dividend .mark { color: var(--series-3); } .event-strip .ev-split .mark { color: var(--series-4); } .event-strip .ev-gap .mark { color: var(--series-2); }
+.event-list { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 2px; }

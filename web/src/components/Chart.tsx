@@ -17,7 +17,7 @@ import { markSeen } from "../guide.js";
 import { DrawTools, type Tool } from "./DrawTools.js";
 import { IndicatorMenu } from "./IndicatorMenu.js";
 import type { Theme } from "../theme.js";
-import type { Bar } from "../types.js";
+import type { Bar, MarketEvent } from "../types.js";
 
 const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
@@ -45,6 +45,8 @@ interface Props {
   prefs: ChartPrefs;
   onPrefs: (p: ChartPrefs) => void;
   fills: Fill[];
+  /** Dividends, splits and gaps of the shown symbol; each sits on the bar of its day. */
+  events?: MarketEvent[];
   /** Shown first in the row of controls above the chart: the symbol choice and the last price. */
   lead?: ReactNode;
   theme: Theme;
@@ -83,7 +85,7 @@ const points = (bars: Bar[], values: Series) => {
  * Candles with volume, optional indicators. New bars at the end are added one at a time; anything else
  * (another symbol, another simulation) replaces the data.
  */
-export function Chart({ bars: raw, prefs: view, onPrefs, fills, lead, theme, simulationId, symbol, timeframes = TIMEFRAMES }: Props) {
+export function Chart({ bars: raw, prefs: view, onPrefs, fills, events = [], lead, theme, simulationId, symbol, timeframes = TIMEFRAMES }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
   const candles = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -216,13 +218,26 @@ export function Chart({ bars: raw, prefs: view, onPrefs, fills, lead, theme, sim
         text: `${buy ? "K" : "V"} ${f.qty}`,
       }];
     });
+    const eventMarkers = events.flatMap((e) => {
+      if (e.t === null) return [];
+      const at = snap(e.t);
+      if (at < 0) return [];
+      const gapUp = e.kind === "gap" && /\+\d/.test(e.text);
+      return [{
+        time: times[at] as UTCTimestamp, position: e.kind === "gap" && !gapUp ? "belowBar" as const : "aboveBar" as const,
+        shape: e.kind === "gap" ? (gapUp ? "arrowUp" as const : "arrowDown" as const) : "square" as const,
+        color: css(e.kind === "dividend" ? "--series-3" : e.kind === "split" ? "--series-4" : "--series-2"),
+        text: e.kind === "dividend" ? "D" : e.kind === "split" ? "S" : "G",
+      }];
+    });
     markers.current?.setMarkers([
       ...drawings.flatMap((d) => d.kind === "marker" ? [{
         time: d.t as UTCTimestamp, position: "aboveBar" as const, shape: "arrowDown" as const, color, text: d.text,
       }] : []),
       ...fillMarkers,
+      ...eventMarkers,
     ].sort((a, b) => (a.time as number) - (b.time as number)));
-  }, [drawings, trendFirst, theme, fills, bars]);
+  }, [drawings, trendFirst, theme, fills, events, bars]);
 
   const changePrefs = (p: IndicatorPrefs) => { setPrefs(p); savePrefs(p); if (p.enabled.length > 0) markSeen("indicator"); };
 

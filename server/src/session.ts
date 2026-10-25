@@ -17,6 +17,7 @@ import { HINT_ORDER, HINT_RULES, type Hint, type HintRule, type RuleConfig, defa
 import { type GoalOutcome, evaluateGoals, scenarioById } from "./domain/scenario.js";
 import { GRADE_FORMULA, type Grade, gradeRun } from "./domain/grade.js";
 import { type Calendar, buildCalendar } from "./domain/dividendCalendar.js";
+import { type MarketEvent, marketEvents } from "./domain/marketEvents.js";
 import { type Orderbook, buildOrderbook } from "./domain/orderbook.js";
 import { type Journal, type JournalOrder, buildJournal } from "./domain/journal.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
@@ -706,6 +707,32 @@ export class SessionService {
       today, startCash: sim.startCash, totalReturn: metrics.totalReturn, titles,
       bookings: bookings.map((b) => ({ exDay: b.ref, amount: b.amount, paidDay: iso(b.t) })),
     });
+  }
+
+  /**
+   * Dividends, splits and gaps of some titles, from the bars that are finished at the simulation time and not past them.
+   * Looks back a year in a daily simulation and the 30 days the minute archive holds otherwise.
+   */
+  marketEvents(id: number, symbols: string[]): MarketEvent[] {
+    const sim = this.sim(id);
+    const day = sim.resolution === "day";
+    const from = sim.startAt - (day ? 366 : 30) * DAY;
+    const out: MarketEvent[] = [];
+    for (const symbol of new Set(symbols)) {
+      const inst = this.registry.get(symbol);
+      if (!inst) continue;
+      const bars = day
+        ? (this.daily?.between(symbol, from, sim.simulationTime) ?? []).map((b) => ({ t: b.t, o: b.o, c: b.c }))
+        : this.archive.barsBetween(symbol, from, sim.simulationTime - 59).map((b) => ({ t: b.t, o: b.o, c: b.c }));
+      const fromDay = new Date(from * 1000).toISOString().slice(0, 10);
+      const toDay = new Date((sim.simulationTime - 1) * 1000).toISOString().slice(0, 10);
+      out.push(...marketEvents({
+        symbol, currency: inst.currency, bars,
+        dividends: this.events?.dividends(symbol, fromDay, toDay) ?? [],
+        splits: this.events?.splits(symbol, fromDay, toDay) ?? [],
+      }));
+    }
+    return out.sort((a, b) => a.day.localeCompare(b.day) || a.symbol.localeCompare(b.symbol) || a.kind.localeCompare(b.kind));
   }
 
   private runCache = new Map<number, RunSummary>();

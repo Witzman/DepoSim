@@ -134,6 +134,17 @@ describe("a simulation by days", () => {
     expect(t.svc.dividendCalendar(t.id, t.depotId).lines.find((l) => l.symbol === SAP.symbol)!.past.map((p) => p.exDay)).toEqual([isoOf(d[8]), isoOf(d[1])]);
   });
 
+  it("lists dividends and gaps of a title up to the clock and not past it", () => {
+    const d = tradingDays();
+    const t = setup({ dividends: [{ exDay: isoOf(d[2]), amount: 2 }, { exDay: isoOf(d[9]), amount: 3 }] });
+    t.svc.stepDays(t.id, 4);
+    const e = t.svc.marketEvents(t.id, [SAP.symbol, "NOPE"]);
+    expect(e.map((x) => [x.kind, x.day, x.symbol])).toEqual([["dividend", isoOf(d[2]), SAP.symbol]]);
+    expect(e[0].t).toBe(d[2]);
+    t.svc.stepDays(t.id, 8);
+    expect(t.svc.marketEvents(t.id, [SAP.symbol]).map((x) => x.day)).toEqual([isoOf(d[2]), isoOf(d[9])]);
+  });
+
   it("says end of data when no bar is left, and the time stays", () => {
     const t = setup();
     const r = t.svc.stepDays(t.id, 20);
