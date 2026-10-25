@@ -3,6 +3,7 @@ import type { Cent } from "./domain/money.js";
 import type { FeeConfig } from "./domain/fees.js";
 import { splitOrder } from "./domain/events.js";
 import { type Rules, RELAXED } from "./domain/rules.js";
+import { type AutoPause, parseAutoPause } from "./domain/autopause.js";
 import type { Tempo } from "./domain/clock.js";
 import type { DepotState, NewOrder, Order, OrderStatus } from "./domain/broker.js";
 
@@ -26,6 +27,8 @@ export interface Simulation {
   /** The scenario it plays, if any; the clock stops at `endAt` and the simulation ends. */
   scenarioId: string | null;
   endAt: number | null;
+  /** The rules that stop the clock by themselves. */
+  autoPause: AutoPause;
 }
 
 /** A ghost is a frozen copy of a depot that never trades; it is only valued at market. */
@@ -128,6 +131,7 @@ export interface Store {
   setSimulationTime(id: number, simulationTime: number): void;
   setTempo(id: number, tempo: Tempo): void;
   setBenchmark(id: number, symbol: string | null): void;
+  setAutoPause(id: number, prefs: AutoPause): void;
   /** Cash, positions and every order of one depot. */
   loadDepot(depotId: number): DepotState & { orders: OrderRecord[] };
   /** Writes the cash and replaces the positions. */
@@ -189,6 +193,7 @@ interface SimulationRow {
   resolution: "minute" | "day";
   scenario_id: string | null;
   end_at: number | null;
+  auto_pause: string | null;
 }
 
 const toSimulation = (r: SimulationRow): Simulation => ({
@@ -207,6 +212,7 @@ const toSimulation = (r: SimulationRow): Simulation => ({
   resolution: r.resolution === "day" ? "day" : "minute",
   scenarioId: r.scenario_id,
   endAt: r.end_at,
+  autoPause: parseAutoPause(r.auto_pause),
 });
 
 export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
@@ -253,6 +259,9 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
     },
     setBenchmark: (id, symbol) => {
       db.prepare("update simulations set benchmark = ? where id = ?").run(symbol, id);
+    },
+    setAutoPause: (id, prefs) => {
+      db.prepare("update simulations set auto_pause = ? where id = ?").run(JSON.stringify(prefs), id);
     },
     setTempo: (id, tempo) => {
       db.prepare("update simulations set tempo = ? where id = ?").run(tempo, id);

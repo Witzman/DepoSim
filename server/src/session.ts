@@ -4,19 +4,20 @@ import type { Archive } from "./data/archive.js";
 import { type Bar, MarketDataError } from "./data/marketdata.js";
 import { type DepotState, type NewOrder, depotValue, fillOrder, positionValue, triggersLimit, validateOrder } from "./domain/broker.js";
 import {
-  CATCH_UP_LAG_S, LIVE_EDGE_S, LIVE_MARGIN_S, OPEN_WINDOW_S, type Tempo, advanceCarry, effectiveTempo, liveLimit, skipClosed,
+  CATCH_UP_LAG_S, type JumpKind, LIVE_EDGE_S, LIVE_MARGIN_S, OPEN_WINDOW_S, TIME_LAPSE, type Tempo, advanceCarry, effectiveTempo, liveLimit, nextStop, skipClosed,
 } from "./domain/clock.js";
 import { type AllocationLine, planAllocation } from "./domain/allocation.js";
 import { type Breakdown, type FeeLedger, breakdown, feeLedger } from "./domain/breakdown.js";
 import { type Correlation, type Metrics, type Point, type Relative, computeMetrics, correlationMatrix, relativeTo, thin } from "./domain/metrics.js";
 import { BLOCKING_KINDS } from "./domain/quality.js";
-import { CLOCK_STOPPED_REFUSED } from "./domain/rules.js";
+import { CLOCK_STOPPED_REFUSED, JUMP_REFUSED } from "./domain/rules.js";
 import { closedDayReason } from "./domain/venues.js";
 import { type Diversification, type HeldSeries, diversify } from "./domain/diversification.js";
 import { HINT_ORDER, HINT_RULES, type Hint, type HintRule, type RuleConfig, defaultConfig, evaluateHints, orderNotes } from "./domain/hints.js";
 import { type GoalOutcome, evaluateGoals, scenarioById } from "./domain/scenario.js";
 import { GRADE_FORMULA, type Grade, gradeRun } from "./domain/grade.js";
 import { type Calendar, buildCalendar } from "./domain/dividendCalendar.js";
+import { type AutoPauseRule, type Signals, distanceToLimit, jumpOf, noSignals, pauseReason } from "./domain/autopause.js";
 import { type MarketEvent, marketEvents } from "./domain/marketEvents.js";
 import { type Orderbook, buildOrderbook } from "./domain/orderbook.js";
 import { type Journal, type JournalOrder, buildJournal } from "./domain/journal.js";
@@ -68,6 +69,18 @@ export interface TickResult {
   waitingForData: boolean;
   /** The newest known bar is close to the live limit, so the market is running now. */
   liveEdge: boolean;
+  /** What the tick did that an auto-pause rule may care about; absent for a tick that was not asked for them. */
+  signals?: Signals;
+}
+
+export interface JumpResult {
+  ok: true;
+  simulationTime: number;
+  /** All bars that finished during the jump, per instrument. */
+  newBars: Record<string, Bar[]>;
+  /** Why the jump ended before its target, or null when it arrived. */
+  stopped: { rule: AutoPauseRule | "fill" | "data" | "end"; reason: string } | null;
+  target: number;
 }
 
 export interface PositionView {
@@ -327,8 +340,21 @@ export class SessionService {
     return false;
   }
 
-  setTempo(id: number, tempo: Tempo): void {
+  /**
+   * The two fastest tempi (time lapse) need minute prices, a replay and no open order: at 300 times an order would be passed
+   * over unseen. Any other tempo is always allowed.
+   */
+  setTempo(id: number, tempo: Tempo): { ok: true } | { ok: false; reason: string } {
+    if (TIME_LAPSE.includes(tempo)) {
+      const sim = this.sim(id);
+      if (sim.resolution === "day") return { ok: false, reason: "Zeitraffer gibt es nur mit Minutenkursen." };
+      if (sim.live) return { ok: false, reason: "Im Livebetrieb bestimmt die Uhr das Tempo." };
+      if (this.store.listDepots(id).some((d) => this.store.loadDepot(d.id).orders.some((o) => o.status === "open"))) {
+        return { ok: false, reason: "Zeitraffer geht nur ohne offene Orders. Lösche sie oder warte, bis sie ausgeführt sind." };
+      }
+    }
     this.store.setTempo(id, tempo);
+    return { ok: true };
   }
 
   run(id: number): void {
@@ -355,7 +381,24 @@ export class SessionService {
    * The fills and the new time are written in one transaction: if anything throws, none of it
    * happened and the same bars are still waiting to be evaluated.
    */
-  tick(id: number, realMs: number): TickResult {
+  /**
+   * Moves the clock by `realMs` of real time, or, with `cap`, not past that simulation time (a jump goes to a target in
+   * steps). The signals tell what the tick did: orders executed, dividends booked.
+   */
+  tick(id: number, realMs: number, cap?: number): TickResult {
+    this.signals = noSignals();
+    try {
+      const r = this.tickCore(id, realMs, cap);
+      r.signals = this.signals;
+      return r;
+    } finally {
+      this.signals = null;
+    }
+  }
+
+  private signals: Signals | null = null;
+
+  private tickCore(id: number, realMs: number, cap = Infinity): TickResult {
     const sim = this.sim(id);
     if (sim.endedAt !== null) {
       return { simulationTime: sim.simulationTime, newBars: {}, endOfData: true, waitingForData: false, liveEdge: false };
@@ -377,15 +420,16 @@ export class SessionService {
     if (sim.live && lag <= CATCH_UP_LAG_S) {
       raw = limitL; // close enough: a live simulation sits on the limit
     } else {
-      const step = advanceCarry(sOld, tempo, realMs, this.carry.get(id) ?? 0);
+      // A jump names its target; otherwise the real time that passed decides how far the clock moves.
+      const step = cap === Infinity ? advanceCarry(sOld, tempo, realMs, this.carry.get(id) ?? 0) : { s: cap, carry: 0 };
       raw = step.s;
       carryOut = step.carry;
       advanced = true;
     }
-    const capped = Math.min(raw, limitL, sim.endAt ?? Infinity);
+    const capped = Math.min(raw, limitL, sim.endAt ?? Infinity, cap);
     const skipped = skipClosed(capped, symbols, this.archive);
     const endOfData = skipped === undefined;
-    const target0 = skipped === undefined ? capped : Math.min(skipped, limitL, sim.endAt ?? Infinity);
+    const target0 = skipped === undefined ? capped : Math.min(skipped, limitL, sim.endAt ?? Infinity, cap);
 
     const horizon = this.horizon();
     const liveEdge = horizon !== undefined && limitL - horizon <= LIVE_EDGE_S;
@@ -481,6 +525,8 @@ export class SessionService {
           filledSim: s, fillPrice: exec.execPrice, gross: exec.gross, commission: exec.commission, foreignFee: exec.foreign,
         });
       }
+      // An order must not be passed over at time-lapse speed: the clock drops to the fastest tempo that watches it.
+      if (TIME_LAPSE.includes(sim.tempo)) this.store.setTempo(id, 60);
       return { ok: true, orderId };
     });
   }
@@ -733,6 +779,142 @@ export class SessionService {
       }));
     }
     return out.sort((a, b) => a.day.localeCompare(b.day) || a.symbol.localeCompare(b.symbol) || a.kind.localeCompare(b.kind));
+  }
+
+  private lastOpen = new Map<number, Map<string, boolean>>();
+  private nearFired = new Set<number>();
+  private jumpFired = new Set<string>();
+
+  /** The price an auto-pause rule looks at: the close of the last finished bar (or day) at `s`. */
+  private lastClose(symbol: string, s: number, day: boolean): number | undefined {
+    return day ? this.daily?.lastComplete(symbol, s)?.c : this.archive.lastCompleteBar(symbol, s, SOUND)?.c;
+  }
+
+  /**
+   * The reason to stop the clock after a tick, if one of the rules the person switched on applies. Each cause is told once:
+   * an order that is near its limit, a jump that is still going on, an opening that already happened do not fire again.
+   * A simulation without a pause (the hardcore rules) has no auto-pause either.
+   */
+  autoPauseFor(id: number, r: TickResult): { rule: AutoPauseRule; reason: string } | null {
+    const sim = this.sim(id);
+    const p = sim.autoPause;
+    const day = sim.resolution === "day";
+    const s = r.simulationTime;
+    const signals: Signals = { ...(r.signals ?? noSignals()), opened: [], near: [], jumps: [] };
+
+    // Openings are seen against the last look even when no rule asks, so that switching the rule on does not fire at once.
+    if (!day) {
+      const now = new Map<string, boolean>();
+      for (const v of VENUES) if (v.hasSource) now.set(v.id, this.venueOpen(v.id as Venue, s));
+      const before = this.lastOpen.get(id);
+      this.lastOpen.set(id, now);
+      if (before) for (const v of VENUES) if (now.get(v.id) && before.get(v.id) === false) signals.opened.push(`${v.name} hat geöffnet`);
+    }
+    if (!sim.rules.pauseAllowed) return null;
+    if (!(p.onFill || p.onEvent || p.onOpen || p.nearLimit || p.jump)) return null;
+
+    const depots = this.store.listDepots(id).filter((d) => d.kind === "normal").map((d) => this.store.loadDepot(d.id));
+    if (p.nearLimit) {
+      const open = depots.flatMap((d) => d.orders.filter((o) => o.status === "open" && o.kind === "limit" && o.limitPrice !== undefined));
+      const openIds = new Set(open.map((o) => o.id));
+      for (const gone of this.nearFired) if (!openIds.has(gone)) this.nearFired.delete(gone);
+      for (const o of open) {
+        if (this.nearFired.has(o.id)) continue;
+        const price = this.lastClose(o.symbol, s, day);
+        const dist = price === undefined ? null : distanceToLimit(price, o.limitPrice as number);
+        if (dist !== null && dist <= p.nearLimitPct) {
+          this.nearFired.add(o.id);
+          signals.near.push(`${o.side === "buy" ? "Kauf" : "Verkauf"}-Limit ${o.symbol} ist ${(dist * 100).toFixed(1).replace(".", ",")} % vom Kurs entfernt`);
+        }
+      }
+    }
+    if (p.jump && !day) {
+      const watched = new Set(depots.flatMap((d) => [...d.positions.keys(), ...d.orders.filter((o) => o.status === "open").map((o) => o.symbol)]));
+      for (const symbol of watched) {
+        const now = this.lastClose(symbol, s, false);
+        const then = this.lastClose(symbol, s - p.jumpMinutes * 60, false);
+        const change = now === undefined || then === undefined ? null : jumpOf(now, then, p.jumpPct);
+        const key = `${id}:${symbol}`;
+        if (change === null) { this.jumpFired.delete(key); continue; }
+        if (this.jumpFired.has(key)) continue;
+        this.jumpFired.add(key);
+        signals.jumps.push(`${symbol} ${change > 0 ? "+" : "−"}${(Math.abs(change) * 100).toFixed(1).replace(".", ",")} % in ${p.jumpMinutes} Minuten`);
+      }
+    }
+    return pauseReason(p, signals);
+  }
+
+  /**
+   * The end of the next finished bar of any instrument after `s`: the smallest step that shows something new. Over a night or
+   * a weekend that is the first bar after the gap. Undefined when the archive has no later bar.
+   */
+  private nextBarEnd(s: number): number | undefined {
+    let end: number | undefined;
+    for (const inst of this.instruments) {
+      const bar = this.archive.nextBarAfter(inst.symbol, s - 60);
+      if (bar && (end === undefined || bar.t + 60 < end)) end = bar.t + 60;
+    }
+    return end;
+  }
+
+  /**
+   * Plays the clock to a target in steps of one finished bar and stops on the way when an order executed (it is carried out
+   * first, then the clock halts), when an auto-pause rule fires, at the end of the data or of a scenario. The jump arrives at the
+   * target to the second, also when the market is shut there. A daily simulation knows one jump, the next trading day.
+   * `symbol` names the market whose hours the target follows (the shown symbol); Xetra if none.
+   */
+  jump(id: number, kind: JumpKind, symbol?: string): JumpResult | { ok: false; reason: string } {
+    const sim = this.sim(id);
+    if (sim.endedAt !== null) return { ok: false, reason: "Die Simulation ist beendet." };
+    if (sim.live) return { ok: false, reason: "Im Livebetrieb gibt es keine Sprünge: Die Zeit ist die Gegenwart." };
+    if (!sim.rules.pauseAllowed) return { ok: false, reason: JUMP_REFUSED };
+
+    if (sim.resolution === "day") {
+      if (kind !== "candle" && kind !== "day") return { ok: false, reason: "In einer Tageskurs-Simulation gibt es nur „Tag weiter“." };
+      const r = this.stepDays(id, 1);
+      const ended = this.sim(id).endedAt !== null;
+      return {
+        ok: true, simulationTime: r.simulationTime, newBars: r.newBars, target: r.simulationTime,
+        stopped: ended ? { rule: "end", reason: "Das Szenario ist zu Ende." } : r.endOfData ? { rule: "data", reason: "Ende der Daten: für die Zeit danach gibt es noch keine Kurse." } : null,
+      };
+    }
+
+    const from = sim.simulationTime;
+    const venue = VENUES.find((v) => v.id === (symbol ? this.registry.get(symbol)?.venue : undefined)) ?? VENUES[0];
+    let target: number;
+    if (kind === "candle") {
+      const next = this.nextBarEnd(from);
+      if (next === undefined) return { ok: true, simulationTime: from, newBars: {}, target: from, stopped: { rule: "data", reason: "Ende der Daten: für die Zeit danach gibt es noch keine Kurse." } };
+      target = next;
+    } else {
+      const stop = nextStop(kind, from, venue);
+      if (stop === undefined) return { ok: false, reason: `${venue.name} hat in den nächsten zwei Wochen keinen Handelstag.` };
+      target = Math.min(stop, sim.endAt ?? Infinity);
+    }
+
+    return this.playTo(id, target);
+  }
+
+  /** Plays the clock on towards `target` in steps of one finished bar; see `jump` for where it stops. */
+  playTo(id: number, target: number): JumpResult {
+    const sim = this.sim(id);
+    const from = sim.simulationTime;
+    const merged: Record<string, Bar[]> = {};
+    let time = from;
+    let stopped: JumpResult["stopped"] = null;
+    for (let guard = 0; time < target && guard < 20_000; guard++) {
+      const to = Math.min(target, this.nextBarEnd(time) ?? target);
+      const r = this.tick(id, 0, to);
+      for (const [sym, bars] of Object.entries(r.newBars)) (merged[sym] ??= []).push(...bars);
+      const moved = r.simulationTime > time;
+      time = r.simulationTime;
+      if (this.sim(id).endedAt !== null) { stopped = { rule: "end", reason: "Das Szenario ist zu Ende." }; break; }
+      if (r.signals?.fills.length) { stopped = { rule: "fill", reason: `Angehalten: ${r.signals.fills[0]}${r.signals.fills.length > 1 ? ` (und ${r.signals.fills.length - 1} weitere)` : ""}` }; break; }
+      const pause = this.autoPauseFor(id, r);
+      if (pause) { stopped = pause; break; }
+      if (r.endOfData || r.waitingForData || !moved) { stopped = { rule: "data", reason: "Ende der Daten: für die Zeit danach gibt es noch keine Kurse." }; break; }
+    }
+    return { ok: true, simulationTime: time, newBars: merged, target, stopped };
   }
 
   private runCache = new Map<number, RunSummary>();
@@ -1228,6 +1410,7 @@ export class SessionService {
       }
       fillOrder(state, o, exec);
       this.store.markFilled(o.id, { filledSim: bar.t, fillPrice: exec.execPrice, gross: exec.gross, commission: exec.commission, foreignFee: exec.foreign });
+      this.signals?.fills.push(`${o.side === "buy" ? "Kauf" : "Verkauf"} ${o.qty} ${symbol} ausgeführt`);
       changed = true;
     }
     return changed;
@@ -1295,6 +1478,7 @@ export class SessionService {
         text: `Aktiensplit ${symbol} ${sp.numerator}:${sp.denominator}, ${held.qty} → ${res.qty} Stück` + (res.cashOut > 0 ? `, Bruchteil ${eur(res.cashOut)}` : ""),
       };
       if (!this.store.addBooking(depot.id, booking)) continue;
+      this.signals?.bookings.push(`Aktiensplit ${symbol} ${sp.numerator}:${sp.denominator} gebucht`);
       applySplit(state, symbol, sp.numerator, sp.denominator, priceEur);
       this.store.splitOpenOrders(depot.id, symbol, sp.numerator, sp.denominator);
       for (const o of state.orders) {
@@ -1321,6 +1505,7 @@ export class SessionService {
       const text = `Ausschüttung ${symbol} ${(amount / 100).toFixed(2).replace(".", ",")} €`;
       if (this.store.addBooking(depot.id, { t, kind: "dividend", symbol, ref: d.exDay, amount, text })) {
         state.cash += amount;
+        this.signals?.bookings.push(`Ausschüttung ${symbol} gebucht`);
         changed = true;
       }
     }
@@ -1361,6 +1546,7 @@ export class SessionService {
       this.store.markFilled(o.id, {
         filledSim: bar.t + 60, fillPrice: exec.execPrice, gross: exec.gross, commission: exec.commission, foreignFee: exec.foreign,
       });
+      this.signals?.fills.push(`${o.side === "buy" ? "Kauf" : "Verkauf"} ${o.qty} ${symbol} ausgeführt`);
       changed = true;
     }
     return changed;

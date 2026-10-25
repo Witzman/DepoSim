@@ -3,6 +3,7 @@ import { createArchive } from "../src/data/archive.js";
 import type { MarketDataErrorKind } from "../src/data/marketdata.js";
 import { openDb } from "../src/db.js";
 import { DEFAULT_FEES } from "../src/domain/fees.js";
+import { parseAutoPause } from "../src/domain/autopause.js";
 import { InstrumentRegistry } from "../src/instruments.js";
 import { SessionService } from "../src/session.js";
 import { createStore } from "../src/store.js";
@@ -951,5 +952,135 @@ describe("bars marked as outliers (#50)", () => {
     t.svc.setTempo(t.id, 60);
     const r = t.svc.tick(t.id, 3000);
     expect(r.newBars["SAP.DE"].map((b) => b.t)).toEqual([D0 + 7 * H + 660, D0 + 7 * H + 720]);
+  });
+});
+
+describe("jumps and auto-pause (#30)", () => {
+  const T10 = D0 + 7 * H + 600; // the test simulation starts at 07:10 UTC, bar 10 of SAP has just finished
+
+  async function started(opts: SetupOpts = {}) {
+    const t = setup(opts);
+    await t.svc.start(t.id);
+    return t;
+  }
+
+  it("goes one candle on: to the end of the next finished bar, with that bar", async () => {
+    const t = await started();
+    const r = t.svc.jump(t.id, "candle");
+    expect(r).toMatchObject({ ok: true, simulationTime: T10 + 60, stopped: null });
+    if (r.ok) expect(r.newBars["SAP.DE"].map((b) => b.t)).toEqual([T10]);
+    expect(t.store.getSimulation(t.id)?.simulationTime).toBe(T10 + 60);
+  });
+
+  it("arrives at the target to the second, also when the market is shut there", async () => {
+    const t = await started();
+    const r = t.svc.jump(t.id, "hour"); // 08:10 UTC, ten minutes after the last bar of the day in the data
+    expect(r).toMatchObject({ ok: true, simulationTime: T10 + 3600, target: T10 + 3600, stopped: null });
+  });
+
+  it("stops where a limit order executed on the way, after carrying it out", async () => {
+    const t = await started();
+    const order = t.svc.placeOrder(t.id, t.depotId, { symbol: "SAP.DE", side: "buy", kind: "limit", qty: 1, limitPrice: 105 });
+    expect(order.ok).toBe(true);
+    const r = t.svc.jump(t.id, "hour");
+    // bar 15 (close 105, low 104.5) is the first to reach the limit; it finishes at 07:16
+    expect(r).toMatchObject({ ok: true, simulationTime: D0 + 7 * H + 16 * 60, stopped: { rule: "fill" } });
+    expect(t.svc.snapshot(t.id).depots[0].positions[0]).toMatchObject({ symbol: "SAP.DE", qty: 1 });
+    if (r.ok && r.stopped) expect(r.stopped.reason).toBe("Angehalten: Kauf 1 SAP.DE ausgeführt");
+  });
+
+  it("is deterministic: the same jump from the same state ends at the same time with the same bars", async () => {
+    const a = await started();
+    const b = await started();
+    const ra = a.svc.jump(a.id, "hour");
+    const rb = b.svc.jump(b.id, "hour");
+    expect(ra).toEqual(rb);
+  });
+
+  it("refuses a jump in a simulation without a pause, in a live one, and in an ended one", async () => {
+    const t = await started();
+    t.db.prepare("update simulations set rules_json = ? where id = ?").run(JSON.stringify({ preset: "hardcore", pauseAllowed: false, tempoLocked: true }), t.id);
+    expect(t.svc.jump(t.id, "hour")).toMatchObject({ ok: false, reason: expect.stringMatching(/keine Sprünge/) });
+    const live = setup({ live: true });
+    expect(live.svc.jump(live.id, "hour")).toMatchObject({ ok: false, reason: expect.stringMatching(/Livebetrieb/) });
+    const done = await started();
+    done.store.endSimulation(done.id);
+    expect(done.svc.jump(done.id, "candle")).toMatchObject({ ok: false });
+  });
+
+  it("stops at the end of the data instead of waiting for it", async () => {
+    const t = await started();
+    t.svc.jump(t.id, "day"); // to the Berlin midnight; the data goes on to D1 07:10
+    const r = t.svc.jump(t.id, "close"); // Xetra closes at 15:30 UTC the day after
+    expect(r).toMatchObject({ ok: true });
+    if (r.ok) expect(r.simulationTime).toBeLessThanOrEqual(r.target);
+  });
+
+  describe("auto-pause", () => {
+    const on = (t: Awaited<ReturnType<typeof started>>, p: object) => t.store.setAutoPause(t.id, parseAutoPause(p));
+
+    it("stops once when an order is near its limit, with the reason", async () => {
+      const t = await started();
+      on(t, { nearLimit: true, nearLimitPct: 0.01 });
+      t.svc.placeOrder(t.id, t.depotId, { symbol: "SAP.DE", side: "buy", kind: "limit", qty: 1, limitPrice: 100 });
+      const r = t.svc.jump(t.id, "hour");
+      // the price falls a point a minute from 110; 101 (bar 19) is within 1 % of 100, the limit is reached one bar later
+      expect(r).toMatchObject({ ok: true, simulationTime: D0 + 7 * H + 20 * 60, stopped: { rule: "near" } });
+      if (r.ok && r.stopped) expect(r.stopped.reason).toMatch(/^Automatisch angehalten: Kauf-Limit SAP\.DE ist 1,0 % vom Kurs entfernt/);
+      // told once: playing on does not stop for the same order again, only for its execution
+      const again = t.svc.jump(t.id, "hour");
+      expect(again).toMatchObject({ ok: true, stopped: { rule: "fill" } });
+    });
+
+    it("stops on a jump of a held title, once, and again only after it calmed down", async () => {
+      const t = await started();
+      t.store.saveBalance(t.depotId, 900_000, new Map([["SAP.DE", { qty: 5, cost: 50_000 }]]));
+      on(t, { jump: true, jumpPct: 0.05, jumpMinutes: 5 });
+      const r = t.svc.jump(t.id, "hour");
+      // the price falls a point a minute from 110: five minutes earlier it was 5 higher, -5 % is reached when 5/x >= 5 %, at 100 (bar 20: 100 vs 105 = -4.76 %)
+      // and then at 95 (bar 25: 95 vs 100 = -5.0 %): the first bar at which the fall over five minutes is at least 5 % is bar 25
+      expect(r).toMatchObject({ ok: true, simulationTime: D0 + 7 * H + 26 * 60, stopped: { rule: "jump" } });
+      if (r.ok && r.stopped) expect(r.stopped.reason).toBe("Automatisch angehalten: SAP.DE −5,0 % in 5 Minuten");
+      const again = t.svc.jump(t.id, "hour"); // still falling at 5 % or more: told once, not at every bar
+      expect(again).toMatchObject({ ok: true, stopped: null });
+    });
+
+    it("stops on an executed order only when asked for, and a jump always does", async () => {
+      const t = await started();
+      on(t, { onFill: true });
+      t.svc.placeOrder(t.id, t.depotId, { symbol: "SAP.DE", side: "buy", kind: "limit", qty: 1, limitPrice: 105 });
+      const tick = t.svc.tick(t.id, 6 * 60 * 1000); // six minutes of real time at tempo 1 = 360 s
+      expect(t.svc.snapshot(t.id).depots[0].positions).toHaveLength(1);
+      expect(t.svc.autoPauseFor(t.id, tick)).toMatchObject({ rule: "fill", reason: "Automatisch angehalten: Kauf 1 SAP.DE ausgeführt" });
+      on(t, { onFill: false });
+      expect(t.svc.autoPauseFor(t.id, tick)).toBeNull();
+    });
+
+    it("has nothing to say without the pause allowed", async () => {
+      const t = await started();
+      on(t, { onFill: true });
+      t.db.prepare("update simulations set rules_json = ? where id = ?").run(JSON.stringify({ preset: "hardcore", pauseAllowed: false }), t.id);
+      t.svc.placeOrder(t.id, t.depotId, { symbol: "SAP.DE", side: "buy", kind: "limit", qty: 1, limitPrice: 109 });
+      expect(t.svc.autoPauseFor(t.id, t.svc.tick(t.id, 1000))).toBeNull();
+    });
+  });
+
+  describe("time lapse tempo", () => {
+    it("is refused with an open order, in a live simulation and in a daily one, and allowed otherwise", async () => {
+      const t = await started();
+      expect(t.svc.setTempo(t.id, 300)).toEqual({ ok: true });
+      expect(t.store.getSimulation(t.id)?.tempo).toBe(300);
+      t.svc.setTempo(t.id, 60);
+      t.svc.placeOrder(t.id, t.depotId, { symbol: "SAP.DE", side: "buy", kind: "limit", qty: 1, limitPrice: 50 });
+      expect(t.svc.setTempo(t.id, 120)).toMatchObject({ ok: false, reason: expect.stringMatching(/ohne offene Orders/) });
+      expect(t.svc.setTempo(t.id, 30)).toEqual({ ok: true });
+    });
+
+    it("drops to 60 when an order is placed during a time lapse", async () => {
+      const t = await started();
+      t.svc.setTempo(t.id, 300);
+      t.svc.placeOrder(t.id, t.depotId, { symbol: "SAP.DE", side: "buy", kind: "limit", qty: 1, limitPrice: 50 });
+      expect(t.store.getSimulation(t.id)?.tempo).toBe(60);
+    });
   });
 });

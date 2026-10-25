@@ -5,6 +5,7 @@ const KEYS: [string, string][] = [
   ["S", "Verkaufen: Menge im Orderticket"],
   ["G", "Kennzahlen erklärt (Glossar)"],
   ["Leertaste", "Start oder Pause"],
+  [".", "Nächste Kerze (Tageskurse: ein Tag weiter)"],
   ["1 – 4", "Tempo 1x, 5x, 30x, 60x"],
   ["Strg + K", "Suche und Befehle (auf dem Mac Cmd + K)"],
   ["?", "Diese Liste"],

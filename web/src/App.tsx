@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  type Socket, addDepot, addGhost, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, getBackupStatus, getBars, getDataStatus, getMarketEvents, getRun, getWatchlist, listSimulations,
+  type Socket, addDepot, addGhost, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, setAutoPause, getBackupStatus, getBars, getDataStatus, getMarketEvents, getRun, getWatchlist, listSimulations,
   openSocket, removeDepot, setBenchmark, removeInstrument, renameDepot,
 } from "./api.js";
 import { AllocationDialog } from "./components/AllocationDialog.js";
@@ -45,7 +45,7 @@ import { canGhost, pickDepot } from "./view.js";
 import type { CommandId } from "./palette.js";
 import { useNarrow } from "./useNarrow.js";
 import { useTheme } from "./theme.js";
-import type { BackupStatus, Bar, DataStatus, Instrument, MarketEvent, RunSummary, ServerMessage, Simulation, Snapshot, Tempo } from "./types.js";
+import type { BackupStatus, Bar, DataStatus, Instrument, JumpKind, MarketEvent, RunSummary, ServerMessage, Simulation, Snapshot, Tempo } from "./types.js";
 
 const SELECTED_KEY = "deposim-selected";
 
@@ -168,6 +168,9 @@ export function App() {
           return next.length > cap ? next.slice(-cap) : next;
         });
       }
+    } else if (m.type === "paused") {
+      setNotice(m.reason);
+      feedback("event");
     } else {
       setNotice(m.text);
     }
@@ -215,6 +218,9 @@ export function App() {
       } else if (/^[1-4]$/.test(e.key) && socket.current) {
         e.preventDefault();
         socket.current.send({ type: "tempo", tempo: ([1, 5, 30, 60] as const)[Number(e.key) - 1] });
+      } else if (e.key === "." && socket.current) {
+        e.preventDefault();
+        socket.current.send({ type: "step" });
       } else if (e.key === " " && socket.current) {
         e.preventDefault();
         socket.current.send({ type: runningRef.current ? "pause" : "run" });
@@ -334,6 +340,10 @@ export function App() {
     if (id === "ghost") return void newGhost();
     if (id === "longterm") return setView("longterm");
     if (id === "data") return setView("data");
+    if (id === "next-candle" || id === "jump-hour" || id === "jump-close" || id === "jump-open" || id === "jump-day") {
+      const to = { "next-candle": "candle", "jump-hour": "hour", "jump-close": "close", "jump-open": "open", "jump-day": "day" }[id] as JumpKind;
+      return socket.current?.send({ type: "jump", to, symbol });
+    }
     if (id === "orderbook") {
       setView("trade");
       setOrderbookOpen((o) => !o);
@@ -545,6 +555,13 @@ export function App() {
                   delayS={snapshot?.delayS ?? 900}
                   rules={live.rules}
                   daily={live.resolution === "day" ? { skipped, onStep: () => socket.current?.send({ type: "step" }) } : undefined}
+                  onJump={!live.live && live.endedAt === null && live.resolution === "minute" && live.rules.pauseAllowed
+                    ? (to) => socket.current?.send({ type: "jump", to, symbol })
+                    : undefined}
+                  hasOpenOrders={snapshot?.depots.some((d) => d.orders.some((o) => o.status === "open")) ?? false}
+                  autoPause={!live.live && live.endedAt === null && live.rules.pauseAllowed
+                    ? { value: live.autoPause, daily: live.resolution === "day", onChange: (patch) => { setAutoPause(live.id, patch).catch((e) => setNotice((e as Error).message)); } }
+                    : undefined}
                   onTempo={(t) => socket.current?.send({ type: "tempo", tempo: t })}
                   onRun={() => { setNotice(null); socket.current?.send({ type: "run" }); }}
                   onPause={() => socket.current?.send({ type: "pause" })}
@@ -664,7 +681,7 @@ export function App() {
         open={paletteOpen} instruments={watchlist} simulations={simulations} selectedId={selectedId}
         onClose={() => setPaletteOpen(false)} onPickInstrument={setSymbol} onPickSimulation={setSelectedId}
         onToggleTheme={toggle} onShowHelp={() => setHelpOpen(true)} onAdd={addTitle}
-        commands={selectedId === null ? ["backfill", "backup", "longterm", "data", "glossary", "guide"] : ["backfill", "backup", "ghost", "journal", "compare", "orderbook", "longterm", "data", "glossary", "guide"]} onCommand={runCommand}
+        commands={selectedId === null ? ["backfill", "backup", "longterm", "data", "glossary", "guide"] : ["backfill", "backup", "ghost", "journal", "compare", "orderbook", "longterm", "data", "glossary", "guide", ...(live && !live.live && live.endedAt === null && live.resolution === "minute" && live.rules.pauseAllowed ? ["next-candle", "jump-hour", "jump-close", "jump-open", "jump-day"] as CommandId[] : [])]} onCommand={runCommand}
       />
     </div>
   );

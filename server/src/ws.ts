@@ -2,14 +2,17 @@ import type { WebSocket } from "ws";
 import { z } from "zod";
 import { describeError } from "./errors.js";
 import { PAUSE_REFUSED, TEMPO_REFUSED } from "./domain/rules.js";
-import type { SessionService, TickResult } from "./session.js";
+import type { Bar } from "./data/marketdata.js";
+import type { JumpKind } from "./domain/clock.js";
+import type { JumpResult, SessionService, TickResult } from "./session.js";
 import type { Store } from "./store.js";
 
 const message = z.discriminatedUnion("type", [
   z.object({ type: z.literal("run") }),
   z.object({ type: z.literal("pause") }),
   z.object({ type: z.literal("step") }),
-  z.object({ type: z.literal("tempo"), tempo: z.union([z.literal(1), z.literal(5), z.literal(30), z.literal(60)]) }),
+  z.object({ type: z.literal("tempo"), tempo: z.union([z.literal(1), z.literal(5), z.literal(30), z.literal(60), z.literal(120), z.literal(300)]) }),
+  z.object({ type: z.literal("jump"), to: z.enum(["candle", "hour", "close", "open", "day"]), symbol: z.string().max(20).optional() }),
 ]);
 
 /** The longest stretch of real time one tick may account for. */
@@ -77,6 +80,13 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
         broadcast(id, snapshotMessage(id));
         return;
       }
+      const pause = session.autoPauseFor(id, result);
+      if (pause) {
+        stopLoop(id);
+        broadcast(id, { type: "paused", rule: pause.rule, reason: pause.reason });
+        broadcast(id, snapshotMessage(id));
+        return;
+      }
       if (result.endOfData || result.waitingForData) {
         // The clock cannot go on without newer prices. Look for them, but not oftener than
         // liveRefreshS: 19 calls to the price source for every look.
@@ -121,7 +131,7 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
     loops.set(id, { timer: setInterval(() => void step(id), tickMs), last: performance.now(), busy: false });
   }
 
-  return {
+  const hub = {
     attach(ws: WebSocket, id: number) {
       if (!store.getSimulation(id)) {
         send(ws, { type: "error", text: "Unbekannte Simulation." });
@@ -151,11 +161,22 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
             send(ws, { type: "notice", text: TEMPO_REFUSED });
             return;
           }
-          session.setTempo(id, parsed.tempo);
+          const set = session.setTempo(id, parsed.tempo);
+          if (!set.ok) {
+            send(ws, { type: "notice", text: set.reason });
+            broadcast(id, snapshotMessage(id));
+          }
+        } else if (parsed.type === "jump") {
+          void hub.jump(id, parsed.to, parsed.symbol).then((r) => {
+            if (!r.ok) send(ws, { type: "notice", text: r.reason });
+          });
         } else if (parsed.type === "step") {
           const sim = store.getSimulation(id);
           if (sim?.resolution !== "day") {
-            send(ws, { type: "notice", text: "Ein Tag weiter gibt es nur in Tageskurs-Simulationen." });
+            // One candle on; a daily simulation below plays one trading day.
+            void hub.jump(id, "candle").then((r) => {
+              if (!r.ok) send(ws, { type: "notice", text: r.reason });
+            });
             return;
           }
           if (sim.endedAt !== null) {
@@ -199,6 +220,37 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
       if (clients.has(id)) broadcast(id, snapshotMessage(id));
     },
 
+    /**
+     * Stops the clock, plays it to the target of the jump and tells the clients: the new bars as one tick, why the jump ended
+     * early if it did, and a snapshot. The clock stands still afterwards.
+     */
+    async jump(id: number, kind: JumpKind, symbol?: string): Promise<JumpResult | { ok: false; reason: string }> {
+      stopLoop(id);
+      let r = session.jump(id, kind, symbol);
+      if (!r.ok) return r;
+      // The archive holds the days that were loaded so far. Running out of bars on the way is a reason to fetch the next
+      // day, as the running clock does, not to stop; only when nothing more comes does the jump end at the data.
+      for (let tries = 0; tries < 12 && r.stopped?.rule === "data"; tries++) {
+        const more = await session.loadMore(id).catch(() => false);
+        if (!more) break;
+        const next: JumpResult = kind === "candle" ? (session.jump(id, "candle", symbol) as JumpResult) : session.playTo(id, r.target);
+        if (!next.ok) break;
+        const newBars: Record<string, Bar[]> = { ...r.newBars };
+        for (const [sym, bars] of Object.entries(next.newBars)) newBars[sym] = [...(newBars[sym] ?? []), ...bars];
+        r = { ...next, newBars };
+        if (kind === "candle" && next.stopped === null) break;
+      }
+      const { simulation: _s, ...rest } = session.snapshot(id);
+      broadcast(id, { type: "tick", simulationTime: r.simulationTime, newBars: r.newBars, ...rest });
+      if (r.stopped) {
+        if (r.stopped.rule === "end") broadcast(id, { type: "notice", text: "Das Szenario ist zu Ende. Das Ergebnis steht im Dialog." });
+        else if (r.stopped.rule === "data") broadcast(id, { type: "notice", text: r.stopped.reason });
+        else broadcast(id, { type: "paused", rule: r.stopped.rule, reason: r.stopped.reason });
+      }
+      broadcast(id, snapshotMessage(id));
+      return r;
+    },
+
     /** Stops the clock and closes the clients of a simulation that is being ended or deleted. */
     drop(id: number) {
       stopLoop(id);
@@ -213,6 +265,7 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
       clients.clear();
     },
   };
+  return hub;
 }
 
 export type Hub = ReturnType<typeof createHub>;

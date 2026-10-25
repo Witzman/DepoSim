@@ -1,5 +1,5 @@
 import type {
-  AllocationLine, ArchiveInfo, FlagReport, BackfillJob, BackupStatus, Coverage, DataStatus, GapReport, HintsResult, JobsOverview, SourceSummary, Bar, ClientMessage, CompareResult, CostPreview, Curves, Depot, DividendCalendar, Evaluation, Instrument, Journal, JournalNoteResult, MarketEvent,
+  AllocationLine, ArchiveInfo, AutoPause, FlagReport, BackfillJob, BackupStatus, Coverage, DataStatus, GapReport, HintsResult, JobsOverview, SourceSummary, Bar, ClientMessage, CompareResult, CostPreview, Curves, Depot, DividendCalendar, Evaluation, Instrument, Journal, JournalNoteResult, MarketEvent,
   Longterm, LongtermJob, MissingList, OrderInput, Orderbook, RunSummary, Scenario, ScenarioResult, SearchHit, ServerMessage, Simulation, Rules, VenueInfo,
 } from "./types.js";
 
@@ -62,6 +62,8 @@ export const getDividends = (id: number, depotId: number) =>
 export const getRuns = () => request<RunSummary[]>("/api/runs");
 export const getRun = (id: number) => request<RunSummary>(`/api/simulations/${id}/run`);
 export const getResult = (id: number) => request<ScenarioResult>(`/api/simulations/${id}/result`);
+export const setAutoPause = (id: number, autoPause: Partial<AutoPause>) =>
+  request<Simulation>(`/api/simulations/${id}`, json("PATCH", { autoPause }));
 export const deleteSimulation = (id: number) => request<void>(`/api/simulations/${id}`, { method: "DELETE" });
 export const endSimulation = (id: number) => request<Simulation>(`/api/simulations/${id}/end`, json("POST", {}));
 
@@ -137,7 +139,7 @@ export function socketUrl(id: number, loc: { protocol: string; host: string }): 
   return `${loc.protocol === "https:" ? "wss:" : "ws:"}//${loc.host}/ws/simulations/${id}`;
 }
 
-const KNOWN = new Set(["snapshot", "tick", "notice", "error"]);
+const KNOWN = new Set(["snapshot", "tick", "notice", "paused", "error"]);
 
 /** A message from the server, or null for anything that is not one. */
 export function parseServerMessage(raw: string): ServerMessage | null {

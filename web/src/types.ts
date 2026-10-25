@@ -1,7 +1,21 @@
 // What the server sends and accepts. Kept by hand next to server/src/session.ts and store.ts:
 // the web build must not reach into the server's source.
 
-export type Tempo = 1 | 5 | 30 | 60;
+export type Tempo = 1 | 5 | 30 | 60 | 120 | 300;
+
+export type JumpKind = "candle" | "hour" | "close" | "open" | "day";
+
+/** Rules that stop the clock by themselves; all off until the person switches them on. */
+export interface AutoPause {
+  onFill: boolean;
+  nearLimit: boolean;
+  nearLimitPct: number;
+  jump: boolean;
+  jumpPct: number;
+  jumpMinutes: number;
+  onOpen: boolean;
+  onEvent: boolean;
+}
 export type Venue = "XETRA" | "US";
 
 /** A market the app knows, from GET /api/venues. Only those with `hasSource` can be traded on. */
@@ -91,6 +105,7 @@ export interface Simulation {
   /** The scenario it plays, if any; the clock stops at `endAt`. */
   scenarioId: string | null;
   endAt: number | null;
+  autoPause: AutoPause;
 }
 
 export interface ScenarioGoal {
@@ -451,9 +466,12 @@ export type ServerMessage =
       phase: Snapshot["phase"];
     }
   | { type: "notice"; text: string }
+  | { type: "paused"; rule: string; reason: string }
   | { type: "error"; text: string };
 
-export type ClientMessage = { type: "run" } | { type: "pause" } | { type: "step" } | { type: "tempo"; tempo: Tempo };
+export type ClientMessage =
+  | { type: "run" } | { type: "pause" } | { type: "step" } | { type: "tempo"; tempo: Tempo }
+  | { type: "jump"; to: JumpKind; symbol?: string };
 
 /** GET /api/simulations/:id/journal?depotId= (default: the first normal depot; 400 for a ghost, 404 unknown). */
 export interface JournalTrade {

@@ -8,7 +8,7 @@ export type Entry =
   | { kind: "hit"; hit: SearchHit }
   | { kind: "command"; id: CommandId; label: string };
 
-export type CommandId = "backfill" | "ghost" | "journal" | "compare" | "orderbook" | "longterm" | "backup" | "data" | "glossary" | "guide";
+export type CommandId = "backfill" | "ghost" | "journal" | "compare" | "orderbook" | "longterm" | "backup" | "data" | "glossary" | "guide" | "next-candle" | "jump-hour" | "jump-close" | "jump-open" | "jump-day";
 
 /** The commands of Paket E; the palette gets the ids that make sense right now. */
 export const COMMANDS: { id: CommandId; label: string; words: string[] }[] = [
@@ -21,6 +21,11 @@ export const COMMANDS: { id: CommandId; label: string; words: string[] }[] = [
   { id: "data", label: "Datenzustand öffnen", words: ["daten", "datenzustand", "abdeckung", "lücken", "ampel", "quelle", "quellenstatus", "aufträge", "protokoll", "archiv", "größe"] },
   { id: "glossary", label: "Kennzahlen erklärt", words: ["kennzahlen", "glossar", "erklärt", "erklärung", "sharpe", "sortino", "calmar", "beta", "alpha", "volatilität", "drawdown", "rückgang", "value at risk", "trefferquote", "profitfaktor"] },
   { id: "guide", label: "Lernpfad starten", words: ["lernpfad", "erste schritte", "einstieg", "anleitung", "tutorial", "hilfe", "geführt"] },
+  { id: "next-candle", label: "Nächste Kerze", words: ["kerze", "schritt", "weiter", "zeit", "sprung"] },
+  { id: "jump-hour", label: "Eine Stunde weiter", words: ["stunde", "weiter", "zeit", "sprung"] },
+  { id: "jump-close", label: "Bis Handelsschluss", words: ["handelsschluss", "schluss", "börsenschluss", "zeit", "sprung"] },
+  { id: "jump-open", label: "Bis Eröffnung", words: ["eröffnung", "börsenstart", "zeit", "sprung"] },
+  { id: "jump-day", label: "Bis nächster Tag", words: ["tag", "nächster", "mitternacht", "zeit", "sprung"] },
   { id: "orderbook", label: "Orderbuch ein- oder ausklappen", words: ["orderbuch", "tiefe", "order", "handel"] },
 ];
 

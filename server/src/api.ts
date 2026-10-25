@@ -12,7 +12,8 @@ import { BLOCKING_KINDS } from "./domain/quality.js";
 import { MarketDataError } from "./data/marketdata.js";
 import type { InstrumentSearch } from "./data/search.js";
 import { DEFAULT_FEES } from "./domain/fees.js";
-import { applyRules, resolveRules } from "./domain/rules.js";
+import { JUMP_REFUSED, applyRules, resolveRules } from "./domain/rules.js";
+import { parseAutoPause } from "./domain/autopause.js";
 import { SCENARIOS, scenarioById } from "./domain/scenario.js";
 import { describeError } from "./errors.js";
 import type { Fx } from "./fx.js";
@@ -61,7 +62,14 @@ const orderBody = z.object({
   depotId: z.number().int().optional(),
 });
 
-const patchBody = z.object({ benchmark: z.string().min(1).nullable() });
+const autoPauseBody = z.object({
+  onFill: z.boolean(), nearLimit: z.boolean(), nearLimitPct: z.number().min(0.0005).max(0.1),
+  jump: z.boolean(), jumpPct: z.number().min(0.005).max(0.5), jumpMinutes: z.number().int().min(1).max(240),
+  onOpen: z.boolean(), onEvent: z.boolean(),
+}).partial();
+const patchBody = z.object({ benchmark: z.string().min(1).nullable().optional(), autoPause: autoPauseBody.optional() })
+  .refine((b) => b.benchmark !== undefined || b.autoPause !== undefined, { message: "benchmark oder autoPause" });
+const jumpBody = z.object({ to: z.enum(["candle", "hour", "close", "open", "day"]), symbol: z.string().max(20).optional() });
 const depotName = z.string().trim().min(1).max(40);
 const depotBody = z.object({ name: depotName.optional() });
 const renameBody = z.object({ name: depotName });
@@ -651,12 +659,24 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     const body = patchBody.safeParse(req.body);
     if (!body.success) return invalid(reply, body.error);
     const symbol = body.data.benchmark;
-    if (symbol !== null && !instruments.get(symbol)) {
+    if (symbol !== undefined && symbol !== null && !instruments.get(symbol)) {
       return reply.code(400).send({ error: `Unbekanntes Wertpapier ${symbol}.` });
     }
-    store.setBenchmark(sim.id, symbol);
+    if (body.data.autoPause && !sim.rules.pauseAllowed) return reply.code(409).send({ error: JUMP_REFUSED });
+    if (symbol !== undefined) store.setBenchmark(sim.id, symbol);
+    if (body.data.autoPause) store.setAutoPause(sim.id, parseAutoPause({ ...sim.autoPause, ...body.data.autoPause }));
     hub.broadcastSnapshot(sim.id);
     return store.getSimulation(sim.id);
+  });
+
+  app.post("/api/simulations/:id/jump", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    const body = jumpBody.safeParse(req.body);
+    if (!body.success) return invalid(reply, body.error);
+    const r = await hub.jump(sim.id, body.data.to, body.data.symbol);
+    if (!r.ok) return reply.code(409).send({ error: r.reason });
+    return { simulationTime: r.simulationTime, target: r.target, stopped: r.stopped };
   });
 
   app.post("/api/simulations/:id/depots", async (req, reply) => {

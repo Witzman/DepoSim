@@ -199,6 +199,8 @@ export function openDb(path: string): Db {
   if (!columns.some((c) => c.name === "benchmark")) db.exec("alter table simulations add column benchmark text");
   // Resolution (#54): an older simulation plays minute bars.
   if (!columns.some((c) => c.name === "resolution")) db.exec("alter table simulations add column resolution text not null default 'minute'");
+  // Auto-pause rules (#30): an older simulation has none switched on.
+  if (!columns.some((c) => c.name === "auto_pause")) db.exec("alter table simulations add column auto_pause text");
   // Scenarios (#28): a free simulation has neither.
   if (!columns.some((c) => c.name === "scenario_id")) db.exec("alter table simulations add column scenario_id text");
   if (!columns.some((c) => c.name === "end_at")) db.exec("alter table simulations add column end_at integer");

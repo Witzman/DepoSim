@@ -62,3 +62,4 @@ export function applyRules(fees: FeeConfig, rules: Rules): FeeConfig {
 export const PAUSE_REFUSED = "In dieser Simulation gibt es keine Pause: Die Uhr läuft weiter.";
 export const TEMPO_REFUSED = "In dieser Simulation ist das Tempo festgelegt.";
 export const CLOCK_STOPPED_REFUSED = "In dieser Simulation handelst du nur bei laufender Uhr.";
+export const JUMP_REFUSED = "In dieser Simulation gibt es keine Sprünge und keine Auto-Pause: Die Uhr hält nie an.";
