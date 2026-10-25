@@ -1,7 +1,7 @@
 import { tabKeys } from "./tabKeys.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  type Socket, addDepot, addGhost, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, setAutoPause, getBackupStatus, getBars, getDataStatus, getMarketEvents, getRun, getWatchlist, listSimulations,
+  type Socket, addDepot, addGhost, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, setAutoPause, getBackupStatus, getBars, getDataStatus, getRun, getWatchlist, listSimulations,
   openSocket, removeDepot, setBenchmark, removeInstrument, renameDepot,
 } from "./api.js";
 import { AllocationDialog } from "./components/AllocationDialog.js";
@@ -20,7 +20,6 @@ import { OrderbookPanel } from "./components/Orderbook.js";
 import { Chart, type Fill } from "./components/Chart.js";
 import { CHART_PREFS_KEY, RAW_LIMIT, defaultChartPrefs, parseChartPrefs, type ChartPrefs } from "./bars.js";
 import { DataView } from "./components/DataView.js";
-import { lightLine } from "./data.js";
 import { Collapsible } from "./components/Collapsible.js";
 import { ClockBar } from "./components/ClockBar.js";
 import { Curves } from "./components/Curves.js";
@@ -32,7 +31,6 @@ import { OrderTicket } from "./components/OrderTicket.js";
 import { OrdersPanel } from "./components/OrdersPanel.js";
 import { MobileBar } from "./components/MobileBar.js";
 import { BackupDialog } from "./components/BackupDialog.js";
-import { backupLine } from "./backup.js";
 import { Palette } from "./components/Palette.js";
 import { Glossary } from "./components/Glossary.js";
 import { Guide } from "./components/Guide.js";
@@ -42,6 +40,8 @@ import { Hints } from "./components/Hints.js";
 import { applyMotion, feedback, feedbackPrefs } from "./feedback.js";
 import { ShortcutHelp } from "./components/ShortcutHelp.js";
 import { SimulationPicker } from "./components/SimulationPicker.js";
+import { TopBar } from "./components/TopBar.js";
+import { useMarketEvents, useOrderSignals } from "./appHooks.js";
 import { Watchlist } from "./components/Watchlist.js";
 import { formatPrice } from "./format.js";
 import { pickInitial } from "./select.js";
@@ -49,7 +49,7 @@ import { canGhost, pickDepot } from "./view.js";
 import type { CommandId } from "./palette.js";
 import { useNarrow } from "./useNarrow.js";
 import { useTheme } from "./theme.js";
-import type { BackupStatus, Bar, DataStatus, Instrument, JumpKind, MarketEvent, RunSummary, ServerMessage, Simulation, Snapshot, Tempo } from "./types.js";
+import type { BackupStatus, Bar, DataStatus, Instrument, JumpKind, RunSummary, ServerMessage, Simulation, Snapshot, Tempo } from "./types.js";
 
 const SELECTED_KEY = "deposim-selected";
 
@@ -415,48 +415,14 @@ export function App() {
   const fillKey = fillList.map((f) => `${f.t}:${f.side}:${f.price}:${f.qty}`).join("|");
   const fills = useMemo<Fill[]>(() => fillList, [fillKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // Dividends, splits and gaps of the shown symbol and of what the depot holds. Fetched when the day turns; nothing is newer than the clock.
-  const [marketEvents, setMarketEvents] = useState<MarketEvent[]>([]);
   const heldKey = depot ? depot.positions.map((p) => p.symbol).sort().join(",") : "";
-  const eventDay = live ? Math.floor(live.simulationTime / 86400) : 0;
-  const seenEvents = useRef<{ sim: number; keys: Set<string> } | null>(null);
-  useEffect(() => {
-    if (!live || !symbol) { setMarketEvents([]); return; }
-    const symbols = [...new Set([symbol, ...(heldKey ? heldKey.split(",") : [])])];
-    let alive = true;
-    getMarketEvents(live.id, symbols).then((list) => {
-      if (!alive) return;
-      setMarketEvents(list);
-      const before = seenEvents.current;
-      const keys = new Set(list.map((e) => e.key));
-      seenEvents.current = { sim: live.id, keys };
-      if (!before || before.sim !== live.id) return; // the first look at a simulation only remembers
-      const fresh = list.filter((e) => !before.keys.has(e.key));
-      if (fresh.length === 0) return;
-      setNotice(fresh.length === 1 ? fresh[0].text : `${fresh.length} neue Ereignisse: ${fresh.map((e) => e.text).join(" · ")}`);
-      feedback("event");
-    }).catch(() => {});
-    return () => { alive = false; };
-  }, [live?.id, symbol, heldKey, eventDay]); // eslint-disable-line react-hooks/exhaustive-deps
+  const marketEvents = useMarketEvents(live?.id ?? null, symbol, heldKey, live ? Math.floor(live.simulationTime / 86400) : 0, setNotice);
   const symbolEvents = useMemo(() => marketEvents.filter((e) => e.symbol === symbol), [marketEvents, symbol]);
   // The signals follow what the server did with the orders: an order that fills, a limit that is reached, one that is refused.
-  const seenOrders = useRef<{ key: string; status: Map<number, string> } | null>(null);
   useEffect(() => {
     applyMotion(feedbackPrefs());
   }, []);
-  useEffect(() => {
-    if (!depot || !live) return;
-    const key = `${live.id}:${depot.id}`;
-    const now = new Map(depot.orders.map((o) => [o.id, o.status] as [number, string]));
-    const before = seenOrders.current;
-    seenOrders.current = { key, status: now };
-    if (!before || before.key !== key) return; // the first look at a depot only remembers
-    for (const o of depot.orders) {
-      const was = before.status.get(o.id);
-      if (was === o.status || (was === undefined && o.status === "open")) continue;
-      if (o.status === "filled") feedback(o.kind === "limit" && was === "open" ? "limit" : o.side);
-      else if (o.status === "rejected") feedback("rejected");
-    }
-  }, [depot?.orders]); // eslint-disable-line react-hooks/exhaustive-deps
+  useOrderSignals(live?.id ?? null, depot);
   useEffect(() => { if (view === "evaluation") markSeen("evaluation"); }, [view]);
   const locked = live === null || live.endedAt !== null || snapshot === null;
   const scenarioResult = useScenarioResult(live?.id ?? 0, !!live?.scenarioId, snapshot?.running ?? false, live?.endedAt != null);
@@ -481,50 +447,12 @@ export function App() {
 
   return (
     <div className={`app${narrow && live ? " with-bar" : ""}`}>
-      <header className="topbar">
-        <h1 className="brand">
-          <svg viewBox="0 0 32 32" aria-hidden="true">
-            <rect width="32" height="32" rx="7" fill="var(--accent)" />
-            <path d="M6 22 L12 15 L17 19 L22 11 L26 9" fill="none" stroke="var(--accent-text)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          DepoSim
-        </h1>
-        {live && (
-          <span className={`pill${snapshot?.running ? " on" : ""}`} data-testid="top-status">
-            <span className="dot" aria-hidden="true" />
-            {live.endedAt !== null ? "beendet" : snapshot?.running ? "läuft" : "angehalten"}
-          </span>
-        )}
-        <span className="spacer" />
-        {dataState && (() => {
-          const line = lightLine(dataState);
-          return (
-            <button className={`btn small light-btn ${dataState.level}`} data-testid="data-status" data-level={dataState.level}
-              onClick={() => setView("data")} title={line.title} aria-label={`${line.text}. Datenzustand öffnen`}>
-              <span className={`light ${dataState.level}`} aria-hidden="true" />{narrow ? "" : line.text}
-            </button>
-          );
-        })()}
-        {backupState && (() => {
-          // On a phone the bar has no room: the line shows only when something is wrong; the palette opens the dialog.
-          const line = backupLine(backupState, Date.now() / 1000);
-          if (narrow && !line.bad) return null;
-          return (
-            <button className={`btn small${line.bad ? " error" : ""}`} data-testid="backup-status" onClick={() => setBackupOpen(true)}
-              title={line.text}>{narrow ? (line.bad ? "Sicherung !" : "Sicherung") : line.text}</button>
-          );
-        })()}
-        {live && depot && (
-          <button className="btn small" data-testid="hints-open" onClick={() => setHintsOpen(true)}
-            aria-label={`Hinweise: ${hintCount}`} title="Hinweise und Einstellungen">Hinweise{hintCount > 0 && <span className="badge warn" data-testid="hints-count">{hintCount}</span>}</button>
-        )}
-        <button className="btn small" data-testid="feedback-open" onClick={() => setFeedbackOpen(true)} aria-label="Rückmeldung einstellen" title="Ton, Vibration, Bewegung">Ton</button>
-        <button className="btn small" data-testid="palette-open" onClick={() => setPaletteOpen(true)}
-          aria-label="Suche und Befehle öffnen (Strg+K)" title="Strg+K">Suche</button>
-        <button className="btn small" data-testid="theme-toggle" onClick={toggle} aria-label="Hell oder Dunkel umschalten">
-          {theme === "dark" ? "Hell" : "Dunkel"}
-        </button>
-      </header>
+      <TopBar
+        theme={theme} onToggleTheme={toggle} live={live} running={snapshot?.running ?? false} narrow={narrow} dataState={dataState}
+        backupState={backupState} hasDepot={depot !== undefined} hintCount={hintCount}
+        onData={() => setView("data")} onBackup={() => setBackupOpen(true)} onHints={() => setHintsOpen(true)}
+        onFeedback={() => setFeedbackOpen(true)} onPalette={() => setPaletteOpen(true)}
+      />
 
       <div className="layout">
         <div className="stack side">

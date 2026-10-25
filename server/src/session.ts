@@ -7,31 +7,37 @@ import {
   CATCH_UP_LAG_S, type JumpKind, LIVE_EDGE_S, LIVE_MARGIN_S, OPEN_WINDOW_S, TIME_LAPSE, type Tempo, advanceCarry, effectiveTempo, liveLimit, nextStop, skipClosed,
 } from "./domain/clock.js";
 import { type AllocationLine, planAllocation } from "./domain/allocation.js";
-import { type Breakdown, type FeeLedger, breakdown, feeLedger } from "./domain/breakdown.js";
-import { type Correlation, type Metrics, type Point, type Relative, computeMetrics, correlationMatrix, relativeTo, thin } from "./domain/metrics.js";
+import { type FeeLedger, breakdown, feeLedger } from "./domain/breakdown.js";
+import { type Metrics, type Point, computeMetrics, correlationMatrix, relativeTo, thin } from "./domain/metrics.js";
 import { BLOCKING_KINDS } from "./domain/quality.js";
 import { CLOCK_STOPPED_REFUSED, JUMP_REFUSED } from "./domain/rules.js";
 import { closedDayReason } from "./domain/venues.js";
-import { type Diversification, type HeldSeries, diversify } from "./domain/diversification.js";
-import { HINT_ORDER, HINT_RULES, type Hint, type HintRule, type RuleConfig, defaultConfig, evaluateHints, orderNotes } from "./domain/hints.js";
-import { type GoalOutcome, evaluateGoals, scenarioById } from "./domain/scenario.js";
-import { GRADE_FORMULA, type Grade, gradeRun } from "./domain/grade.js";
+import { type HeldSeries, diversify } from "./domain/diversification.js";
+import { HINT_ORDER, HINT_RULES, type HintRule, type RuleConfig, defaultConfig, evaluateHints, orderNotes } from "./domain/hints.js";
+import { evaluateGoals, scenarioById } from "./domain/scenario.js";
+import { GRADE_FORMULA, gradeRun } from "./domain/grade.js";
 import { type Calendar, buildCalendar } from "./domain/dividendCalendar.js";
 import { type AutoPauseRule, type Signals, distanceToLimit, jumpOf, noSignals, pauseReason } from "./domain/autopause.js";
 import { type MarketEvent, marketEvents } from "./domain/marketEvents.js";
-import { type Analysis, type BetaPoint, BETA_WINDOW, analyze, rollingBeta } from "./domain/rolling.js";
+import { BETA_WINDOW, analyze, rollingBeta } from "./domain/rolling.js";
 import { type Orderbook, buildOrderbook } from "./domain/orderbook.js";
 import { type Behavior, analyzeBehavior } from "./domain/behavior.js";
-import { type TaxEvent, type TaxTimeline, type YearTax, holdTax, taxAt, taxTimeline } from "./domain/tax.js";
-import { type FundType, FUND_TYPES, TAX_RULES, allowanceFor, effectiveRate } from "./domain/taxrules.js";
-import { type Excursion, type ExcursionBars, type ExcursionSummary, openExcursion, summarize, tradeExcursion } from "./domain/excursions.js";
+import { type Excursion, type ExcursionBars, openExcursion, summarize, tradeExcursion } from "./domain/excursions.js";
 import { type BookedSplit, type Journal, type JournalOrder, type JournalTrade, type OpenLot, adjustForSplits, buildJournalCore } from "./domain/journal.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
 import type { Cent } from "./domain/money.js";
+import { buildTaxReport } from "./taxReport.js";
 import { applySplit, dividendCredit, showsSplit, splitOrder } from "./domain/events.js";
 import type { Events } from "./events.js";
 import type { DailyArchive } from "./data/dailyarchive.js";
-import type { Booking, Depot, DepotKind, OrderRecord, Simulation, Store } from "./store.js";
+import type { Booking, Depot, OrderRecord, Simulation, Store } from "./store.js";
+
+export * from "./sessionTypes.js";
+import { COMPARE_POINTS } from "./sessionTypes.js";
+import type {
+  Comparison, Curves, DepotSnapshot, Evaluation, Excursions, HintsResult, JumpResult, OpenExcursion, PlaceResult, PreviewResult,
+  RollingResult, RunSummary, ScenarioResult, SessionDeps, Snapshot, TaxReport, TickResult,
+} from "./sessionTypes.js";
 
 const DAY = 86400;
 /** Prices for the simulation skip bars marked as outliers (#50). */
@@ -44,232 +50,13 @@ const isoDay = (t: number) => new Date(t * 1000).toISOString().slice(0, 10);
 /** Daily bars stepped through at once by one tick; more than this in a tick is held back so a pause answers quickly. */
 const MAX_DAY_STEPS = 40;
 
-export interface SessionDeps {
-  store: Store;
-  archive: Archive;
-  instruments: InstrumentRegistry;
-  /** The exchange-rate series. It is read for prices but is not an instrument. */
-  fxSymbol: string;
-  /** Current time in UTC seconds. */
-  now?: () => number;
-  /** How far behind the present the price source is. */
-  delayS?: number;
-  /** The tempo a live simulation catches up at. */
-  catchUpTempo?: number;
-  /** Dividends and splits. Without it nothing is booked. */
-  events?: Events;
-  /** Daily prices, for simulations that play one day per step. Without it a daily simulation cannot start. */
-  daily?: DailyArchive;
-  /** Units of a currency per EUR on a UTC day ("USD"), for daily simulations. */
-  fxRate?: (ccy: string, day: string) => number | undefined;
-}
-
-export interface TickResult {
-  simulationTime: number;
-  /** Bars that finished during this tick, per instrument. The exchange rate is left out. */
-  newBars: Record<string, Bar[]>;
-  /** No later bar is in the archive. The caller may try `loadMore`. */
-  endOfData: boolean;
-  /** The clock was held back at the newest known bar, and the present is further on. */
-  waitingForData: boolean;
-  /** The newest known bar is close to the live limit, so the market is running now. */
-  liveEdge: boolean;
-  /** What the tick did that an auto-pause rule may care about; absent for a tick that was not asked for them. */
-  signals?: Signals;
-}
-
-export interface RollingResult {
-  simulationTime: number;
-  depot: Analysis;
-  /** Absent without a benchmark: then only the depot is shown. */
-  benchmark: (Analysis & { symbol: string; name: string }) | null;
-  beta: { window: number; points: BetaPoint[] };
-}
-
-export interface JumpResult {
-  ok: true;
-  simulationTime: number;
-  /** All bars that finished during the jump, per instrument. */
-  newBars: Record<string, Bar[]>;
-  /** Why the jump ended before its target, or null when it arrived. */
-  stopped: { rule: AutoPauseRule | "fill" | "data" | "end"; reason: string } | null;
-  target: number;
-}
-
-export interface PositionView {
-  symbol: string;
-  qty: number;
-  cost: Cent;
-  value: Cent;
-}
-
-export interface DepotSnapshot {
-  id: number;
-  name: string;
-  kind: DepotKind;
-  cash: Cent;
-  value: Cent;
-  positions: PositionView[];
-  orders: OrderRecord[];
-}
-
-export interface Snapshot {
-  simulation: Simulation;
-  running: boolean;
-  /** Every depot of the simulation, in the order they were made. */
-  depots: DepotSnapshot[];
-  prices: Record<string, { price: number; barT: number }>;
-  fx: number | null;
-  venues: Record<Venue, boolean>;
-  /** Per market: "Feiertag: Karfreitag" when the calendar shuts the whole simulated day. Absent otherwise. */
-  venueClosed: Partial<Record<Venue, string>>;
-  /** The latest simulation time that may be shown: now minus the delay. */
-  liveLimit: number;
-  delayS: number;
-  /** Replay, catching up to the present, or at the present. */
-  phase: "replay" | "catchup" | "live";
-}
-
-export interface BenchmarkCurve {
-  symbol: string;
-  name: string;
-  currency: Instrument["currency"];
-  /** The instrument's price in its own currency at the times of the first depot's curve. */
-  points: Point[];
-}
-
-export interface TaxReport {
-  settings: Simulation["tax"];
-  enabled: boolean;
-  rules: { asOf: string; rate: number; church: number[]; allowance: number; allowanceIsDefault: boolean; sources: string[] };
-  vorabpauschale: { computed: false; reason: string };
-  funds: { symbol: string; name: string; type: FundType; isDefault: boolean }[];
-  /** Null while the view is off. */
-  report: {
-    years: YearTax[];
-    total: Cent;
-    curve: { t: number; gross: Cent; net: Cent }[];
-    gross: Pick<Metrics, "totalReturn" | "volatility" | "sharpe" | "maxDrawdown" | "basis">;
-    net: Pick<Metrics, "totalReturn" | "volatility" | "sharpe" | "maxDrawdown" | "basis">;
-    friction: { fees: Cent; tax: Cent; before: Cent; share: number | null };
-    hold: { tax: Cent; difference: Cent; gain: Cent };
-  } | null;
-}
-
-export type OpenExcursion = Excursion & { symbol: string; qty: number; openedSim: number };
-
-/** The after-the-fact figures of the journal: per closed trade by key, per open lot, and over all. */
-export interface Excursions {
-  benchmark: string | null;
-  trades: Record<string, Excursion>;
-  open: OpenExcursion[];
-  summary: ExcursionSummary;
-}
-
-export interface Curves {
-  depots: { id: number; name: string; kind: DepotKind; points: Point[] }[];
-  benchmark: BenchmarkCurve | null;
-}
-
-export interface Evaluation {
-  depots: { id: number; name: string; kind: DepotKind; startedAt: number; metrics: Metrics; vsBenchmark: Relative | null; fees: FeeLedger; breakdown: Breakdown; diversification: Diversification | null }[];
-  correlation: Correlation;
-  benchmark: { symbol: string; name: string; metrics: Metrics } | null;
-  note: string;
-}
-
 const EVALUATION_POINTS = 5000;
 const EVALUATION_NOTE =
   "Volatilität, Sharpe-Ratio und Korrelation sind aus der Kurve geschätzt, ohne risikofreien Zins. " +
   "Spread und Devisenaufschlag stecken im Ausführungspreis und fehlen in der Gebührenbilanz. " +
   "Der Maßstab ist der Kurs in seiner eigenen Währung, ohne Wechselkurs.";
-
 const GHOST_NO_TRADE = "Ein Geisterdepot handelt nicht.";
-
-/** One simulation in a comparison: curves in percent from their own start, on their own time axis. */
-export interface Comparison {
-  id: number;
-  name: string;
-  startAt: number;
-  simulationTime: number;
-  depots: {
-    id: number;
-    name: string;
-    kind: DepotKind;
-    startedAt: number;
-    /** Percent change from the first point of the depot's curve. */
-    points: { t: number; pct: number }[];
-    figures: {
-      /** Percent; null with fewer than two points. */
-      returnPct: number | null;
-      /** The deepest fall from a peak in percent (0 or negative); null with fewer than two points. */
-      maxDrawdownPct: number | null;
-      /** Commission and foreign fee booked, in cents. */
-      fees: Cent;
-      /** Filled orders. */
-      trades: number;
-    };
-  }[];
-}
-
-export const COMPARE_POINTS = 400;
-
-export interface ScenarioResult extends GoalOutcome {
-  scenarioId: string;
-  title: string;
-  finished: boolean;
-  simulationTime: number;
-  endAt: number | null;
-  depotId: number;
-}
-
-/** A round in the round book: the figures of the first normal depot, with the grade and a thinned curve for the card. */
-export interface RunSummary {
-  id: number;
-  name: string;
-  startAt: number;
-  simulationTime: number;
-  endedAt: number | null;
-  /** The round is over; before that these are figures of the moment and are worked out afresh each time. */
-  finished: boolean;
-  preset: Simulation["rules"]["preset"];
-  resolution: Simulation["resolution"];
-  scenarioId: string | null;
-  scenarioTitle: string | null;
-  startCash: Cent;
-  finalValue: Cent;
-  totalReturn: number | null;
-  benchmarkSymbol: string | null;
-  benchmarkReturn: number | null;
-  maxDrawdown: number | null;
-  fees: Cent;
-  feeShare: number;
-  trades: number;
-  hitRate: number | null;
-  closedTrades: number;
-  grade: Grade;
-  /** How the grade comes about, in words; the one source of the text the card shows. */
-  gradeFormula: string;
-  /** Stars and goals of a scenario round. */
-  scenario: ScenarioResult | null;
-  curve: { depot: Point[]; benchmark: Point[] | null };
-}
-
 const RUN_CURVE_POINTS = 120;
-
-export interface HintsResult {
-  depotId: number;
-  simulationTime: number;
-  hints: Hint[];
-  /** Hints that apply but were hidden by the person. */
-  hiddenCount: number;
-  rules: { rule: HintRule; label: string; unit: string; defaults: number[]; enabled: boolean; levels: number[]; hidden: boolean }[];
-}
-
-export type PlaceResult = { ok: true; orderId: number } | { ok: false; reason: string };
-
-/** `problem` is why the order would be rejected; the cost is shown anyway. */
-export type PreviewResult = { ok: true; cost: CostPreview; problem?: string; notes?: string[] } | { ok: false; reason: string };
 
 export class SessionService {
   private readonly store: Store;
@@ -780,13 +567,12 @@ export class SessionService {
     const sim = this.sim(id);
     const scenario = sim.scenarioId ? scenarioById(sim.scenarioId) : undefined;
     if (!scenario) return undefined;
-    const ev = this.evaluation(id);
     const depot = this.firstNormal(id);
-    const row = ev.depots.find((d) => d.id === depot.id) ?? ev.depots[0];
+    const row = this.depotFigures(sim, depot.id);
     const finalValue = depotValue(this.store.loadDepot(depot.id), this.refsAt(sim.simulationTime, sim.resolution === "day"));
     const outcome = evaluateGoals(scenario, {
       startCash: sim.startCash, finalValue, maxDrawdown: row.metrics.maxDrawdown, depotReturn: row.metrics.totalReturn,
-      benchmarkReturn: ev.benchmark?.metrics.totalReturn ?? null, fees: row.fees.total,
+      benchmarkReturn: this.benchmarkReturn(sim), fees: row.fees.total,
     });
     return { scenarioId: scenario.id, title: scenario.title, finished: sim.endedAt !== null, simulationTime: sim.simulationTime, endAt: sim.endAt, depotId: depot.id, ...outcome };
   }
@@ -1048,14 +834,13 @@ export class SessionService {
     const sim = this.sim(id);
     const cached = this.runCache.get(id);
     if (cached && sim.endedAt !== null && cached.endedAt === sim.endedAt) return cached;
-    const ev = this.evaluation(id);
     const depot = this.firstNormal(id);
-    const row = ev.depots.find((d) => d.id === depot.id) ?? ev.depots[0];
+    const row = this.depotFigures(sim, depot.id);
     const state = this.store.loadDepot(depot.id);
     const finalValue = depotValue(state, this.refsAt(sim.simulationTime, sim.resolution === "day"));
     const journal = this.journal(id, depot.id);
     const filledOrders = state.orders.filter((o) => o.status === "filled").length;
-    const benchmarkReturn = ev.benchmark?.metrics.totalReturn ?? null;
+    const benchmarkReturn = this.benchmarkReturn(sim);
     const grade = gradeRun({
       totalReturn: row.metrics.totalReturn, benchmarkReturn, maxDrawdown: row.metrics.maxDrawdown, feeShare: row.fees.shareOfStart,
       hitRate: journal.hitRate.rate, closedTrades: journal.hitRate.n, filledOrders, days: (sim.simulationTime - sim.startAt) / DAY,
@@ -1065,7 +850,7 @@ export class SessionService {
     const out: RunSummary = {
       id, name: sim.name, startAt: sim.startAt, simulationTime: sim.simulationTime, endedAt: sim.endedAt, finished: sim.endedAt !== null,
       preset: sim.rules.preset, resolution: sim.resolution, scenarioId: sim.scenarioId, scenarioTitle: scenario?.title ?? null,
-      startCash: sim.startCash, finalValue, totalReturn: row.metrics.totalReturn, benchmarkSymbol: ev.benchmark?.symbol ?? null,
+      startCash: sim.startCash, finalValue, totalReturn: row.metrics.totalReturn, benchmarkSymbol: bench ? sim.benchmark : null,
       benchmarkReturn, maxDrawdown: row.metrics.maxDrawdown, fees: row.fees.total, feeShare: row.fees.shareOfStart,
       trades: filledOrders, hitRate: journal.hitRate.rate, closedTrades: journal.hitRate.n, grade, gradeFormula: GRADE_FORMULA, scenario,
       curve: { depot: thin(this.store.valueCurve(depot.id, EVALUATION_POINTS), RUN_CURVE_POINTS), benchmark: bench },
@@ -1080,6 +865,24 @@ export class SessionService {
       .filter((s) => s.endedAt !== null)
       .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0) || b.id - a.id)
       .map((s) => this.runSummary(s.id));
+  }
+
+  /**
+   * Only the figures a round book entry and the goals of a scenario need: the metrics and the fees of one depot. The whole
+   * `evaluation()` (distribution, correlation, price series of every held title) is far more than that, and the goals panel asks
+   * every few seconds.
+   */
+  private depotFigures(sim: Simulation, depotId: number): { metrics: Metrics; fees: FeeLedger } {
+    return {
+      metrics: computeMetrics(this.store.valueCurve(depotId, EVALUATION_POINTS)),
+      fees: feeLedger(this.store.loadDepot(depotId).orders, sim.startCash),
+    };
+  }
+
+  /** The total return of the benchmark over the same time, or null without one. */
+  private benchmarkReturn(sim: Simulation): number | null {
+    const series = this.benchmarkSeries(sim, EVALUATION_POINTS);
+    return series ? computeMetrics(series).totalReturn : null;
   }
 
   /** The benchmark's closing prices from the start to now, in the points of the simulation's own resolution. */
@@ -1160,62 +963,14 @@ export class SessionService {
    */
   tax(id: number, depotId: number): TaxReport {
     const sim = this.sim(id);
-    const settings = sim.tax;
-    const rules = {
-      asOf: TAX_RULES.asOf, rate: effectiveRate(settings.church), church: [...TAX_RULES.church],
-      allowance: settings.allowance ?? allowanceFor(new Date(sim.simulationTime * 1000).getUTCFullYear()),
-      allowanceIsDefault: settings.allowance === null, sources: [...TAX_RULES.sources],
-    };
-    const vorab = {
-      computed: false as const,
-      reason: "Die Vorabpauschale für thesaurierende Fonds wird nicht berechnet: das Simulationsdepot weiß nicht, ob ein Fonds thesauriert, und Yahoo liefert es nicht.",
-    };
-    if (!settings.enabled) return { settings, enabled: false, rules, vorabpauschale: vorab, funds: [], report: null };
-
+    if (!sim.tax.enabled) return buildTaxReport({ sim, trades: [], open: [], bookings: [], instrument: () => undefined, gross: [], feesTotal: 0 });
     const journal = this.bookedTrades(id, depotId);
-    const fundOf = (symbol: string): FundType | null =>
-      this.registry.get(symbol)?.kind === "ETF" ? (settings.fundTypes[symbol] ?? "equityFund") : null;
-    const exempt = (fund: FundType | null) => (fund === null ? 0 : TAX_RULES.partialExemption[fund]);
-    const events: TaxEvent[] = [];
-    for (const t of journal.trades) {
-      const fund = fundOf(t.symbol);
-      events.push({ t: t.closedSim, pot: fund === null ? "stock" : "other", amount: t.netPnl, exempt: exempt(fund) });
-    }
-    for (const b of journal.bookings) {
-      if (b.kind !== "dividend" || b.amount === 0) continue;
-      events.push({ t: b.t, pot: "other", amount: b.amount, exempt: exempt(fundOf(b.symbol)) });
-    }
-    const timeline: TaxTimeline = taxTimeline(events, settings);
-
-    const gross = this.store.valueCurve(depotId, EVALUATION_POINTS);
-    const net = gross.map((p) => ({ t: p.t, value: p.value - taxAt(timeline, p.t) }));
-    const first = gross[0];
-    const last = gross[gross.length - 1];
-    const fees = feeLedger(this.store.loadDepot(depotId).orders, sim.startCash).total;
-    const result = first && last ? last.value - first.value : 0;
-    const before = result + fees + timeline.total;
-    const m = (points: { t: number; value: number }[]) => {
-      const x = computeMetrics(points);
-      return { totalReturn: x.totalReturn, volatility: x.volatility, sharpe: x.sharpe, maxDrawdown: x.maxDrawdown, basis: x.basis };
-    };
-    const step = Math.max(1, Math.ceil(gross.length / 300));
-    const symbols = new Set([...journal.trades.map((t) => t.symbol), ...journal.open.map((o) => o.symbol), ...journal.bookings.map((b) => b.symbol)]);
-    const funds = [...symbols].flatMap((symbol) => {
-      const inst = this.registry.get(symbol);
-      return inst?.kind === "ETF" ? [{ symbol, name: inst.name, type: settings.fundTypes[symbol] ?? ("equityFund" as FundType), isDefault: settings.fundTypes[symbol] === undefined }] : [];
+    return buildTaxReport({
+      sim, trades: journal.trades, open: journal.open, bookings: journal.bookings,
+      instrument: (symbol) => this.registry.get(symbol),
+      gross: this.store.valueCurve(depotId, EVALUATION_POINTS),
+      feesTotal: feeLedger(this.store.loadDepot(depotId).orders, sim.startCash).total,
     });
-    const holdYear = new Date((last?.t ?? sim.simulationTime) * 1000).getUTCFullYear();
-    const hold = holdTax(Math.max(0, result), holdYear, settings);
-    return {
-      settings, enabled: true, rules, vorabpauschale: vorab, funds,
-      report: {
-        years: timeline.years, total: timeline.total,
-        curve: gross.filter((_, i) => i % step === 0 || i === gross.length - 1).map((p) => ({ t: p.t, gross: p.value, net: p.value - taxAt(timeline, p.t) })),
-        gross: m(gross), net: m(net),
-        friction: { fees, tax: timeline.total, before, share: before > 0 ? (fees + timeline.total) / before : null },
-        hold: { tax: hold, difference: timeline.total - hold, gain: Math.max(0, result) },
-      },
-    };
   }
 
   /**
