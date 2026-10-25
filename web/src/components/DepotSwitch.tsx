@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { tabKeys } from "../tabKeys.js";
 import { canGhost } from "../view.js";
 import type { DepotView } from "../types.js";
 
@@ -36,9 +37,9 @@ export function DepotSwitch({ depots, activeId, disabled, onSelect, onAdd, onRen
 
   return (
     <section className="card" aria-label="Depots">
-      <div className="depot-tabs" role="tablist" aria-label="Depots">
+      <div className="depot-tabs" role="tablist" aria-label="Depots" onKeyDown={tabKeys}>
         {depots.map((d) => (
-          <button key={d.id} role="tab" className="btn" aria-selected={d.id === active.id}
+          <button key={d.id} role="tab" className="btn" aria-selected={d.id === active.id} tabIndex={d.id === active.id ? 0 : -1}
             onClick={() => onSelect(d.id)}>{d.kind === "ghost" && <span aria-hidden="true">◌ </span>}{d.name}{d.kind === "ghost" && <span className="badge ghost">Geist</span>}</button>
         ))}
         <button className="btn small" disabled={disabled || depots.length >= MAX_DEPOTS} onClick={onAdd}>+ Depot</button>

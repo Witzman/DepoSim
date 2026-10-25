@@ -149,6 +149,16 @@ describe("time of day", () => {
   });
 });
 
+describe("time of day by venue", () => {
+  it("reads the hour in the zone of the venue the symbol trades on", () => {
+    const us = many(10, (i) => ({ ...trade(i, 1), symbol: "AAPL", openedSim: D0 + 14 * H + 30 * 60 })); // 14:30 UTC = 10:30 in New York (EDT)
+    const de = many(10, (i) => ({ ...trade(20 + i, 1), symbol: "SAP.DE", openedSim: D0 + 10 * H })); // 10:00 UTC = 12:00 in Berlin (CEST)
+    const zoneOf = (symbol: string) => (symbol === "AAPL" ? "America/New_York" : "Europe/Berlin");
+    const r = analyzeBehavior({ ...base, bars: access({}), trades: [...us, ...de], zoneOf }).timeOfDay;
+    expect(r.hours.map((h) => [h.hour, h.n])).toEqual([[10, 10], [12, 10]]);
+  });
+});
+
 describe("buildJournalCore contexts", () => {
   it("hands out per sale the closed pieces and the lots still open, all in own prices", () => {
     nextId = 1;

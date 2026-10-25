@@ -48,9 +48,12 @@ export function buildOrderbook(input: {
   /** The last finished bar at the simulation time. */
   bar: Bar | undefined;
   venueOpen: boolean;
+  /** A daily simulation: day candles show no depth. */
+  daily?: boolean;
 }): Orderbook {
   const { symbol, currency, bar, venueOpen } = input;
   const none = (reason: string): Orderbook => ({ available: false, simulated: true, label: LABEL, symbol, reason });
+  if (input.daily) return none("Im Tageskurs-Modus gibt es kein Orderbuch: Tageskerzen zeigen keine Tiefe.");
   if (!bar) return none("Für dieses Wertpapier gibt es noch keine Kerze.");
   if (!venueOpen) return none("Der Handelsplatz ist geschlossen, es gibt kein Orderbuch.");
   if (!(bar.v > 0)) return none("Die letzte Kerze hat kein Volumen, es gibt kein Orderbuch.");

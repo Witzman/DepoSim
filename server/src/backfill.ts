@@ -204,6 +204,7 @@ export function createBackfill(deps: {
         try {
           if (hooks.gapMs && items.some((i) => i.status !== "out_of_range")) await new Promise((r) => setTimeout(r, hooks.gapMs));
           const bars = await archive.fetchDay(m.symbol, m.dayStart);
+          if (bars > 0) session.dataChanged();
           add(bars > 0 ? "loaded" : "empty", { bars });
         } catch (err) {
           if (err instanceof MarketDataError && err.kind === "rate_limited") limited = true;

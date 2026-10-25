@@ -1,5 +1,5 @@
 // Caches only the user interface. The API, the socket and the health check always go to the network.
-const CACHE = "deposim-ui-v2";
+const CACHE = "deposim-ui-__BUILD__"; // vite.config.ts puts the build time here, so a new build drops the old cache
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.add("/")).catch(() => {}).then(() => self.skipWaiting()));

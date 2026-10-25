@@ -230,6 +230,27 @@ describe("websocket", () => {
     expect(app.session.snapshot(id).simulation.simulationTime).toBe(reached);
   });
 
+  it("deleting a simulation with a connected client stops the clock, closes the client and forgets the leftovers of the tick", async () => {
+    const app = make();
+    const id = await createSim(app);
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const { port } = app.server.address() as { port: number };
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/simulations/${id}`);
+    const closed = new Promise<number>((r) => ws.once("close", (code) => r(code)));
+    let ticks = 0;
+    ws.on("message", (d) => { if (JSON.parse(String(d)).type === "tick") ticks++; });
+    await new Promise((r) => ws.once("open", r));
+    ws.send(JSON.stringify({ type: "tempo", tempo: 60 }));
+    ws.send(JSON.stringify({ type: "run" }));
+    await until(() => ticks >= 2);
+    expect(app.session.isRunning(id)).toBe(true);
+    expect((await app.inject({ method: "DELETE", url: `/api/simulations/${id}` })).statusCode).toBe(204);
+    expect(await closed).toBe(1000);
+    expect(app.session.isRunning(id)).toBe(false);
+    expect((app.session as unknown as { carry: Map<number, number> }).carry.has(id)).toBe(false);
+    expect((await app.inject({ url: "/api/simulations" })).json()).toEqual([]);
+  });
+
   it("answers a message it does not understand with an error and carries on", async () => {
     const app = make();
     const id = await createSim(app);
@@ -399,10 +420,21 @@ describe("the clock of a live simulation (websocket)", () => {
     expect(sapCalls.length).toBeGreaterThanOrEqual(2); // it does look again
     for (let i = 1; i < sapCalls.length; i++) expect(sapCalls[i].at - sapCalls[i - 1].at).toBeGreaterThanOrEqual(90); // never oftener than 100 ms
 
+    // one notice for the whole wait; after the bars arrive the clock may meet the new edge and say it again, which is a new wait
+    expect(msgs.filter((m) => m.type === "notice" && /Warte/.test(m.text))).toHaveLength(1);
     t.all["SAP.DE"] = t.whole.filter((b) => b.t < at(40)); // the bars up to 07:40 arrive
     await until(() => msgs.some((m) => m.type === "tick" && m.simulationTime >= at(35)));
-    expect(msgs.filter((m) => m.type === "notice" && /Warte/.test(m.text))).toHaveLength(1);
     expect(t.app.session.isRunning(id)).toBe(true);
+  });
+
+  it("tells a client that joins during the wait why the clock stands", async () => {
+    const t = makeLive({ now: at(40) + 900, sapUntil: at(30) });
+    const id = await sim(t.app, { live: true, startAt: at(20) });
+    const first = await connect(t.app, id);
+    first.send({ type: "run" });
+    await until(() => first.msgs.some((m) => m.type === "notice" && /Warte auf neue Kurse/.test(m.text)));
+    const late = await connect(t.app, id);
+    await until(() => late.msgs.some((m) => m.type === "notice" && /Warte auf neue Kurse/.test(m.text)));
   });
 
   it("says the market is shut on a holiday, not 'waiting' and not 'end of data'", async () => {
@@ -859,6 +891,23 @@ describe("tax over HTTP", () => {
 
     const off2 = await app.inject({ method: "PUT", url: `/api/simulations/${id}/tax`, payload: { enabled: false } as object });
     expect(off2.json()).toMatchObject({ enabled: false, church: 0.09 });
+  });
+
+  it("figures from stored prices are dropped when prices are added later, and a trade key is found without reading prices", async () => {
+    const app = make();
+    const id = await createSim(app);
+    const o = { symbol: "SAP.DE", kind: "market", qty: 2 };
+    await post(app, `/api/simulations/${id}/orders`, { ...o, side: "buy" });
+    await post(app, `/api/simulations/${id}/orders`, { ...o, side: "sell" });
+    const j = (await app.inject({ url: `/api/simulations/${id}/journal` })).json();
+    const inner = app.session as unknown as { derivedCache: Map<string, unknown>; excursionCache: Map<string, unknown> };
+    expect(inner.derivedCache.size).toBe(1);
+    expect((await app.inject({ url: `/api/simulations/${id}/journal` })).json().behavior).toEqual(j.behavior); // from the memo
+    expect(app.session.hasTrade(id, j.trades[0].key)).toBe(true);
+    expect(app.session.hasTrade(id, "9:9")).toBe(false);
+    app.session.dataChanged();
+    expect(inner.derivedCache.size).toBe(0);
+    expect(inner.excursionCache.size).toBe(0);
   });
 
   it("answers 404 for an unknown simulation", async () => {

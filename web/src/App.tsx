@@ -1,3 +1,4 @@
+import { tabKeys } from "./tabKeys.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type Socket, addDepot, addGhost, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, setAutoPause, getBackupStatus, getBars, getDataStatus, getMarketEvents, getRun, getWatchlist, listSimulations,
@@ -571,15 +572,12 @@ export function App() {
                 />
               </section>
               {scenarioResult && <ScenarioGoals result={scenarioResult} onShowResult={() => setCardId(live.id)} />}
-              <div className="tabs" role="tablist" aria-label="Ansicht">
-                <button role="tab" className="btn" aria-selected={view === "trade"}
-                  onClick={() => setView("trade")}>Handel</button>
-                <button role="tab" className="btn" data-guide="tab-evaluation" aria-selected={view === "evaluation"}
-                  onClick={() => setView("evaluation")}>Auswertung</button>
-                <button role="tab" className="btn" aria-selected={view === "longterm"}
-                  onClick={() => setView("longterm")}>Langzeitvergleich</button>
-                <button role="tab" className="btn" aria-selected={view === "data"}
-                  onClick={() => setView("data")}>Daten</button>
+              <div className="tabs" role="tablist" aria-label="Ansicht" onKeyDown={tabKeys}>
+                {(["trade", "evaluation", "longterm", "data"] as const).map((v) => (
+                  <button key={v} role="tab" id={`tab-${v}`} className="btn" aria-selected={view === v} aria-controls="view-panel"
+                    tabIndex={view === v ? 0 : -1} data-guide={v === "evaluation" ? "tab-evaluation" : undefined}
+                    onClick={() => setView(v)}>{{ trade: "Handel", evaluation: "Auswertung", longterm: "Langzeitvergleich", data: "Daten" }[v]}</button>
+                ))}
               </div>
               {snapshot && depot && view !== "longterm" && view !== "data" && (
                 <DepotSwitch depots={snapshot.depots} activeId={depot.id} disabled={locked}
@@ -591,6 +589,7 @@ export function App() {
                   version={depot.orders.filter((o) => o.status === "filled").length} settingsOpen={hintsOpen} onSettings={setHintsOpen}
                   onCount={setHintCount} onWhy={(q) => { setGlossaryQuery(q); setGlossaryOpen(true); }} />
               )}
+              <div role="tabpanel" className="stack" id="view-panel" aria-labelledby={`tab-${view}`}>
               {view === "data" ? (
                 <DataView onChanged={readLight} />
               ) : view === "longterm" ? (
@@ -650,6 +649,7 @@ export function App() {
                   </>
                 )
               )}
+              </div>
             </>
           ) : view === "data" ? (
             <DataView onChanged={readLight} onClose={() => setView("trade")} />

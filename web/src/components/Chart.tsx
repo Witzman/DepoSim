@@ -11,7 +11,7 @@ import { tickMarkFormatter, timeFormatter } from "../chartTime.js";
 import { addDrawing, hitTest, newId, parse, removeDrawing, serialize, storageKey, type Drawing } from "../drawings.js";
 import { loadPrefs, savePrefs, toConfig, type IndicatorPrefs } from "../indicatorPrefs.js";
 import type { Series } from "../indicators.js";
-import { useIndicators } from "../useIndicators.js";
+import { barsKey, useIndicators } from "../useIndicators.js";
 import { signedPercent } from "../format.js";
 import { markSeen } from "../guide.js";
 import { DrawTools, type Tool } from "./DrawTools.js";
@@ -97,7 +97,7 @@ export function Chart({ bars: raw, prefs: view, onPrefs, fills, events = [], lea
   const config = useMemo(() => toConfig(prefs), [prefs]);
   const bars = useMemo(() => aggregate(raw, view.timeframe), [raw, view.timeframe]);
   const display = useMemo(() => (view.type === "heikin" ? heikinAshi(bars) : bars), [bars, view.type]);
-  const { result } = useIndicators(bars, config);
+  const { result, key: resultKey } = useIndicators(bars, config);
   const closeLine = useRef<ISeriesApi<"Line"> | null>(null);
   const dataKey = useRef("");
   const firstT = useRef<number | null>(null);
@@ -343,7 +343,8 @@ export function Chart({ bars: raw, prefs: view, onPrefs, fills, events = [], lea
     indicatorSeries.current = [];
     const stale = (v: Series | undefined) => v !== undefined && v.length !== bars.length;
     const all = [result.sma, result.ema, result.rsi, result.macd?.macd, result.bollinger?.mid, result.vwap, result.atr, result.stoch?.k, result.obv];
-    if (!all.some(stale)) {
+    // A result belongs to the bars it was computed for; bars of another title with as many candles do not match.
+    if (resultKey === barsKey(bars) && !all.some(stale)) {
       const line = (v: Series, color: string, style: LineStyle, pane = 0, width: 1 | 2 = 1) => {
         const s = api.addSeries(LineSeries, {
           color, lineStyle: style, lineWidth: width, priceLineVisible: false, lastValueVisible: false,

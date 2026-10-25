@@ -412,6 +412,14 @@ export class SessionService {
     this.carry.clear();
   }
 
+  /** Forgets what is kept in memory for a simulation that is deleted: SQLite may give its id to the next one. */
+  forget(id: number): void {
+    this.running.delete(id);
+    this.carry.delete(id);
+    this.runCache.delete(id);
+    this.lastOpen.delete(id);
+  }
+
   /** Not stored: after a restart every simulation is paused. */
   isRunning(id: number): boolean {
     return this.running.has(id);
@@ -717,10 +725,16 @@ export class SessionService {
     if (!inst) return undefined;
     const sim = this.sim(id);
     const s = sim.simulationTime;
-    if (sim.resolution === "day") return buildOrderbook({ symbol: inst.symbol, currency: inst.currency, bar: undefined, venueOpen: false });
+    if (sim.resolution === "day") return buildOrderbook({ symbol: inst.symbol, currency: inst.currency, bar: undefined, venueOpen: false, daily: true });
     return buildOrderbook({
       symbol: inst.symbol, currency: inst.currency, bar: this.archive.lastCompleteBar(inst.symbol, s, SOUND), venueOpen: this.venueOpen(inst.venue, s),
     });
+  }
+
+  /** The time zone of the venue an instrument trades on; Berlin for one that is not known. */
+  private zoneOf(symbol: string): string {
+    const venue = this.registry.get(symbol)?.venue;
+    return VENUES.find((v) => v.id === venue)?.timeZone ?? "Europe/Berlin";
   }
 
   /** Normalised curves and key figures of one simulation, computed now. */
@@ -979,6 +993,17 @@ export class SessionService {
 
   private runCache = new Map<number, RunSummary>();
   private excursionCache = new Map<string, Excursion>();
+  /** Counts changes to the stored prices: figures worked out from older prices are not reused. */
+  private dataVersion = 0;
+  /** The behaviour and the excursions of a depot at a simulation time, for repeated reads at the same time. */
+  private derivedCache = new Map<string, { behavior: Behavior; excursions: Excursions }>();
+
+  /** Called when bars were added to the archive after the fact (the backfill). */
+  dataChanged(): void {
+    this.dataVersion++;
+    this.excursionCache.clear();
+    this.derivedCache.clear();
+  }
 
   /**
    * The round book entry of a simulation. A finished round never changes, so its figures are kept
@@ -1034,6 +1059,22 @@ export class SessionService {
     );
   }
 
+  /**
+   * The trades, open lots and bookings of a depot without reading a single price: enough for the trade keys and the tax, and
+   * cheap. The "too early" and behaviour figures that need prices come from `journal`.
+   */
+  private bookedTrades(id: number, depotId: number) {
+    const sim = this.sim(id);
+    const filled: JournalOrder[] = [];
+    for (const o of this.store.loadDepot(depotId).orders) {
+      if (o.status !== "filled" || o.filledSim === undefined || o.fillPrice === undefined) continue;
+      filled.push({ id: o.id, symbol: o.symbol, side: o.side, qty: o.qty, fillPrice: o.fillPrice, filledSim: o.filledSim, gross: o.gross ?? 0, commission: o.commission ?? 0, foreignFee: o.foreignFee ?? 0 });
+    }
+    const noBars = { lastCompleteBar: () => undefined, nextBarAfter: () => undefined };
+    const { journal, openLots } = buildJournalCore({ orders: filled, s: sim.simulationTime, bars: noBars, notes: {} });
+    return { trades: journal.trades, open: journal.open, openLots, bookings: this.store.bookings(depotId) };
+  }
+
   /** Trades, hit rate, holding time and "too early" of one depot, computed now from its filled orders. */
   journal(id: number, depotId: number): Journal & { bookings: Booking[]; depotId: number; simulationTime: number; behavior: Behavior; excursions: Excursions } {
     const sim = this.sim(id);
@@ -1047,12 +1088,20 @@ export class SessionService {
     }
     const bars = sim.resolution === "day" ? this.dailyBars() : this.archive;
     const { journal, contexts, openLots } = buildJournalCore({ orders: filled, s: sim.simulationTime, bars, notes: this.store.notes(id) });
-    const curve = this.store.valueCurve(depotId, EVALUATION_POINTS);
-    const meanValue = curve.length === 0 ? null : curve.reduce((a, p) => a + p.value, 0) / curve.length;
-    const behavior = analyzeBehavior({
-      orders: filled, trades: journal.trades, contexts, s: sim.simulationTime, bars, meanValue, intraday: sim.resolution !== "day",
-    });
-    const excursions = this.excursions(sim, depotId, journal.trades, openLots);
+    // Behaviour and excursions do not depend on the notes: the same time, orders, bookings and prices give the same figures.
+    const key = `${depotId}:${sim.simulationTime}:${filled.length}:${filled.at(-1)?.id ?? 0}:${sim.benchmark ?? ""}:${this.dataVersion}`;
+    let derived = this.derivedCache.get(key);
+    if (!derived) {
+      const curve = this.store.valueCurve(depotId, EVALUATION_POINTS);
+      const meanValue = curve.length === 0 ? null : curve.reduce((a, p) => a + p.value, 0) / curve.length;
+      derived = {
+        behavior: analyzeBehavior({ orders: filled, trades: journal.trades, contexts, s: sim.simulationTime, bars, meanValue, intraday: sim.resolution !== "day", zoneOf: (symbol) => this.zoneOf(symbol) }),
+        excursions: this.excursions(sim, depotId, journal.trades, openLots),
+      };
+      if (this.derivedCache.size > 50) this.derivedCache.clear();
+      this.derivedCache.set(key, derived);
+    }
+    const { behavior, excursions } = derived;
     return { ...journal, bookings: this.store.bookings(depotId), depotId, simulationTime: sim.simulationTime, behavior, excursions };
   }
 
@@ -1074,7 +1123,7 @@ export class SessionService {
     };
     if (!settings.enabled) return { settings, enabled: false, rules, vorabpauschale: vorab, funds: [], report: null };
 
-    const journal = this.journal(id, depotId);
+    const journal = this.bookedTrades(id, depotId);
     const fundOf = (symbol: string): FundType | null =>
       this.registry.get(symbol)?.kind === "ETF" ? (settings.fundTypes[symbol] ?? "equityFund") : null;
     const exempt = (fund: FundType | null) => (fund === null ? 0 : TAX_RULES.partialExemption[fund]);
@@ -1170,7 +1219,7 @@ export class SessionService {
     return this.store
       .listDepots(id)
       .filter((d) => d.kind === "normal")
-      .some((d) => this.journal(id, d.id).trades.some((t) => t.key === tradeKey));
+      .some((d) => this.bookedTrades(id, d.id).trades.some((t) => t.key === tradeKey));
   }
 
   /** "Depot N" with N one above the highest number in use, so a deleted depot's name is not given out again. */

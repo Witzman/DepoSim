@@ -43,6 +43,8 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
   const refreshAt = new Map<number, number>();
   // Simulations that were told "waiting for prices" in the current wait, so it is said once.
   const waiting = new Set<number>();
+  // The simulation time at the last tick: a wait is over when the clock moves, not when one tick merely does not flag it.
+  const lastTime = new Map<number, number>();
 
   const send = (ws: WebSocket, m: unknown) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(m));
@@ -80,6 +82,8 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
         broadcast(id, snapshotMessage(id));
         return;
       }
+      const prevTime = lastTime.get(id);
+      lastTime.set(id, result.simulationTime);
       const pause = session.autoPauseFor(id, result);
       if (pause) {
         stopLoop(id);
@@ -114,7 +118,7 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
           broadcast(id, snapshotMessage(id));
         }
       } else {
-        waiting.delete(id); // it moves again: the next wait is told again
+        if (result.simulationTime !== prevTime) waiting.delete(id); // it moves again: the next wait is told again
       }
     } catch (err) {
       stopLoop(id);
@@ -142,6 +146,8 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
       if (!set) clients.set(id, (set = new Set()));
       set.add(ws);
       send(ws, snapshotMessage(id));
+      // The notice goes out once per wait; a client that joins during it would see a standing clock without a reason.
+      if (waiting.has(id)) send(ws, { type: "notice", text: "Warte auf neue Kurse …" });
 
       ws.on("message", (raw) => {
         let parsed: z.infer<typeof message>;
@@ -255,6 +261,7 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
     drop(id: number) {
       stopLoop(id);
       refreshAt.delete(id);
+      lastTime.delete(id);
       for (const ws of [...(clients.get(id) ?? [])]) ws.close(1000, "simulation removed");
       clients.delete(id);
     },

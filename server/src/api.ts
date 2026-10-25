@@ -454,6 +454,7 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     if (!sim) return notFound(reply);
     hub.drop(sim.id);
     store.deleteSimulation(sim.id);
+    session.forget(sim.id);
     return reply.code(204).send();
   });
 

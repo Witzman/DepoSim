@@ -57,7 +57,7 @@ export function BehaviorCard({ b }: { b: Behavior }) {
       <h4>Tageszeit der Eröffnung</h4>
       {b.timeOfDay.ok ? (
         <table className="positions num" data-testid="behavior-hours">
-          <thead><tr><th scope="col">Stunde (MEZ/MESZ)</th><th scope="col">Trades (n)</th><th scope="col">Gewinner</th><th scope="col">Netto G/V</th></tr></thead>
+          <thead><tr><th scope="col">Stunde (Ortszeit des Handelsplatzes)</th><th scope="col">Trades (n)</th><th scope="col">Gewinner</th><th scope="col">Netto G/V</th></tr></thead>
           <tbody>
             {b.timeOfDay.hours.map((h) => (
               <tr key={h.hour}><th scope="row">{String(h.hour).padStart(2, "0")}–{String((h.hour + 1) % 24).padStart(2, "0")} Uhr</th><td>{h.n}</td><td>{h.wins}</td><td className={h.netPnl > 0 ? "up" : h.netPnl < 0 ? "down" : "muted"}>{signedEur(h.netPnl)}</td></tr>

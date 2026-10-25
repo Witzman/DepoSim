@@ -48,3 +48,24 @@ test("a scenario that is not known is turned away and the free game is still the
   await expect(page.getByRole("radio", { name: /Freies Spiel/ })).toBeChecked();
   await expect(page.getByTestId("by-day")).toBeVisible();
 });
+
+test("a scenario played with a position: bonus goals can be met, but without the main goal there are no stars; the round has a grade", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Neue Simulation" }).click();
+  await page.getByTestId("scenario-rallye-2023").getByRole("radio").check();
+  await page.getByRole("button", { name: "Anlegen" }).click();
+  await expect(page.getByTestId("sim-time")).toHaveText("02.01.2023");
+  await page.getByLabel("Menge").fill("60");
+  await page.getByRole("button", { name: "Kaufen" }).click();
+  await page.getByRole("button", { name: "60 T/s" }).click();
+  await page.getByRole("button", { name: "Start" }).click();
+
+  const result = page.getByTestId("run-card");
+  await expect(result).toBeVisible({ timeout: 20_000 });
+  // the test market is flat: the 5 % main goal is missed, the two bonus goals are met, and bonus alone earns nothing
+  await expect(result.getByTestId("result-stars")).toHaveAttribute("aria-label", "0 von 3 Sternen");
+  const goals = result.getByTestId("goal-list");
+  await expect(goals.locator("li").filter({ hasText: "Endwert mindestens" })).toContainText("verfehlt");
+  await expect(goals.locator("li").filter({ hasText: "Größter Rückgang" })).toContainText("erfüllt");
+  await expect(goals.locator("li").filter({ hasText: "Besser als der Maßstab" })).toContainText("erfüllt");
+});

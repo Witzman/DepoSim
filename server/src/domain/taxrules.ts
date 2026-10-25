@@ -14,8 +14,9 @@ export const TAX_RULES = {
   /** Teilfreistellung: the share of fund income that is free of tax. § 20 InvStG. */
   partialExemption: { equityFund: 0.3, mixedFund: 0.15, other: 0 },
   /**
-   * Sparerpauschbetrag per person and calendar year in euro. § 20 Abs. 9 EStG: 1.000 from 2023
-   * (confirmed by the sources below), 801 for the years before from the author's knowledge, not from a source read here.
+   * Sparerpauschbetrag per person and calendar year in euro. § 20 Abs. 9 EStG: raised from 801 to 1.000 for 2023 on by the
+   * Jahressteuergesetz 2022 (Bundesrat 16.12.2022); checked 2026-10-25 against advice sites (vlh.de, lohnsteuer-kompakt.de),
+   * not against the statute text.
    */
   allowance: { from: 2023, now: 1000, before: 801 },
   /**
@@ -24,7 +25,7 @@ export const TAX_RULES = {
    */
   baseRate: { 2024: 0.0229, 2025: 0.0253, 2026: 0.032 } as Record<number, number>,
   sources: [
-    "§ 20 EStG (Einkünfte aus Kapitalvermögen, Abs. 6 Verlustverrechnung, Abs. 9 Sparerpauschbetrag)",
+    "§ 20 EStG (Einkünfte aus Kapitalvermögen; Abs. 6 Satz 4 Aktienverluste nur mit Aktiengewinnen, besteht weiter; Abs. 9 Sparerpauschbetrag, 801 € bis 2022, 1.000 € ab 2023)",
     "§ 32d EStG (Abgeltungsteuer), § 43a EStG (Steuerabzug), § 4 SolzG, § 51a EStG",
     "InvStG § 18 (Vorabpauschale), § 20 (Teilfreistellung)",
     "BMF-Schreiben vom 13.01.2026 (Basiszins 2026: 3,20 %)",

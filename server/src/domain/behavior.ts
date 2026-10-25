@@ -80,8 +80,13 @@ function closeDaysBefore(bars: BarsAccess, symbol: string, t: number, days: numb
   return bar?.c;
 }
 
-const berlinHour = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Berlin", hour: "2-digit", hour12: false });
-const hourOf = (t: number) => Number(berlinHour.format(t * 1000)) % 24;
+const hourFormats = new Map<string, Intl.DateTimeFormat>();
+/** The hour of the day at `t` in a time zone. */
+function hourOf(t: number, zone: string): number {
+  let f = hourFormats.get(zone);
+  if (!f) hourFormats.set(zone, (f = new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", hour12: false })));
+  return Number(f.format(t * 1000)) % 24;
+}
 
 /**
  * Patterns in how the trades were made, from the same orders as the journal. Pure; reads prices only up to `s`.
@@ -97,6 +102,8 @@ export function analyzeBehavior(input: {
   meanValue: number | null;
   /** False for a daily simulation: all orders sit at the same time of day. */
   intraday: boolean;
+  /** The time zone of the venue a symbol trades on; Berlin when absent. */
+  zoneOf?: (symbol: string) => string;
 }): Behavior {
   const { trades, contexts, s, bars } = input;
   const orders = [...input.orders].sort((a, b) => a.filledSim - b.filledSim || a.id - b.id);
@@ -191,7 +198,7 @@ export function analyzeBehavior(input: {
 
   const hours = new Map<number, { hour: number; n: number; wins: number; netPnl: number }>();
   for (const t of trades) {
-    const h = hourOf(t.openedSim);
+    const h = hourOf(t.openedSim, input.zoneOf?.(t.symbol) ?? "Europe/Berlin");
     const e = hours.get(h) ?? { hour: h, n: 0, wins: 0, netPnl: 0 };
     e.n++;
     if (t.netPnl > 0) e.wins++;
