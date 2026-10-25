@@ -17,6 +17,7 @@ describe("healthz", () => {
     const res = await app.inject({ url: "/healthz" });
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe("ok");
+    expect(res.headers["x-deposim-build"]).toBe("dev"); // no build-time file outside the image
     await app.close();
   });
 });

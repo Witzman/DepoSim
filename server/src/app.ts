@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import fastifyStatic from "@fastify/static";
 import fastifyWebsocket from "@fastify/websocket";
@@ -143,7 +143,9 @@ export function buildApp(opts: AppOptions): FastifyInstance {
     });
   });
 
-  app.get("/healthz", async (_req, reply) => reply.type("text/plain").send("ok"));
+  // The image carries the time it was built at (Dockerfile); a deploy shows as a newer value here, behind no login.
+  const buildTime = (() => { try { return readFileSync("build-time", "utf8").trim(); } catch { return "dev"; } })();
+  app.get("/healthz", async (_req, reply) => reply.type("text/plain").header("x-deposim-build", buildTime).send("ok"));
   registerApi(app, { daily: createDailyArchive(db), store, session, archive, instruments, search: instrumentSearch(opts.search ?? createYahooSearch(), stats), hub, backfill, longterm, fx, db, backup, jobs, health, now: nowS });
 
   if (existsSync(WEB_DIST)) {
