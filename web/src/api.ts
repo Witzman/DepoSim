@@ -1,5 +1,5 @@
 import type {
-  AllocationLine, BackfillJob, BackupStatus, Bar, ClientMessage, CompareResult, CostPreview, Curves, Depot, Evaluation, Instrument, Journal, JournalNoteResult,
+  AllocationLine, ArchiveInfo, BackfillJob, BackupStatus, Coverage, DataStatus, GapReport, JobsOverview, SourceSummary, Bar, ClientMessage, CompareResult, CostPreview, Curves, Depot, Evaluation, Instrument, Journal, JournalNoteResult,
   Longterm, LongtermJob, MissingList, OrderInput, Orderbook, SearchHit, ServerMessage, Simulation, VenueInfo,
 } from "./types.js";
 
@@ -159,3 +159,12 @@ export function openSocket(id: number, onMessage: (m: ServerMessage) => void, on
 export const getLongterm = () => request<Longterm>("/api/longterm");
 export const startLongtermRefresh = () => request<LongtermJob>("/api/longterm/refresh", json("POST", {}));
 export const getLongtermRefresh = () => request<LongtermJob>("/api/longterm/refresh");
+
+export const getDataStatus = () => request<DataStatus>("/api/data/status");
+export const getCoverage = (days = 30) => request<Coverage>(`/api/data/coverage?days=${days}`);
+export const getGaps = (symbol: string, day: string) =>
+  request<GapReport>(`/api/data/gaps?symbol=${encodeURIComponent(symbol)}&day=${day}`);
+export const getSources = async () => (await request<{ sources: SourceSummary[] }>("/api/data/source")).sources;
+export const getArchiveInfo = () => request<ArchiveInfo>("/api/data/archive");
+export const getJobs = () => request<JobsOverview>("/api/jobs");
+export const runJob = (name: string) => request<unknown>(`/api/jobs/${encodeURIComponent(name)}/run`, json("POST", {}));

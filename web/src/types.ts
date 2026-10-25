@@ -436,3 +436,107 @@ export interface BackupStatus {
   error: { at: number; message: string } | null;
   log: { at: number; ok: boolean; text: string }[];
 }
+
+// ---- Datenzustand (#49) ----
+
+export type CellState = "complete" | "partial" | "empty" | "never" | "closed";
+
+export interface DataCell {
+  day: string;
+  state: CellState;
+  bars: number;
+  expected: number | null;
+  thin: boolean;
+  today: boolean;
+  reason?: string;
+}
+
+export interface CoverageRow {
+  symbol: string;
+  name: string;
+  venue: string;
+  kind: "EQUITY" | "ETF" | "FX";
+  cells: DataCell[];
+}
+
+export interface Coverage {
+  days: string[];
+  reachDays: number;
+  rows: CoverageRow[];
+  gapCells: number;
+}
+
+export interface GapReport {
+  symbol: string;
+  day: string;
+  open: boolean;
+  reason?: string;
+  windowFrom: number | null;
+  windowTo: number | null;
+  expected: number;
+  bars: number;
+  missingMinutes: number;
+  gaps: { from: number; to: number; minutes: number }[];
+  truncated: boolean;
+  hint: string;
+}
+
+export type Light = "green" | "yellow" | "red";
+
+export interface DataStatus {
+  level: Light;
+  reasons: { level: Light | "info"; text: string }[];
+  lastCollectionAt: number | null;
+  gapCells: number;
+  rateLimited24h: number;
+}
+
+export type CallKind = "200" | "404" | "422" | "429" | "error";
+
+export interface SourceSummary {
+  source: string;
+  label: string;
+  counts: Record<CallKind, number>;
+  calls: number;
+  meanMs: number | null;
+  lastOkAt: number | null;
+  lastAt: number | null;
+}
+
+export interface ArchiveInfo {
+  rows: { bars: number; dailyBars: number; fetchedDays: number };
+  fileBytes: number;
+  weeks: { weekStart: string; bars: number; estimatedBytes: number }[];
+  bytesPerBar: number | null;
+  lastBackupAt: number | null;
+  backupEnabled: boolean;
+}
+
+export interface JobRun {
+  id: number;
+  job: string;
+  trigger: "plan" | "hand";
+  startedAt: number;
+  finishedAt: number | null;
+  status: string;
+  label: string;
+  message: string | null;
+  error: string | null;
+}
+
+export interface JobInfo {
+  name: string;
+  label: string;
+  schedule: string;
+  enabled: boolean;
+  nextAt: number | null;
+  running: boolean;
+  queued: boolean;
+  lastRun: JobRun | null;
+}
+
+export interface JobsOverview {
+  enabled: boolean;
+  jobs: JobInfo[];
+  runs: JobRun[];
+}

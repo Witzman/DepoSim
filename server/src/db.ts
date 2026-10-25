@@ -65,6 +65,15 @@ create table if not exists job_runs (
   error text
 );
 create index if not exists job_runs_job on job_runs (job, started_at);
+create table if not exists source_stats (
+  hour integer not null,
+  source text not null,
+  kind text not null,
+  count integer not null,
+  ms_total integer not null,
+  last_at integer not null,
+  primary key (hour, source, kind)
+);
 create table if not exists simulations (
   id integer primary key,
   name text not null,

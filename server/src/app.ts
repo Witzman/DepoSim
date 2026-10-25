@@ -10,11 +10,13 @@ import { createBackfill } from "./backfill.js";
 import { type BackupService, createBackupService } from "./backup.js";
 import { FX_SYMBOL, type Instrument, type JobSettings, WATCHLIST } from "./config.js";
 import { createArchive } from "./data/archive.js";
+import { createSourceStats, instrumentDaily, instrumentEcb, instrumentMarketData, instrumentSearch } from "./data/instrumented.js";
 import { type EcbSource, createEcb } from "./data/ecb.js";
 import type { DailyData, MarketData } from "./data/marketdata.js";
 import { type InstrumentSearch, createYahooSearch } from "./data/search.js";
 import { createYahoo, createYahooDaily } from "./data/yahoo.js";
 import { openDb } from "./db.js";
+import { type Health, createHealth } from "./health.js";
 import { type Fx, createFx } from "./fx.js";
 import { InstrumentRegistry } from "./instruments.js";
 import { createLongterm } from "./longterm.js";
@@ -63,6 +65,7 @@ declare module "fastify" {
     backup: BackupService;
     fx: Fx;
     jobs: Jobs;
+    health: Health;
   }
 }
 
@@ -72,19 +75,21 @@ const WEB_DIST = resolve(import.meta.dirname, "../../web/dist");
 export function buildApp(opts: AppOptions): FastifyInstance {
   if (opts.dbPath !== ":memory:") mkdirSync(dirname(opts.dbPath), { recursive: true });
   const db = openDb(opts.dbPath);
+  const nowS = opts.now ?? (() => Date.now() / 1000);
+  // Every call to a source is counted where the adapters are joined up (#49); the adapters themselves do not know.
+  const stats = createSourceStats(db, nowS);
   const store = createStore(db);
   const instruments = new InstrumentRegistry(db, opts.instruments ?? WATCHLIST);
-  const archive = createArchive(db, opts.marketData ?? createYahoo(), { minGapMs: opts.minGapMs, now: opts.now });
+  const archive = createArchive(db, instrumentMarketData(opts.marketData ?? createYahoo(), stats), { minGapMs: opts.minGapMs, now: opts.now });
   const session = new SessionService({
     store, archive, instruments, fxSymbol: FX_SYMBOL, now: opts.now,
     delayS: opts.liveDelayS, catchUpTempo: opts.catchUpTempo,
   });
   const backfill = createBackfill({ archive, store, session, instruments, now: opts.now ?? (() => Date.now() / 1000) });
-  const nowS = opts.now ?? (() => Date.now() / 1000);
   const fxLog = (text: string, ok: boolean) => (ok ? app.log.info(text) : app.log.error(text));
-  const fx = createFx({ db, source: opts.fxSource ?? createEcb(), now: nowS, log: fxLog });
+  const fx = createFx({ db, source: instrumentEcb(opts.fxSource ?? createEcb(), stats), now: nowS, log: fxLog });
   const longterm = createLongterm({
-    db, source: opts.dailyData ?? createYahooDaily(), now: nowS, minGapMs: opts.minGapMs, fx,
+    db, source: instrumentDaily(opts.dailyData ?? createYahooDaily(), stats), now: nowS, minGapMs: opts.minGapMs, fx,
   });
   const hub = createHub(session, store, opts.tickMs ?? 250, opts.liveRefreshS ?? 60);
 
@@ -106,8 +111,14 @@ export function buildApp(opts: AppOptions): FastifyInstance {
     }),
   });
   app.decorate("jobs", jobs);
+  const health = createHealth({ db, instruments, stats, jobs, backup, now: nowS });
+  app.decorate("health", health);
   jobs.start(opts.jobsTickMs ?? 0);
+  // The light is looked at as often as the clock; a change goes into the job log (tests call `health.checkAlarm()` themselves).
+  const alarmTimer = (opts.jobsTickMs ?? 0) > 0 ? setInterval(() => health.checkAlarm(), opts.jobsTickMs) : undefined;
+  alarmTimer?.unref();
   app.addHook("onClose", async () => {
+    if (alarmTimer) clearInterval(alarmTimer);
     await jobs.stop();
     hub.stopAll();
     db.close();
@@ -121,7 +132,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   });
 
   app.get("/healthz", async (_req, reply) => reply.type("text/plain").send("ok"));
-  registerApi(app, { store, session, archive, instruments, search: opts.search ?? createYahooSearch(), hub, backfill, longterm, fx, db, backup, jobs, now: opts.now ?? (() => Date.now() / 1000) });
+  registerApi(app, { store, session, archive, instruments, search: instrumentSearch(opts.search ?? createYahooSearch(), stats), hub, backfill, longterm, fx, db, backup, jobs, health, now: nowS });
 
   if (existsSync(WEB_DIST)) {
     app.register(fastifyStatic, { root: WEB_DIST });

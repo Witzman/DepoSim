@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  type Socket, addDepot, addGhost, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, getBackupStatus, getBars, getWatchlist, listSimulations,
+  type Socket, addDepot, addGhost, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, getBackupStatus, getBars, getDataStatus, getWatchlist, listSimulations,
   openSocket, removeDepot, setBenchmark, removeInstrument, renameDepot,
 } from "./api.js";
 import { AllocationDialog } from "./components/AllocationDialog.js";
@@ -10,6 +10,8 @@ import { Journal } from "./components/Journal.js";
 import { OrderbookPanel } from "./components/Orderbook.js";
 import { Chart, type Fill } from "./components/Chart.js";
 import { CHART_PREFS_KEY, RAW_LIMIT, defaultChartPrefs, parseChartPrefs, type ChartPrefs } from "./bars.js";
+import { DataView } from "./components/DataView.js";
+import { lightLine } from "./data.js";
 import { Collapsible } from "./components/Collapsible.js";
 import { ClockBar } from "./components/ClockBar.js";
 import { Curves } from "./components/Curves.js";
@@ -32,7 +34,7 @@ import { canGhost, pickDepot } from "./view.js";
 import type { CommandId } from "./palette.js";
 import { useNarrow } from "./useNarrow.js";
 import { useTheme } from "./theme.js";
-import type { BackupStatus, Bar, Instrument, ServerMessage, Simulation, Snapshot, Tempo } from "./types.js";
+import type { BackupStatus, Bar, DataStatus, Instrument, ServerMessage, Simulation, Snapshot, Tempo } from "./types.js";
 
 const SELECTED_KEY = "deposim-selected";
 
@@ -79,13 +81,14 @@ export function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ticketCommand, setTicketCommand] = useState<{ side: "buy" | "sell"; n: number }>({ side: "buy", n: 0 });
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [view, setView] = useState<"trade" | "evaluation" | "longterm">("trade");
+  const [view, setView] = useState<"trade" | "evaluation" | "longterm" | "data">("trade");
   const [activeDepotId, setActiveDepotId] = useState<number | null>(null);
   const [allocationOpen, setAllocationOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [backfillOpen, setBackfillOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
   const [backupState, setBackupState] = useState<BackupStatus | null>(null);
+  const [dataState, setDataState] = useState<DataStatus | null>(null);
   const restored = useRef(false);
   const [orderbookOpen, setOrderbookOpen] = useState(false);
   const [scrollTo, setScrollTo] = useState<{ id: string; n: number } | null>(null);
@@ -115,6 +118,14 @@ export function App() {
   useEffect(() => {
     if (!backupOpen) getBackupStatus().then(setBackupState).catch(() => setBackupState(null));
   }, [backupOpen]);
+
+  // The light in the top bar (#49): read at the start, every minute, and when the data view says something changed.
+  const readLight = useCallback(() => { getDataStatus().then(setDataState).catch(() => setDataState(null)); }, []);
+  useEffect(() => {
+    readLight();
+    const timer = setInterval(readLight, 60_000);
+    return () => clearInterval(timer);
+  }, [readLight]);
 
   const onMessage = useCallback((m: ServerMessage) => {
     if (m.type === "snapshot") {
@@ -294,6 +305,7 @@ export function App() {
     if (id === "backup") return setBackupOpen(true);
     if (id === "ghost") return void newGhost();
     if (id === "longterm") return setView("longterm");
+    if (id === "data") return setView("data");
     if (id === "orderbook") {
       setView("trade");
       setOrderbookOpen((o) => !o);
@@ -371,6 +383,15 @@ export function App() {
           </span>
         )}
         <span className="spacer" />
+        {dataState && (() => {
+          const line = lightLine(dataState);
+          return (
+            <button className={`btn small light-btn ${dataState.level}`} data-testid="data-status" data-level={dataState.level}
+              onClick={() => setView("data")} title={line.title} aria-label={`${line.text}. Datenzustand öffnen`}>
+              <span className={`light ${dataState.level}`} aria-hidden="true" />{narrow ? "" : line.text}
+            </button>
+          );
+        })()}
         {backupState && (() => {
           // On a phone the bar has no room: the line shows only when something is wrong; the palette opens the dialog.
           const line = backupLine(backupState, Date.now() / 1000);
@@ -434,13 +455,17 @@ export function App() {
                   onClick={() => setView("evaluation")}>Auswertung</button>
                 <button role="tab" className="btn" aria-selected={view === "longterm"}
                   onClick={() => setView("longterm")}>Langzeitvergleich</button>
+                <button role="tab" className="btn" aria-selected={view === "data"}
+                  onClick={() => setView("data")}>Daten</button>
               </div>
-              {snapshot && depot && view !== "longterm" && (
+              {snapshot && depot && view !== "longterm" && view !== "data" && (
                 <DepotSwitch depots={snapshot.depots} activeId={depot.id} disabled={locked}
                   onSelect={setActiveDepotId} onAdd={newDepot} onRename={renameActive} onRemove={removeActive}
                   onAllocate={() => setAllocationOpen(true)} onGhost={() => void newGhost()} />
               )}
-              {view === "longterm" ? (
+              {view === "data" ? (
+                <DataView onChanged={readLight} />
+              ) : view === "longterm" ? (
                 <Longterm theme={theme} />
               ) : view === "trade" ? (
                 <>
@@ -493,6 +518,8 @@ export function App() {
                 )
               )}
             </>
+          ) : view === "data" ? (
+            <DataView onChanged={readLight} onClose={() => setView("trade")} />
           ) : view === "longterm" ? (
             <Longterm theme={theme} />
           ) : (
@@ -522,7 +549,7 @@ export function App() {
         open={paletteOpen} instruments={watchlist} simulations={simulations} selectedId={selectedId}
         onClose={() => setPaletteOpen(false)} onPickInstrument={setSymbol} onPickSimulation={setSelectedId}
         onToggleTheme={toggle} onShowHelp={() => setHelpOpen(true)} onAdd={addTitle}
-        commands={selectedId === null ? ["backfill", "backup", "longterm"] : ["backfill", "backup", "ghost", "journal", "compare", "orderbook", "longterm"]} onCommand={runCommand}
+        commands={selectedId === null ? ["backfill", "backup", "longterm", "data"] : ["backfill", "backup", "ghost", "journal", "compare", "orderbook", "longterm", "data"]} onCommand={runCommand}
       />
     </div>
   );

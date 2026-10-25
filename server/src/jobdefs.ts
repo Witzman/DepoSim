@@ -110,7 +110,8 @@ export function buildJobDefs(deps: {
         // ANALYZE reads every index; weekly is plenty for the planner and spares the disk on a big archive.
         if (weekday === 0) db.exec("analyze");
         const pruned = db.prepare("delete from job_runs where started_at < ?").run(Math.floor(now()) - KEEP_RUNS_DAYS * DAY).changes;
-        return { status: "ok", message: `Protokoll gekürzt (${pruned} alte Einträge)${weekday === 0 ? ", ANALYZE" : ""}.`, counts: { pruned } };
+        const prunedStats = db.prepare("delete from source_stats where hour < ?").run(Math.floor(now()) - KEEP_RUNS_DAYS * DAY).changes;
+        return { status: "ok", message: `Protokoll gekürzt (${pruned} alte Einträge)${weekday === 0 ? ", ANALYZE" : ""}.`, counts: { pruned, prunedStats } };
       },
     },
   ];

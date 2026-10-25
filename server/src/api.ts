@@ -11,6 +11,7 @@ import type { InstrumentSearch } from "./data/search.js";
 import { DEFAULT_FEES } from "./domain/fees.js";
 import { describeError } from "./errors.js";
 import type { Fx } from "./fx.js";
+import type { Health } from "./health.js";
 import type { Jobs } from "./jobs.js";
 import type { Longterm } from "./longterm.js";
 import { type InstrumentRegistry, RegistryError } from "./instruments.js";
@@ -80,6 +81,7 @@ interface Deps {
   db: Db;
   backup: BackupService;
   jobs: Jobs;
+  health: Health;
   now: () => number;
 }
 
@@ -99,7 +101,7 @@ const invalid = (reply: FastifyReply, err: z.ZodError) => {
   return reply.code(400).send({ error: `Ungültige Eingabe (${where}): ${issue.message}` });
 };
 
-export function registerApi(app: FastifyInstance, { store, session, archive, instruments, search, hub, backfill, longterm, fx, db, backup, jobs, now }: Deps) {
+export function registerApi(app: FastifyInstance, { store, session, archive, instruments, search, hub, backfill, longterm, fx, db, backup, jobs, health, now }: Deps) {
   const simulationOf = (params: unknown) => {
     const id = Number((params as { id?: string }).id);
     return Number.isInteger(id) ? store.getSimulation(id) : undefined;
@@ -161,6 +163,25 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     return reply.code(202).send(result.job);
   });
   app.get("/api/longterm/refresh", async () => longterm.status());
+
+  // Datenzustand (#49): what the archive holds, how the sources answer, the light for the status line.
+  const coverageQuery = z.object({ days: z.coerce.number().int().min(1).max(90).default(30) });
+  const gapsQuery = z.object({ symbol: z.string().regex(SYMBOL), day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) });
+  app.get("/api/data/status", async () => health.status());
+  app.get("/api/data/coverage", async (req, reply) => {
+    const query = coverageQuery.safeParse(req.query);
+    if (!query.success) return invalid(reply, query.error);
+    return health.coverage(query.data.days);
+  });
+  app.get("/api/data/gaps", async (req, reply) => {
+    const query = gapsQuery.safeParse(req.query);
+    if (!query.success) return invalid(reply, query.error);
+    const report = health.gaps(query.data.symbol, query.data.day);
+    if (!report) return reply.code(404).send({ error: "Unbekanntes Symbol oder ungültiger Tag." });
+    return report;
+  });
+  app.get("/api/data/source", async () => ({ sources: health.sources() }));
+  app.get("/api/data/archive", async () => health.archive());
 
   // ---- Sicherung, Export, Import (#46) ----
   let restoring = false;
