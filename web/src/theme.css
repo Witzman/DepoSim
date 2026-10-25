@@ -515,3 +515,11 @@ dialog.hints-settings { width: min(94vw, 520px); max-height: 85vh; overflow-y: a
 .rule-list li { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
 .rule-list label.level { display: flex; align-items: center; gap: 4px; }
 .rule-list label.level input { width: 4.5rem; }
+
+/* Quiet feedback (#44): a short flash of a changed row, and a soft entrance for notices. Off for reduced motion. */
+@keyframes flash { from { background: var(--accent-soft); } to { background: transparent; } }
+@keyframes soft-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+tr.flash { animation: flash 700ms ease-out; }
+.banner, .note-hint { animation: soft-in 200ms ease-out; }
+@media (prefers-reduced-motion: reduce) { tr.flash, .banner, .note-hint { animation: none; } }
+html[data-motion="reduced"] tr.flash, html[data-motion="reduced"] .banner, html[data-motion="reduced"] .note-hint { animation: none; }

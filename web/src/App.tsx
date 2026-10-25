@@ -26,7 +26,9 @@ import { BackupDialog } from "./components/BackupDialog.js";
 import { backupLine } from "./backup.js";
 import { Palette } from "./components/Palette.js";
 import { Glossary } from "./components/Glossary.js";
+import { FeedbackSettings } from "./components/FeedbackSettings.js";
 import { Hints } from "./components/Hints.js";
+import { applyMotion, feedback, feedbackPrefs } from "./feedback.js";
 import { ShortcutHelp } from "./components/ShortcutHelp.js";
 import { SimulationPicker } from "./components/SimulationPicker.js";
 import { Watchlist } from "./components/Watchlist.js";
@@ -90,6 +92,7 @@ export function App() {
   const [glossaryOpen, setGlossaryOpen] = useState(false);
   const [glossaryQuery, setGlossaryQuery] = useState("");
   const [hintsOpen, setHintsOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [hintCount, setHintCount] = useState(0);
   const [backfillOpen, setBackfillOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
@@ -374,6 +377,25 @@ export function App() {
   const fills = useMemo<Fill[]>(() => (depot?.orders ?? []).flatMap((o) =>
     o.status === "filled" && o.symbol === symbol && o.filledSim !== undefined && o.fillPrice !== undefined
       ? [{ t: o.filledSim, side: o.side, price: o.fillPrice, qty: o.qty }] : []), [depot?.orders, symbol]);
+  // The signals follow what the server did with the orders: an order that fills, a limit that is reached, one that is refused.
+  const seenOrders = useRef<{ key: string; status: Map<number, string> } | null>(null);
+  useEffect(() => {
+    applyMotion(feedbackPrefs());
+  }, []);
+  useEffect(() => {
+    if (!depot || !live) return;
+    const key = `${live.id}:${depot.id}`;
+    const now = new Map(depot.orders.map((o) => [o.id, o.status] as [number, string]));
+    const before = seenOrders.current;
+    seenOrders.current = { key, status: now };
+    if (!before || before.key !== key) return; // the first look at a depot only remembers
+    for (const o of depot.orders) {
+      const was = before.status.get(o.id);
+      if (was === o.status || (was === undefined && o.status === "open")) continue;
+      if (o.status === "filled") feedback(o.kind === "limit" && was === "open" ? "limit" : o.side);
+      else if (o.status === "rejected") feedback("rejected");
+    }
+  }, [depot?.orders]); // eslint-disable-line react-hooks/exhaustive-deps
   const locked = live === null || live.endedAt !== null || snapshot === null;
 
   return (
@@ -415,6 +437,7 @@ export function App() {
           <button className="btn small" data-testid="hints-open" onClick={() => setHintsOpen(true)}
             aria-label={`Hinweise: ${hintCount}`} title="Hinweise und Einstellungen">Hinweise{hintCount > 0 && <span className="badge warn" data-testid="hints-count">{hintCount}</span>}</button>
         )}
+        <button className="btn small" data-testid="feedback-open" onClick={() => setFeedbackOpen(true)} aria-label="Rückmeldung einstellen" title="Ton, Vibration, Bewegung">Ton</button>
         <button className="btn small" data-testid="palette-open" onClick={() => setPaletteOpen(true)}
           aria-label="Suche und Befehle öffnen (Strg+K)" title="Strg+K">Suche</button>
         <button className="btn small" data-testid="theme-toggle" onClick={toggle} aria-label="Hell oder Dunkel umschalten">
@@ -565,6 +588,7 @@ export function App() {
         }} />
       <BackfillDialog open={backfillOpen} onClose={() => setBackfillOpen(false)} />
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <FeedbackSettings open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
       <Glossary open={glossaryOpen} initialQuery={glossaryQuery} onClose={() => { setGlossaryOpen(false); setGlossaryQuery(""); }} />
       <Palette
         open={paletteOpen} instruments={watchlist} simulations={simulations} selectedId={selectedId}

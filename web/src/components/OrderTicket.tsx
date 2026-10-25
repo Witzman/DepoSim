@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { placeOrder, previewOrder } from "../api.js";
+import { feedback } from "../feedback.js";
 import { formatEur, formatPrice } from "../format.js";
 import type { CostPreview, Instrument, OrderInput } from "../types.js";
 
@@ -82,6 +83,7 @@ export function OrderTicket({ simulationId, depotId, instrument, priceKey, disab
       setProblem(null);
     } catch (err) {
       setProblem((err as Error).message);
+      feedback("rejected");
     } finally {
       setBusy(false);
     }
