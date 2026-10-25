@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { MarketDataError } from "../src/data/marketdata.js";
-import { createEcb, parseEcbCsv } from "../src/data/ecb.js";
+import { createEcb, parseEcbCsv, parseEcbSdmx } from "../src/data/ecb.js";
 
 const CSV = readFileSync(new URL("./fixtures/ecb-hist.csv", import.meta.url), "utf8");
 
@@ -30,22 +30,42 @@ describe("parseEcbCsv", () => {
   });
 });
 
-describe("createEcb", () => {
-  const answer = (status: number, body = CSV) => (async () => new Response(body, { status })) as typeof fetch;
+const SDMX = [
+  "KEY,FREQ,CURRENCY,CURRENCY_DENOM,EXR_TYPE,EXR_SUFFIX,TIME_PERIOD,OBS_VALUE",
+  "EXR.D.USD.EUR.SP00.A,D,USD,EUR,SP00,A,2026-10-23,1.1193",
+  "EXR.D.JPY.EUR.SP00.A,D,JPY,EUR,SP00,A,2026-10-23,175.51",
+  "EXR.D.USD.EUR.SP00.A,D,USD,EUR,SP00,A,2026-10-22,1.1205",
+  "",
+].join("\n");
 
-  it("asks the full file for both ranges and keeps only the last 90 days for 'recent'", async () => {
+describe("parseEcbSdmx", () => {
+  it("folds the long lines into one row per day, oldest first", () => {
+    expect(parseEcbSdmx(SDMX)).toEqual([
+      { day: "2026-10-22", rates: { USD: 1.1205 } },
+      { day: "2026-10-23", rates: { USD: 1.1193, JPY: 175.51 } },
+    ]);
+  });
+
+  it("skips empty values and rates of zero, and refuses what is not the answer", () => {
+    expect(parseEcbSdmx(SDMX + "EXR.D.ISK.EUR.SP00.A,D,ISK,EUR,SP00,A,2026-10-23,\nEXR.D.RUB.EUR.SP00.A,D,RUB,EUR,SP00,A,2026-10-23,0\n")[1].rates).toEqual({ USD: 1.1193, JPY: 175.51 });
+    for (const text of ["", "<html>no</html>", "KEY,CURRENCY,TIME_PERIOD,OBS_VALUE\n", "KEY,CURRENCY,TIME_PERIOD,OBS_VALUE\nx,USD,yesterday,1\n", "KEY,CURRENCY,TIME_PERIOD,OBS_VALUE\nx,USD,2026-10-23,abc\n"]) {
+      expect(() => parseEcbSdmx(text), text).toThrow(MarketDataError);
+    }
+  });
+});
+
+describe("createEcb", () => {
+  const answer = (status: number, body = SDMX) => (async () => new Response(body, { status })) as typeof fetch;
+
+  it("asks the data warehouse for everything since 1999 or for the last 100 days", async () => {
     const urls: string[] = [];
-    const fetchFn = (async (url: string) => (urls.push(url), new Response(CSV))) as unknown as typeof fetch;
+    const fetchFn = (async (url: string) => (urls.push(url), new Response(SDMX))) as unknown as typeof fetch;
     const ecb = createEcb(fetchFn);
     await ecb.fetch("full");
     await ecb.fetch("recent");
-    expect(urls).toEqual([
-      "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.csv",
-      "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.csv",
-    ]);
-    const long = "Date,USD,\n2026-10-23,1.1,\n2026-07-25,1.2,\n2026-07-24,1.3,\n";
-    const recent = await createEcb((async () => new Response(long)) as typeof fetch).fetch("recent");
-    expect(recent.map((r) => r.day)).toEqual(["2026-07-25", "2026-10-23"]);
+    const base = "https://data-api.ecb.europa.eu/service/data/EXR/D..EUR.SP00.A?detail=dataonly&format=csvdata&startPeriod=";
+    expect(urls[0]).toBe(base + "1999-01-01");
+    expect(urls[1]).toBe(base + new Date(Date.now() - 100 * 86_400_000).toISOString().slice(0, 10));
   });
 
   it("names the kind of failure", async () => {

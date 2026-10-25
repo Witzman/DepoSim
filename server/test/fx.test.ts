@@ -57,6 +57,13 @@ describe("fx_daily", () => {
     expect((db.prepare("select count(*) as n from fx_daily where ccy = 'USD'").get() as { n: number }).n).toBe(8);
   });
 
+  it("asks for the whole history again when what is stored is older than the recent answer reaches", async () => {
+    const { db, fx, calls } = make();
+    db.prepare("insert into fx_daily (ccy, day, rate, filled) values ('USD', '2010-02-14', 2, 0)").run();
+    await fx.update();
+    expect(calls).toEqual(["full"]);
+  });
+
   it("fills the gap between what is stored and a newer answer", async () => {
     const { db, fx } = make({ data: rows.slice(0, 2) }); // 16th and 19th
     await fx.update();

@@ -113,7 +113,10 @@ export function createFx(deps: { db: Db; source: EcbSource; now: () => number; l
 
   async function doUpdate(): Promise<FxUpdate> {
     try {
-      const rows = await source.fetch(latestDay() === null ? "full" : "recent");
+      // The whole history when nothing is stored or what is stored is older than the recent answer reaches (a short answer would leave a hole).
+      const latest = latestDay();
+      const stale = latest === null || latest < new Date((now() - 80 * 86_400) * 1000).toISOString().slice(0, 10);
+      const rows = await source.fetch(stale ? "full" : "recent");
       // Per currency: the days the ECB gave, and every calendar day between them filled with the day before.
       const byCcy = new Map<string, Map<string, number>>();
       for (const r of rows) for (const [ccy, rate] of Object.entries(r.rates)) {
