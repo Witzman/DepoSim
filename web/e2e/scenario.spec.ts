@@ -25,11 +25,11 @@ test("a scenario is picked as a card, shows its goals, ends at its end date and 
   await page.getByRole("button", { name: "60 T/s" }).click();
   await page.getByRole("button", { name: "Start" }).click();
 
-  const result = page.getByTestId("scenario-result");
+  const result = page.getByTestId("run-card");
   await expect(result).toBeVisible({ timeout: 20_000 });
   await expect(result.getByTestId("result-stars")).toHaveAttribute("aria-label", "0 von 3 Sternen"); // no trade, the main goal is missed
   await expect(result.getByTestId("goal-list").locator("li")).toHaveCount(3);
-  await expect(result).toContainText("Das Hauptziel wurde verfehlt");
+  await expect(result.getByTestId("run-grade")).toHaveAttribute("aria-label", "Ohne Note"); // no trade, no grade
   await result.getByRole("button", { name: "Schließen" }).click();
   await expect(result).toBeHidden();
 

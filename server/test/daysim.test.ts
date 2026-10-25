@@ -305,6 +305,31 @@ describe("scenarios", () => {
     expect(result.stars).toBeLessThanOrEqual(3);
   });
 
+  it("keeps a finished round in the round book with a grade, and shows the same numbers on every later look", async () => {
+    const app = await scenarioApp();
+    const sim = (await app.inject({ method: "POST", url: "/api/simulations", payload: { name: "Buch", scenarioId: "rallye-2023" } })).json();
+    const depotId = app.session.defaultDepotId(sim.id);
+    expect((await app.inject({ url: "/api/runs" })).json()).toEqual([]); // not over yet
+    const idle = (await app.inject({ url: `/api/simulations/${sim.id}/run` })).json();
+    expect(idle).toMatchObject({ finished: false, trades: 0, grade: { grade: null } });
+
+    expect(app.session.placeOrder(sim.id, depotId, { symbol: "EUNL.DE", side: "buy", kind: "market", qty: 50 }).ok).toBe(true);
+    app.session.stepDays(sim.id, 500);
+    const first = (await app.inject({ url: `/api/simulations/${sim.id}/run` })).json();
+    expect(first).toMatchObject({ finished: true, scenarioId: "rallye-2023", trades: 1, benchmarkSymbol: "EUNL.DE", preset: "relaxed" });
+    expect(["A", "B", "C", "D", "E"]).toContain(first.grade.grade);
+    expect(first.grade.parts.reduce((a: number, p: { weight: number }) => a + p.weight, 0)).toBeCloseTo(1, 9);
+    expect(first.scenario.goals).toHaveLength(3);
+    expect(first.curve.depot.length).toBeGreaterThan(2);
+    expect(first.curve.depot.length).toBeLessThanOrEqual(120);
+    expect(first.curve.benchmark.length).toBeGreaterThan(2);
+
+    const book = (await app.inject({ url: "/api/runs" })).json();
+    expect(book).toHaveLength(1);
+    expect(book[0]).toEqual(first);
+    expect((await app.inject({ url: `/api/simulations/${sim.id}/run` })).json()).toEqual(first);
+  });
+
   it("says a free simulation has no result", async () => {
     const app = await scenarioApp();
     const sim = (await app.inject({ method: "POST", url: "/api/simulations", payload: { name: "F", startAt: Date.parse("2022-03-01T00:00:00Z") / 1000, resolution: "day" } })).json();

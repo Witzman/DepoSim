@@ -585,6 +585,14 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     goals: [{ role: "main", ...s.main }, ...s.bonus.map((g) => ({ role: "bonus", ...g }))],
   })));
 
+  app.get("/api/runs", async () => session.runs());
+
+  app.get("/api/simulations/:id/run", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    return session.runSummary(sim.id);
+  });
+
   app.get("/api/simulations/:id/result", async (req, reply) => {
     const sim = simulationOf(req.params);
     if (!sim) return notFound(reply);

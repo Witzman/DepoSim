@@ -130,6 +130,45 @@ export interface ScenarioResult {
   goals: GoalResult[];
 }
 
+export type GradeLetter = "A" | "B" | "C" | "D" | "E";
+
+export interface GradePart {
+  key: "return" | "risk" | "costs" | "hits";
+  label: string;
+  score: number;
+  weight: number;
+  detail: string;
+}
+
+/** GET /api/runs and /api/simulations/:id/run: a round with its figures, grade and a thinned curve for the card. */
+export interface RunSummary {
+  id: number;
+  name: string;
+  startAt: number;
+  simulationTime: number;
+  endedAt: number | null;
+  finished: boolean;
+  preset: RulePreset;
+  resolution: "minute" | "day";
+  scenarioId: string | null;
+  scenarioTitle: string | null;
+  startCash: number;
+  finalValue: number;
+  totalReturn: number | null;
+  benchmarkSymbol: string | null;
+  benchmarkReturn: number | null;
+  maxDrawdown: number | null;
+  fees: number;
+  feeShare: number;
+  trades: number;
+  hitRate: number | null;
+  closedTrades: number;
+  grade: { grade: GradeLetter | null; score: number | null; parts: GradePart[]; note: string | null };
+  gradeFormula: string;
+  scenario: ScenarioResult | null;
+  curve: { depot: { t: number; value: number }[]; benchmark: { t: number; value: number }[] | null };
+}
+
 export type RulePreset = "relaxed" | "realistic" | "hardcore" | "custom";
 
 /** Chosen when the simulation is made and never changed. */

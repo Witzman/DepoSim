@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  type Socket, addDepot, addGhost, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, getBackupStatus, getBars, getDataStatus, getWatchlist, listSimulations,
+  type Socket, addDepot, addGhost, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, getBackupStatus, getBars, getDataStatus, getRun, getWatchlist, listSimulations,
   openSocket, removeDepot, setBenchmark, removeInstrument, renameDepot,
 } from "./api.js";
 import { AllocationDialog } from "./components/AllocationDialog.js";
 import { BackfillDialog } from "./components/BackfillDialog.js";
 import { Compare } from "./components/Compare.js";
 import { Journal } from "./components/Journal.js";
-import { ScenarioGoals, ScenarioResultDialog, useScenarioResult } from "./components/ScenarioGoals.js";
+import { ScenarioGoals, useScenarioResult } from "./components/ScenarioGoals.js";
+import { RunBook } from "./components/RunBook.js";
+import { RunCardDialog } from "./components/RunCardDialog.js";
 import { OrderbookPanel } from "./components/Orderbook.js";
 import { Chart, type Fill } from "./components/Chart.js";
 import { CHART_PREFS_KEY, RAW_LIMIT, defaultChartPrefs, parseChartPrefs, type ChartPrefs } from "./bars.js";
@@ -41,7 +43,7 @@ import { canGhost, pickDepot } from "./view.js";
 import type { CommandId } from "./palette.js";
 import { useNarrow } from "./useNarrow.js";
 import { useTheme } from "./theme.js";
-import type { BackupStatus, Bar, DataStatus, Instrument, ServerMessage, Simulation, Snapshot, Tempo } from "./types.js";
+import type { BackupStatus, Bar, DataStatus, Instrument, RunSummary, ServerMessage, Simulation, Snapshot, Tempo } from "./types.js";
 
 const SELECTED_KEY = "deposim-selected";
 
@@ -290,6 +292,7 @@ export function App() {
     try {
       const sim = await endSimulation(id);
       setSimulations((prev) => prev.map((s) => (s.id === id ? sim : s)));
+      setCardId(id); // ending a round always shows its card
     } catch (e) {
       setNotice((e as Error).message);
     }
@@ -409,15 +412,24 @@ export function App() {
   useEffect(() => { if (view === "evaluation") markSeen("evaluation"); }, [view]);
   const locked = live === null || live.endedAt !== null || snapshot === null;
   const scenarioResult = useScenarioResult(live?.id ?? 0, !!live?.scenarioId, snapshot?.running ?? false, live?.endedAt != null);
-  const [resultOpen, setResultOpen] = useState(false);
-  // The dialog opens when a scenario ends while it is on screen, not whenever an old one is picked.
+  // The card of a round: which simulation it shows, and its figures from the server.
+  const [cardId, setCardId] = useState<number | null>(null);
+  const [cardRun, setCardRun] = useState<RunSummary | null>(null);
+  useEffect(() => {
+    if (cardId === null) { setCardRun(null); return; }
+    let alive = true;
+    getRun(cardId).then((r) => { if (alive) setCardRun(r); }).catch(() => { if (alive) setCardId(null); });
+    return () => { alive = false; };
+  }, [cardId]);
+  // The card opens when a round ends while it is on screen, not whenever an old one is picked.
   const endedBefore = useRef<{ id: number; ended: boolean } | null>(null);
   useEffect(() => {
     const now = live ? { id: live.id, ended: live.endedAt !== null } : null;
     const before = endedBefore.current;
-    if (now && before && before.id === now.id && !before.ended && now.ended && live?.scenarioId) setResultOpen(true);
+    if (now && before && before.id === now.id && !before.ended && now.ended) setCardId(now.id);
     endedBefore.current = now;
   }, [live?.id, live?.endedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const runBookVersion = [...simulations.filter((s) => s.endedAt !== null).map((s) => s.id), live?.endedAt != null ? `live${live.id}` : ""].join(",");
 
   return (
     <div className={`app${narrow && live ? " with-bar" : ""}`}>
@@ -474,6 +486,9 @@ export function App() {
               onCreate={create} onEnd={end} onDelete={remove}
             />
           </Collapsible>
+          <Collapsible narrow={narrow} title="Rundenbuch" openByDefault={false}>
+            <RunBook version={runBookVersion} onOpen={setCardId} onImport={(card) => create({ name: card.name, scenarioId: card.scenarioId ?? undefined })} />
+          </Collapsible>
           {live && (
             <>
             <Collapsible narrow={narrow} title="Watchlist">
@@ -508,7 +523,7 @@ export function App() {
                   onPause={() => socket.current?.send({ type: "pause" })}
                 />
               </section>
-              {scenarioResult && <ScenarioGoals result={scenarioResult} onShowResult={() => setResultOpen(true)} />}
+              {scenarioResult && <ScenarioGoals result={scenarioResult} onShowResult={() => setCardId(live.id)} />}
               <div className="tabs" role="tablist" aria-label="Ansicht">
                 <button role="tab" className="btn" aria-selected={view === "trade"}
                   onClick={() => setView("trade")}>Handel</button>
@@ -593,7 +608,7 @@ export function App() {
           )}
         </main>
       </div>
-      <ScenarioResultDialog result={scenarioResult} open={resultOpen} onClose={() => setResultOpen(false)} />
+      <RunCardDialog run={cardRun} open={cardId !== null} onClose={() => setCardId(null)} />
       {live && depot && (
         <AllocationDialog open={allocationOpen} simulationId={live.id} depotId={depot.id} depotName={depot.name}
           instruments={watchlist} onClose={() => setAllocationOpen(false)} />

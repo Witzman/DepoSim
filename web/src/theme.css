@@ -554,3 +554,15 @@ html[data-motion="reduced"] .guide-pulse { animation: none; }
 .goal-list li[data-met="true"] { color: var(--up); }
 .stars.big { font-size: 2rem; margin: 0; }
 .scenario-goals .toolbar { gap: 12px; }
+.run-card { max-width: min(760px, 96vw); }
+.run-card .grade-row { display: flex; gap: 20px; align-items: center; }
+.grade { font-size: 5rem; font-weight: 700; line-height: 1; margin: 0; min-width: 1.2em; text-align: center; }
+.grade-A { color: var(--up); } .grade-B { color: #4a8f2a; } .grade-C { color: #b58a00; } .grade-D { color: #c9661a; } .grade-E { color: var(--down); } .grade-none { color: var(--muted); }
+.grade-badge { font-weight: 700; }
+.grade-parts { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 4px; }
+.grade-parts li { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; }
+.grade-parts li .muted { grid-column: 1 / -1; font-size: 0.85em; }
+.card-preview { width: 100%; height: auto; border: 1px solid var(--border); border-radius: 6px; margin-top: 10px; background: #fff; }
+.card-text { width: 100%; margin-top: 8px; font: inherit; }
+.runbook-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.run-card .actions { flex-wrap: wrap; }

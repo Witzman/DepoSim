@@ -15,6 +15,7 @@ import { closedDayReason } from "./domain/venues.js";
 import { type Diversification, type HeldSeries, diversify } from "./domain/diversification.js";
 import { HINT_ORDER, HINT_RULES, type Hint, type HintRule, type RuleConfig, defaultConfig, evaluateHints, orderNotes } from "./domain/hints.js";
 import { type GoalOutcome, evaluateGoals, scenarioById } from "./domain/scenario.js";
+import { GRADE_FORMULA, type Grade, gradeRun } from "./domain/grade.js";
 import { type Orderbook, buildOrderbook } from "./domain/orderbook.js";
 import { type Journal, type JournalOrder, buildJournal } from "./domain/journal.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
@@ -165,6 +166,40 @@ export interface ScenarioResult extends GoalOutcome {
   endAt: number | null;
   depotId: number;
 }
+
+/** A round in the round book: the figures of the first normal depot, with the grade and a thinned curve for the card. */
+export interface RunSummary {
+  id: number;
+  name: string;
+  startAt: number;
+  simulationTime: number;
+  endedAt: number | null;
+  /** The round is over; before that these are figures of the moment and are worked out afresh each time. */
+  finished: boolean;
+  preset: Simulation["rules"]["preset"];
+  resolution: Simulation["resolution"];
+  scenarioId: string | null;
+  scenarioTitle: string | null;
+  startCash: Cent;
+  finalValue: Cent;
+  totalReturn: number | null;
+  benchmarkSymbol: string | null;
+  benchmarkReturn: number | null;
+  maxDrawdown: number | null;
+  fees: Cent;
+  feeShare: number;
+  trades: number;
+  hitRate: number | null;
+  closedTrades: number;
+  grade: Grade;
+  /** How the grade comes about, in words; the one source of the text the card shows. */
+  gradeFormula: string;
+  /** Stars and goals of a scenario round. */
+  scenario: ScenarioResult | null;
+  curve: { depot: Point[]; benchmark: Point[] | null };
+}
+
+const RUN_CURVE_POINTS = 120;
 
 export interface HintsResult {
   depotId: number;
@@ -637,6 +672,62 @@ export class SessionService {
     return { scenarioId: scenario.id, title: scenario.title, finished: sim.endedAt !== null, simulationTime: sim.simulationTime, endAt: sim.endAt, depotId: depot.id, ...outcome };
   }
 
+  private runCache = new Map<number, RunSummary>();
+
+  /**
+   * The round book entry of a simulation. A finished round never changes, so its figures are kept
+   * (the evaluation is not cheap) and a later look shows exactly the numbers of the first.
+   */
+  runSummary(id: number): RunSummary {
+    const sim = this.sim(id);
+    const cached = this.runCache.get(id);
+    if (cached && sim.endedAt !== null && cached.endedAt === sim.endedAt) return cached;
+    const ev = this.evaluation(id);
+    const depot = this.firstNormal(id);
+    const row = ev.depots.find((d) => d.id === depot.id) ?? ev.depots[0];
+    const state = this.store.loadDepot(depot.id);
+    const finalValue = depotValue(state, this.refsAt(sim.simulationTime, sim.resolution === "day"));
+    const journal = this.journal(id, depot.id);
+    const filledOrders = state.orders.filter((o) => o.status === "filled").length;
+    const benchmarkReturn = ev.benchmark?.metrics.totalReturn ?? null;
+    const grade = gradeRun({
+      totalReturn: row.metrics.totalReturn, benchmarkReturn, maxDrawdown: row.metrics.maxDrawdown, feeShare: row.fees.shareOfStart,
+      hitRate: journal.hitRate.rate, closedTrades: journal.hitRate.n, filledOrders, days: (sim.simulationTime - sim.startAt) / DAY,
+    });
+    const scenario = this.result(id) ?? null;
+    const bench = this.benchmarkSeries(sim, RUN_CURVE_POINTS);
+    const out: RunSummary = {
+      id, name: sim.name, startAt: sim.startAt, simulationTime: sim.simulationTime, endedAt: sim.endedAt, finished: sim.endedAt !== null,
+      preset: sim.rules.preset, resolution: sim.resolution, scenarioId: sim.scenarioId, scenarioTitle: scenario?.title ?? null,
+      startCash: sim.startCash, finalValue, totalReturn: row.metrics.totalReturn, benchmarkSymbol: ev.benchmark?.symbol ?? null,
+      benchmarkReturn, maxDrawdown: row.metrics.maxDrawdown, fees: row.fees.total, feeShare: row.fees.shareOfStart,
+      trades: filledOrders, hitRate: journal.hitRate.rate, closedTrades: journal.hitRate.n, grade, gradeFormula: GRADE_FORMULA, scenario,
+      curve: { depot: thin(this.store.valueCurve(depot.id, EVALUATION_POINTS), RUN_CURVE_POINTS), benchmark: bench },
+    };
+    if (sim.endedAt !== null) this.runCache.set(id, out);
+    return out;
+  }
+
+  /** The finished rounds, newest first. */
+  runs(): RunSummary[] {
+    return this.store.listSimulations()
+      .filter((s) => s.endedAt !== null)
+      .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0) || b.id - a.id)
+      .map((s) => this.runSummary(s.id));
+  }
+
+  /** The benchmark's closing prices from the start to now, in the points of the simulation's own resolution. */
+  private benchmarkSeries(sim: Simulation, maxPoints: number): Point[] | null {
+    const inst = sim.benchmark ? this.registry.get(sim.benchmark) : undefined;
+    if (!inst) return null;
+    return thin(
+      sim.resolution === "day"
+        ? (this.daily?.between(inst.symbol, sim.startAt, sim.simulationTime) ?? []).map((b) => ({ t: b.t + DAY, value: b.c }))
+        : this.archive.barsBetween(inst.symbol, sim.startAt - 59, sim.simulationTime - 59).map((b) => ({ t: b.t + 60, value: b.c })),
+      maxPoints,
+    );
+  }
+
   /** Trades, hit rate, holding time and "too early" of one depot, computed now from its filled orders. */
   journal(id: number, depotId: number): Journal & { bookings: Booking[]; depotId: number; simulationTime: number } {
     const sim = this.sim(id);
@@ -742,16 +833,7 @@ export class SessionService {
     const refs = this.refsAt(sim.simulationTime, sim.resolution === "day");
     const curves = this.store.listDepots(id).map((d) => ({ depot: d, points: this.store.valueCurve(d.id, EVALUATION_POINTS) }));
     const inst = sim.benchmark ? this.registry.get(sim.benchmark) : undefined;
-    const benchSeries: Point[] | null = inst
-      ? thin(
-        sim.resolution === "day"
-          ? (this.daily?.between(inst.symbol, sim.startAt, sim.simulationTime) ?? []).map((b) => ({ t: b.t + DAY, value: b.c }))
-          : this.archive
-            .barsBetween(inst.symbol, sim.startAt - 59, sim.simulationTime - 59)
-            .map((b) => ({ t: b.t + 60, value: b.c })),
-        EVALUATION_POINTS,
-      )
-      : null;
+    const benchSeries = this.benchmarkSeries(sim, EVALUATION_POINTS);
     const depots = curves.map(({ depot, points }) => {
       const state = this.store.loadDepot(depot.id);
       const held = [...state.positions].map(([symbol, pos]) => ({ symbol, value: positionValue(pos, refs.get(symbol)) }));
