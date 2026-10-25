@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { BehaviorCard } from "./BehaviorCard.js";
 import { getJournal, saveJournalNote } from "../api.js";
 import { arrowOf, formatDuration, formatEur, formatPercentPlain, formatRatio, signedEurArrow, signedPercent } from "../format.js";
 import { formatSimTime } from "../time.js";
@@ -142,6 +143,8 @@ function JournalBody({ simulationId, data, daily }: { simulationId: number; data
         </div>
       )}
       <p className="muted">Netto: nach Provision und Auslandspauschale. Gekauft und verkauft wird nach FIFO zugeordnet.</p>
+
+      <BehaviorCard b={data.behavior} />
 
       <h3>Ausschüttungen und Splits</h3>
       {data.bookings.length === 0 ? <p className="muted">Noch keine Buchung. Ausschüttungen und Aktiensplits werden zum Ex-Tag gebucht, wenn das Depot die Aktie hält.</p> : (

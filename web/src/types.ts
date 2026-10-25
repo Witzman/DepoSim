@@ -530,8 +530,25 @@ export interface JournalSale {
   horizons: JournalHorizon[];
 }
 
+/** The behaviour card of the journal: patterns in how the trades were made, every figure with its sample size. */
+export interface Behavior {
+  minTrades: number;
+  trades: number;
+  disposition: {
+    realizedGains: number; realizedLosses: number; paperGains: number; paperLosses: number;
+    pgr: number | null; plr: number | null; ratio: number | null; unpriced: number; n: number; ok: boolean;
+  };
+  holding: { winners: { n: number; medianSeconds: number | null }; losers: { n: number; medianSeconds: number | null }; ok: boolean };
+  turnover: { orders: number; ordersPerMonth: number | null; yearlyTurnover: number | null; feesPerTrade: number | null; feeShare: number | null; ok: boolean };
+  chasing: { n: number; momentum: number; pullback: number; momentumShare: number | null; pullbackShare: number | null; ok: boolean };
+  afterLoss: { n: number; medianGapSeconds: number | null; baselineGapSeconds: number | null; medianSize: number | null; baselineSize: number | null; ok: boolean };
+  timeOfDay: { hours: { hour: number; n: number; wins: number; netPnl: number }[]; ok: boolean; reason: string | null };
+  note: string;
+}
+
 export interface Journal {
   depotId: number;
+  behavior: Behavior;
   simulationTime: number;
   trades: JournalTrade[];
   hitRate: { n: number; wins: number; rate: number | null; basis: string };

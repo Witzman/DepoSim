@@ -101,6 +101,16 @@ export interface Journal {
   note: string;
 }
 
+/** What stood when a sale was made: the pieces it closed and every lot still open, for the behaviour analysis. */
+export interface SaleContext {
+  orderId: number;
+  symbol: string;
+  soldSim: number;
+  closed: { buyPrice: number; sellPrice: number; qty: number }[];
+  /** In the instrument's own currency, as all prices of the journal are. */
+  remaining: { symbol: string; qty: number; buyPrice: number }[];
+}
+
 export const MIN_TRADES = 5;
 /** Later close above sale price times this counts as "too early". */
 export const TOO_EARLY_FACTOR = 1.02;
@@ -147,14 +157,22 @@ function laterClose(bars: BarsAccess, symbol: string, soldSim: number, days: num
   return bar && bar.t >= day && bar.t + 60 <= s ? bar : undefined;
 }
 
-export function buildJournal(input: {
+interface JournalInput {
   orders: JournalOrder[];
   /** The simulation time. Nothing after it is read. */
   s: number;
   bars: BarsAccess;
   notes: Record<string, string>;
-}): Journal {
+}
+
+export function buildJournal(input: JournalInput): Journal {
+  return buildJournalCore(input).journal;
+}
+
+/** The journal and, per sale, what stood at that moment. One FIFO pass serves both. */
+export function buildJournalCore(input: JournalInput): { journal: Journal; contexts: SaleContext[] } {
   const { s, bars, notes } = input;
+  const contexts: SaleContext[] = [];
   const orders = [...input.orders].sort((a, b) => a.filledSim - b.filledSim || a.id - b.id);
 
   const lots = new Map<string, Lot[]>();
@@ -175,6 +193,7 @@ export function buildJournal(input: {
     let sellFees = o.commission + o.foreignFee;
     let sellLeft = o.qty;
     let sold = 0;
+    const closed: SaleContext["closed"] = [];
     while (toSell > 0 && queue.length > 0) {
       const lot = queue[0];
       const take = Math.min(toSell, lot.qty);
@@ -201,6 +220,7 @@ export function buildJournal(input: {
         netPct: cost === 0 ? null : round2((net / cost) * 100),
         note: notes[`${o.id}:${lot.order.id}`] ?? null,
       });
+      closed.push({ buyPrice: lot.order.fillPrice, sellPrice: o.fillPrice, qty: take });
       lot.qty -= take;
       lot.cost -= cost;
       lot.fees -= buyFees;
@@ -212,6 +232,10 @@ export function buildJournal(input: {
       if (lot.qty === 0) queue.shift();
     }
     if (sold > 0) {
+      contexts.push({
+        orderId: o.id, symbol: o.symbol, soldSim: o.filledSim, closed,
+        remaining: [...lots.values()].flatMap((q) => q.filter((l) => l.qty > 0).map((l) => ({ symbol: l.order.symbol, qty: l.qty, buyPrice: l.order.fillPrice }))),
+      });
       sales.push({
         orderId: o.id, symbol: o.symbol, qty: sold, soldSim: o.filledSim, price: o.fillPrice,
         horizons: HORIZONS.map((days): Horizon => {
@@ -258,7 +282,7 @@ export function buildJournal(input: {
     });
   }
 
-  return {
+  const journal: Journal = {
     trades,
     hitRate: {
       n: trades.length, wins, rate: trades.length === 0 ? null : wins / trades.length,
@@ -274,4 +298,5 @@ export function buildJournal(input: {
     fewData: trades.length < MIN_TRADES,
     note: NOTE,
   };
+  return { journal, contexts };
 }

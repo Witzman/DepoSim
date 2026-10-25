@@ -21,7 +21,8 @@ import { type AutoPauseRule, type Signals, distanceToLimit, jumpOf, noSignals, p
 import { type MarketEvent, marketEvents } from "./domain/marketEvents.js";
 import { type Analysis, type BetaPoint, BETA_WINDOW, analyze, rollingBeta } from "./domain/rolling.js";
 import { type Orderbook, buildOrderbook } from "./domain/orderbook.js";
-import { type Journal, type JournalOrder, buildJournal } from "./domain/journal.js";
+import { type Behavior, analyzeBehavior } from "./domain/behavior.js";
+import { type Journal, type JournalOrder, buildJournalCore } from "./domain/journal.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
 import type { Cent } from "./domain/money.js";
 import { applySplit, dividendCredit, showsSplit, splitOrder } from "./domain/events.js";
@@ -1002,7 +1003,7 @@ export class SessionService {
   }
 
   /** Trades, hit rate, holding time and "too early" of one depot, computed now from its filled orders. */
-  journal(id: number, depotId: number): Journal & { bookings: Booking[]; depotId: number; simulationTime: number } {
+  journal(id: number, depotId: number): Journal & { bookings: Booking[]; depotId: number; simulationTime: number; behavior: Behavior } {
     const sim = this.sim(id);
     const filled: JournalOrder[] = [];
     for (const o of this.store.loadDepot(depotId).orders) {
@@ -1012,8 +1013,14 @@ export class SessionService {
         gross: o.gross ?? 0, commission: o.commission ?? 0, foreignFee: o.foreignFee ?? 0,
       });
     }
-    const journal = buildJournal({ orders: filled, s: sim.simulationTime, bars: sim.resolution === "day" ? this.dailyBars() : this.archive, notes: this.store.notes(id) });
-    return { ...journal, bookings: this.store.bookings(depotId), depotId, simulationTime: sim.simulationTime };
+    const bars = sim.resolution === "day" ? this.dailyBars() : this.archive;
+    const { journal, contexts } = buildJournalCore({ orders: filled, s: sim.simulationTime, bars, notes: this.store.notes(id) });
+    const curve = this.store.valueCurve(depotId, EVALUATION_POINTS);
+    const meanValue = curve.length === 0 ? null : curve.reduce((a, p) => a + p.value, 0) / curve.length;
+    const behavior = analyzeBehavior({
+      orders: filled, trades: journal.trades, contexts, s: sim.simulationTime, bars, meanValue, intraday: sim.resolution !== "day",
+    });
+    return { ...journal, bookings: this.store.bookings(depotId), depotId, simulationTime: sim.simulationTime, behavior };
   }
 
   /** True if the key names a trade of any normal depot of the simulation. */

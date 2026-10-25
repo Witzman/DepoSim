@@ -141,6 +141,10 @@ test.describe("journal", () => {
     const journal = page.getByTestId("journal");
     await expect(journal.getByTestId("few-data")).toHaveText("wenig Daten");
     await expect(journal.getByTestId("hit-rate")).toContainText("n = 1");
+    await expect(journal.getByTestId("behavior-early")).toContainText("Zu früh, um etwas zu sagen");
+    await expect(journal.getByTestId("pgr-plr")).toHaveText("—"); // no number under the minimum
+    await journal.getByTestId("hint-disposition").click();
+    await expect(page.getByTestId("hint-text-disposition")).toContainText("PGR");
     await expect(journal.getByTestId("journal-note")).toHaveText("Beobachtung, keine Prognose.");
     await expect(journal.getByTestId("too-early-1")).toBeVisible();
     await expect(journal.getByTestId("too-early-5")).toBeVisible();

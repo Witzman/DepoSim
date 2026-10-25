@@ -26,6 +26,14 @@ describe("glossary", () => {
     }
   });
 
+  it("explains the behaviour card", () => {
+    const ids = hintIds(source("BehaviorCard.tsx"));
+    for (const id of ["disposition", "turnover", "chasing", "afterLoss"]) {
+      expect(ids, id).toContain(id);
+      expect(entryOf(id), id).toBeDefined();
+    }
+  });
+
   it("explains every figure that the journal shows", () => {
     const ids = hintIds(source("Journal.tsx"));
     for (const id of ["hitRate", "holding", "expectancy", "avgWinLoss", "payoff", "profitFactor", "bestWorstTrade", "losingStreak", "tooEarly"]) {

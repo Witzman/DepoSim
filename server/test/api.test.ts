@@ -848,6 +848,8 @@ describe("journal over HTTP", () => {
     expect(j.tooEarly).toHaveLength(2);
     expect(j.tooEarly[0]).toMatchObject({ days: 1, n: 0, rate: null, avgMovePct: null });
     expect(j.sales[0].horizons.map((h: any) => h.status)).toEqual(["open", "open"]);
+    // the behaviour part is additive and, with one trade, gives no figure
+    expect(j.behavior).toMatchObject({ trades: 1, minTrades: 10, disposition: { ok: false, realizedLosses: 1 }, holding: { ok: false }, timeOfDay: { ok: false } });
   });
 
   it("stores, replaces and deletes a note, and joins it into the journal", async () => {
