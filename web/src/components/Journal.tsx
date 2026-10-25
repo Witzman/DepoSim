@@ -68,10 +68,12 @@ export function Journal({ simulationId, depot, running, daily = false }: Props) 
   const ghost = depot.kind === "ghost";
   const fills = depot.orders.filter((o) => o.status === "filled").length;
 
+  // Another depot or simulation starts from nothing; a refresh of the same one keeps what is shown (and what is unfolded).
+  useEffect(() => setData(null), [simulationId, depot.id]);
+
   useEffect(() => {
     if (ghost) return;
     let current = true;
-    setData(null);
     const load = () =>
       getJournal(simulationId, depot.id)
         .then((d) => current && (setData(d), setError(null)))

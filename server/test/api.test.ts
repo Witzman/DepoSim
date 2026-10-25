@@ -905,6 +905,15 @@ describe("tax over HTTP", () => {
     expect((await app.inject({ url: `/api/simulations/${id}/journal` })).json().behavior).toEqual(j.behavior); // from the memo
     expect(app.session.hasTrade(id, j.trades[0].key)).toBe(true);
     expect(app.session.hasTrade(id, "9:9")).toBe(false);
+    // a deleted simulation takes the figures with it: depot ids come back with the next one
+    expect((await app.inject({ method: "DELETE", url: `/api/simulations/${id}` })).statusCode).toBe(204);
+    expect(inner.derivedCache.size).toBe(0);
+    expect(inner.excursionCache.size).toBe(0);
+    const id2 = await createSim(app);
+    await post(app, `/api/simulations/${id2}/orders`, { ...o, side: "buy" });
+    await post(app, `/api/simulations/${id2}/orders`, { ...o, side: "sell" });
+    const j2 = (await app.inject({ url: `/api/simulations/${id2}/journal` })).json();
+    expect(Object.keys(j2.excursions.trades)).toEqual([j2.trades[0].key]);
     app.session.dataChanged();
     expect(inner.derivedCache.size).toBe(0);
     expect(inner.excursionCache.size).toBe(0);

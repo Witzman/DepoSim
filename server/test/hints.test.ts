@@ -75,6 +75,14 @@ describe("evaluateHints", () => {
     expect(hints.find((h) => h.rule === "losingStreak")).toMatchObject({ severity: "warn", measure: 4 });
   });
 
+  it("flags a high turnover and a disposition ratio over the thresholds, and nothing while the sample is too small", () => {
+    expect(rules(evaluateHints(base({ behavior: { yearlyTurnover: 3.5, dispositionRatio: 2 } })))).toEqual(expect.arrayContaining(["turnover", "disposition"]));
+    expect(rules(evaluateHints(base({ behavior: { yearlyTurnover: 3, dispositionRatio: 1.5 } })))).not.toContain("turnover");
+    expect(rules(evaluateHints(base({ behavior: { yearlyTurnover: 3, dispositionRatio: 1.5 } })))).not.toContain("disposition");
+    expect(rules(evaluateHints(base({ behavior: { yearlyTurnover: null, dispositionRatio: null } })))).not.toContain("turnover");
+    expect(rules(evaluateHints(base({})))).not.toContain("disposition");
+  });
+
   it("notes thin data once there is a curve but no basis", () => {
     const curve = [{ t: 0, value: 1 }, { t: 1, value: 1 }];
     expect(rules(evaluateHints(base({ curve, metricsBasis: null })))).toContain("data");

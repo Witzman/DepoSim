@@ -103,7 +103,15 @@ test("switching the title and back shows that title's candles again, not the oth
   await createSimulation(page);
   const close = async () => (await page.getByTestId("ohlc").innerText()).match(/S\s+([\d.,]+)/)![1];
   await expect(page.getByTestId("ohlc")).toContainText("SAP.DE");
-  const sap = await close();
+  await expect(page.getByTestId("chart")).not.toHaveAttribute("data-bars", "0");
+  // the candles of the title have settled when the same close has been read twice, 500 ms apart
+  let sap = await close();
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(500);
+    const again = await close();
+    if (again === sap) break;
+    sap = again;
+  }
   await page.getByLabel("Wertpapier").selectOption("SIE.DE");
   await expect(page.getByTestId("ohlc")).toContainText("SIE.DE");
   await expect.poll(close).not.toBe(sap);

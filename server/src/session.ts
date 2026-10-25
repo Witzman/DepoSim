@@ -410,6 +410,9 @@ export class SessionService {
   reset(): void {
     this.running.clear();
     this.carry.clear();
+    this.runCache.clear();
+    this.excursionCache.clear();
+    this.derivedCache.clear();
   }
 
   /** Forgets what is kept in memory for a simulation that is deleted: SQLite may give its id to the next one. */
@@ -418,6 +421,9 @@ export class SessionService {
     this.carry.delete(id);
     this.runCache.delete(id);
     this.lastOpen.delete(id);
+    // Depot ids can come back too, and nothing tells which depots a simulation had: drop the figures worked out from prices.
+    this.excursionCache.clear();
+    this.derivedCache.clear();
   }
 
   /** Not stored: after a restart every simulation is paused. */
@@ -633,7 +639,14 @@ export class SessionService {
     const known = new Map(this.instruments.map((i) => [i.symbol, i]));
     const curve = this.store.valueCurve(depotId, EVALUATION_POINTS);
     const { config, hidden } = this.hintConfig(id);
-    const trades = depot.kind === "normal" ? this.journal(id, depotId).trades : [];
+    const journal = depot.kind === "normal" ? this.journal(id, depotId) : undefined;
+    const trades = journal?.trades ?? [];
+    const behavior = journal
+      ? {
+          yearlyTurnover: journal.behavior.turnover.ok ? journal.behavior.turnover.yearlyTurnover : null,
+          dispositionRatio: journal.behavior.disposition.ok ? journal.behavior.disposition.ratio : null,
+        }
+      : undefined;
     const all = evaluateHints({
       depotValue: depotValue(state, refs),
       cash: state.cash,
@@ -650,6 +663,7 @@ export class SessionService {
       feeShareOfStart: feeLedger(state.orders, sim.startCash).shareOfStart,
       trades,
       metricsBasis: computeMetrics(curve).basis,
+      behavior,
     }, config);
     return {
       depotId,
@@ -1089,7 +1103,7 @@ export class SessionService {
     const bars = sim.resolution === "day" ? this.dailyBars() : this.archive;
     const { journal, contexts, openLots } = buildJournalCore({ orders: filled, s: sim.simulationTime, bars, notes: this.store.notes(id) });
     // Behaviour and excursions do not depend on the notes: the same time, orders, bookings and prices give the same figures.
-    const key = `${depotId}:${sim.simulationTime}:${filled.length}:${filled.at(-1)?.id ?? 0}:${sim.benchmark ?? ""}:${this.dataVersion}`;
+    const key = `${id}:${depotId}:${sim.simulationTime}:${filled.length}:${filled.at(-1)?.id ?? 0}:${sim.benchmark ?? ""}:${this.dataVersion}`;
     let derived = this.derivedCache.get(key);
     if (!derived) {
       const curve = this.store.valueCurve(depotId, EVALUATION_POINTS);

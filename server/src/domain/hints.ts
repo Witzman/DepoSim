@@ -1,7 +1,7 @@
 import type { Basis } from "./metrics.js";
 import type { Cent } from "./money.js";
 
-export type HintRule = "largest" | "top3" | "sector" | "usd" | "cashLow" | "cashHigh" | "fees" | "drawdown" | "losingStreak" | "data";
+export type HintRule = "largest" | "top3" | "sector" | "usd" | "cashLow" | "cashHigh" | "fees" | "drawdown" | "losingStreak" | "turnover" | "disposition" | "data";
 export type Severity = "info" | "warn";
 
 export interface RuleConfig {
@@ -32,6 +32,8 @@ export const HINT_RULES: Record<HintRule, RuleInfo> = {
   fees: { label: "Gebühren", unit: "share", severity: "warn", defaults: [0.01], why: "fees" },
   drawdown: { label: "Rückgang vom Höchststand", unit: "share", severity: "info", defaults: [0.1, 0.2], why: "maxDrawdown" },
   losingStreak: { label: "Verlustserie", unit: "count", severity: "warn", defaults: [4], why: "losingStreak" },
+  turnover: { label: "Umschlag", unit: "count", severity: "info", defaults: [3], why: "turnover" },
+  disposition: { label: "Dispositionseffekt", unit: "count", severity: "info", defaults: [1.5], why: "disposition" },
   data: { label: "Datenlage", unit: "none", severity: "info", defaults: [], why: "basis" },
 };
 
@@ -63,6 +65,8 @@ export interface HintInput {
   feeShareOfStart: number;
   trades: { netPnl: number; closedSim: number; sellOrderId: number }[];
   metricsBasis: Basis | null;
+  /** From the behaviour figures of the journal; absent for a depot that does not trade. A figure is null while its sample is too small. */
+  behavior?: { yearlyTurnover: number | null; dispositionRatio: number | null };
 }
 
 const pct = (x: number) => `${(x * 100).toFixed(x * 100 < 10 && x > 0 ? 1 : 0).replace(".", ",")} %`;
@@ -158,6 +162,18 @@ export function evaluateHints(input: HintInput, config: Record<HintRule, RuleCon
     const streak = currentLosingStreak(input.trades);
     const t = config.losingStreak.levels[0];
     if (streak >= t) make("losingStreak", 0, `Die letzten ${streak} abgeschlossenen Trades endeten im Minus (Schwelle ${t}). Auch gute Methoden haben Serien; bei wenigen Trades ist das oft Zufall.`, streak, t);
+  }
+
+  const turnover = input.behavior?.yearlyTurnover ?? null;
+  if (on("turnover") && turnover !== null && turnover > config.turnover.levels[0]) {
+    const t = config.turnover.levels[0];
+    make("turnover", 0, `Das Kaufvolumen entspricht ${turnover.toFixed(1).replace(".", ",")}-mal dem mittleren Depot je Jahr (Schwelle ${String(t).replace(".", ",")}). Jede Order kostet; viel Handel braucht ein entsprechend großes Ergebnis vor Gebühren.`, turnover, t);
+  }
+
+  const ratio = input.behavior?.dispositionRatio ?? null;
+  if (on("disposition") && ratio !== null && ratio > config.disposition.levels[0]) {
+    const t = config.disposition.levels[0];
+    make("disposition", 0, `Gewinne wurden ${ratio.toFixed(1).replace(".", ",")}-mal eher verkauft als Verluste (Schwelle ${String(t).replace(".", ",")}). Das Muster heißt Dispositionseffekt; mit wenigen Trades ist es oft Zufall.`, ratio, t);
   }
 
   if (on("data") && input.curve.length >= 2 && input.metricsBasis === null) {

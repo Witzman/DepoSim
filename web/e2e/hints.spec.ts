@@ -45,7 +45,7 @@ test("with every rule off the card disappears", async ({ page, request }) => {
   await page.getByRole("button", { name: "Kaufen" }).click();
   await expect(page.getByTestId("hints")).toBeVisible();
   const id = (await (await request.get("/api/simulations")).json())[0].id;
-  for (const rule of ["largest", "top3", "sector", "usd", "cashLow", "cashHigh", "fees", "drawdown", "losingStreak", "data"]) {
+  for (const rule of ["largest", "top3", "sector", "usd", "cashLow", "cashHigh", "fees", "drawdown", "losingStreak", "turnover", "disposition", "data"]) {
     await request.put(`/api/simulations/${id}/hints/${rule}`, { data: { enabled: false } });
   }
   await page.reload();
