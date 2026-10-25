@@ -26,6 +26,12 @@ describe("glossary", () => {
     }
   });
 
+  it("explains the after-tax card", () => {
+    const ids = hintIds(source("TaxCard.tsx"));
+    expect(ids).toContain("afterTax");
+    expect(entryOf("afterTax")).toBeDefined();
+  });
+
   it("explains the review of the trades", () => {
     const ids = hintIds(source("TradeReview.tsx"));
     for (const id of ["mae", "mfe", "exitEfficiency"]) {

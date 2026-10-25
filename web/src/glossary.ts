@@ -244,6 +244,13 @@ export const GLOSSARY: Entry[] = [
     aliases: ["exit", "ausstieg", "gewinn mitgenommen"],
   },
   {
+    id: "afterTax", name: "Nach Steuern (Schätzung)",
+    short: "Was von den realisierten Gewinnen nach deutscher Abgeltungsteuer übrig bliebe, als reine Informationssicht.",
+    how: "Realisierte Ergebnisse (nach Gebühren) und Ausschüttungen werden je Kalenderjahr getrennt in einen Aktien-Topf und einen allgemeinen Topf verrechnet, mit Verlustvortrag, Teilfreistellung bei Fonds und dem Sparerpauschbetrag des Jahres. Der Rest wird mit 25 % plus Soli (und Kirchensteuer) besteuert. Die Netto-Kurve ist die Depotkurve minus die bis dahin geschuldete Steuer.",
+    pitfall: "Eine Vereinfachung, keine Steuerberatung: die Buchung des Brokers ändert sich nicht, nicht realisierte Gewinne werden nicht besteuert, die Vorabpauschale fehlt, Quellensteuer und Freistellungsaufträge bei mehreren Banken sind nicht modelliert.",
+    aliases: ["steuer", "abgeltungsteuer", "sparerpauschbetrag", "freistellungsauftrag", "teilfreistellung", "verlustverrechnung", "kirchensteuer", "soli"],
+  },
+  {
     id: "fees", name: "Gebührenbilanz",
     short: "Was Provision und Auslandspauschale gekostet haben.",
     how: "Summe aus Provision und Auslandspauschale aller ausgeführten Orders; „vom Start“ setzt sie ins Verhältnis zum Startkapital.",

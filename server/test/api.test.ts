@@ -826,6 +826,47 @@ describe("ghost depots over HTTP", () => {
   });
 });
 
+describe("tax over HTTP", () => {
+  it("is off at first, takes settings, and then reports taxes, the net curve and the friction", async () => {
+    const app = make();
+    const id = await createSim(app);
+    const off = await app.inject({ url: `/api/simulations/${id}/tax` });
+    expect(off.statusCode).toBe(200);
+    expect(off.json()).toMatchObject({ enabled: false, report: null, settings: { enabled: false, church: 0, allowance: null } });
+    expect(off.json().vorabpauschale.computed).toBe(false);
+
+    const bad = await app.inject({ method: "PUT", url: `/api/simulations/${id}/tax`, payload: { church: 0.5 } as object });
+    expect(bad.statusCode).toBe(400);
+    const unknown = await app.inject({ method: "PUT", url: `/api/simulations/${id}/tax`, payload: { nope: 1 } as object });
+    expect(unknown.statusCode).toBe(400);
+
+    const put = await app.inject({ method: "PUT", url: `/api/simulations/${id}/tax`, payload: { enabled: true, church: 0.09, allowance: 500 } as object });
+    expect(put.json()).toMatchObject({ enabled: true, church: 0.09, allowance: 500 });
+    const o = { symbol: "SAP.DE", kind: "market", qty: 2 };
+    await post(app, `/api/simulations/${id}/orders`, { ...o, side: "buy" });
+    await post(app, `/api/simulations/${id}/orders`, { ...o, side: "sell" });
+
+    const on = (await app.inject({ url: `/api/simulations/${id}/tax` })).json();
+    expect(on.enabled).toBe(true);
+    expect(on.rules).toMatchObject({ allowance: 500, allowanceIsDefault: false });
+    expect(on.rules.rate).toBeCloseTo(0.27995, 4);
+    expect(on.report.total).toBe(0); // the round trip lost money: no tax, the loss is carried
+    expect(on.report.years[0].carryOutStock).toBeLessThan(0);
+    expect(on.report.curve.length).toBeGreaterThan(0);
+    expect(on.report.friction.fees).toBeGreaterThan(0);
+    expect(on.report.friction.tax).toBe(0);
+    expect(on.report.net.totalReturn).toBe(on.report.gross.totalReturn); // no tax owed: the same curve
+
+    const off2 = await app.inject({ method: "PUT", url: `/api/simulations/${id}/tax`, payload: { enabled: false } as object });
+    expect(off2.json()).toMatchObject({ enabled: false, church: 0.09 });
+  });
+
+  it("answers 404 for an unknown simulation", async () => {
+    const app = make();
+    expect((await app.inject({ url: "/api/simulations/9999/tax" })).statusCode).toBe(404);
+  });
+});
+
 describe("journal over HTTP", () => {
   const trade = async (app: FastifyInstance, id: number, depotId?: number) => {
     const o = { symbol: "SAP.DE", kind: "market", qty: 2, ...(depotId ? { depotId } : {}) };

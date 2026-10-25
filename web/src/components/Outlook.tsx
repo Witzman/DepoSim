@@ -113,7 +113,7 @@ export function Outlook({ simulationId, depot, running, benchmark }: Props) {
         <label>Verfahren{" "}
           <select value={method} onChange={(e) => setMethod(e.target.value as Method)} data-testid="outlook-method">
             <option value="bootstrap">Blöcke der eigenen Renditen</option>
-            <option value="normal" disabled={bench.length < MIN_HISTORY_DAYS}>Normalverteilt mit Rendite und Schwankung des Maßstabs{benchmark ? ` (${benchmark})` : ""}</option>
+            <option value="normal" disabled={bench.length < MIN_HISTORY_DAYS}>Normalverteilt mit Rendite und Schwankung des Vergleichswerts{benchmark ? ` (${benchmark})` : ""}</option>
           </select>
         </label>
       </div>

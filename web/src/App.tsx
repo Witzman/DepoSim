@@ -9,6 +9,7 @@ import { Compare } from "./components/Compare.js";
 import { Journal } from "./components/Journal.js";
 import { Dividends } from "./components/Dividends.js";
 import { Outlook } from "./components/Outlook.js";
+import { TaxCard } from "./components/TaxCard.js";
 import { Rolling } from "./components/Rolling.js";
 import { EventStrip } from "./components/EventStrip.js";
 import { ScenarioGoals, useScenarioResult } from "./components/ScenarioGoals.js";
@@ -640,6 +641,7 @@ export function App() {
                       onBenchmark={chooseBenchmark} />
                     <Evaluation simulationId={live.id} activeDepotId={depot.id} running={snapshot.running}
                       benchmark={live.benchmark} rules={live.rules} />
+                    <TaxCard simulationId={live.id} depot={depot} running={snapshot.running} />
                     <Rolling simulationId={live.id} depot={depot} running={snapshot.running} theme={theme} />
                     <Outlook simulationId={live.id} depot={depot} running={snapshot.running} benchmark={live.benchmark} />
                     <Dividends simulationId={live.id} depot={depot} running={snapshot.running} />

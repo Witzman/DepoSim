@@ -598,7 +598,7 @@ input.mini { width: 4.5em; }
 .heat th, .heat td, table.episodes th, table.episodes td { padding: 3px 5px; text-align: right; white-space: nowrap; }
 .heat th[scope="row"], table.episodes th, table.episodes td:not(.num) { text-align: left; }
 .heat td { border: 1px solid var(--surface); }
-.outlook .warn-note { border-left: 4px solid var(--series-5); padding: 6px 10px; background: color-mix(in srgb, var(--series-5) 12%, transparent); }
+.warn-note { border-left: 4px solid var(--series-5); padding: 6px 10px; background: color-mix(in srgb, var(--series-5) 12%, transparent); }
 .outlook .narrow-input { width: 8em; }
 .outlook label { display: inline-flex; gap: 6px; align-items: center; }
 .rolling-svg .fan-outer { fill: color-mix(in srgb, var(--series-1) 14%, transparent); stroke: none; }
@@ -607,3 +607,4 @@ input.mini { width: 4.5em; }
 .outlook .fan-swatch-outer { background: color-mix(in srgb, var(--series-1) 14%, transparent); }
 .review-detail { padding: 6px 4px; } .review-path { width: 240px; max-width: 100%; height: auto; display: block; }
 .review-bar { display: inline-block; height: 10px; min-width: 2px; background: var(--series-1); border-radius: 2px; }
+.tax .narrow-input { width: 8em; } .tax label { display: inline-flex; gap: 6px; align-items: center; }

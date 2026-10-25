@@ -1,4 +1,5 @@
 import type { Db } from "./db.js";
+import { type TaxSettings, parseTaxSettings } from "./domain/tax.js";
 import type { Cent } from "./domain/money.js";
 import type { FeeConfig } from "./domain/fees.js";
 import { splitOrder } from "./domain/events.js";
@@ -29,6 +30,8 @@ export interface Simulation {
   endAt: number | null;
   /** The rules that stop the clock by themselves. */
   autoPause: AutoPause;
+  /** The settings of the "after tax" view. */
+  tax: TaxSettings;
 }
 
 /** A ghost is a frozen copy of a depot that never trades; it is only valued at market. */
@@ -132,6 +135,7 @@ export interface Store {
   setTempo(id: number, tempo: Tempo): void;
   setBenchmark(id: number, symbol: string | null): void;
   setAutoPause(id: number, prefs: AutoPause): void;
+  setTax(id: number, settings: TaxSettings): void;
   /** Cash, positions and every order of one depot. */
   loadDepot(depotId: number): DepotState & { orders: OrderRecord[] };
   /** Writes the cash and replaces the positions. */
@@ -194,6 +198,7 @@ interface SimulationRow {
   scenario_id: string | null;
   end_at: number | null;
   auto_pause: string | null;
+  tax: string | null;
 }
 
 const toSimulation = (r: SimulationRow): Simulation => ({
@@ -213,6 +218,7 @@ const toSimulation = (r: SimulationRow): Simulation => ({
   scenarioId: r.scenario_id,
   endAt: r.end_at,
   autoPause: parseAutoPause(r.auto_pause),
+  tax: parseTaxSettings(r.tax),
 });
 
 export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
@@ -262,6 +268,9 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
     },
     setAutoPause: (id, prefs) => {
       db.prepare("update simulations set auto_pause = ? where id = ?").run(JSON.stringify(prefs), id);
+    },
+    setTax: (id, settings) => {
+      db.prepare("update simulations set tax = ? where id = ?").run(JSON.stringify(settings), id);
     },
     setTempo: (id, tempo) => {
       db.prepare("update simulations set tempo = ? where id = ?").run(tempo, id);

@@ -1,5 +1,5 @@
 import type {
-  AllocationLine, ArchiveInfo, AutoPause, FlagReport, BackfillJob, BackupStatus, Coverage, DataStatus, GapReport, HintsResult, JobsOverview, SourceSummary, Bar, ClientMessage, CompareResult, CostPreview, Curves, Depot, DividendCalendar, Evaluation, Instrument, Journal, JournalNoteResult, MarketEvent,
+  AllocationLine, ArchiveInfo, AutoPause, FlagReport, BackfillJob, BackupStatus, Coverage, DataStatus, GapReport, HintsResult, JobsOverview, SourceSummary, Bar, ClientMessage, CompareResult, CostPreview, Curves, Depot, DividendCalendar, Evaluation, Instrument, Journal, JournalNoteResult, MarketEvent, TaxReport, TaxSettings,
   Longterm, LongtermJob, MissingList, OrderInput, Orderbook, RollingResult, RunSummary, Scenario, ScenarioResult, SearchHit, ServerMessage, Simulation, Rules, VenueInfo,
 } from "./types.js";
 
@@ -57,6 +57,8 @@ export const createSimulation = (body: {
 export const getScenarios = () => request<Scenario[]>("/api/scenarios");
 export const getMarketEvents = (id: number, symbols: string[]) =>
   request<MarketEvent[]>(`/api/simulations/${id}/events?symbols=${encodeURIComponent(symbols.join(","))}`);
+export const getTax = (id: number, depotId: number) => request<TaxReport>(`/api/simulations/${id}/tax?depotId=${depotId}`);
+export const putTax = (id: number, patch: Partial<TaxSettings>) => request<TaxSettings>(`/api/simulations/${id}/tax`, json("PUT", patch));
 export const getRolling = (id: number, depotId: number) =>
   request<RollingResult>(`/api/simulations/${id}/rolling?depotId=${depotId}`);
 export const getDividends = (id: number, depotId: number) =>

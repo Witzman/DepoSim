@@ -815,3 +815,30 @@ export interface JobsOverview {
   jobs: JobInfo[];
   runs: JobRun[];
 }
+
+export type FundType = "equityFund" | "mixedFund" | "other";
+
+export interface TaxSettings { enabled: boolean; church: number; allowance: number | null; fundTypes: Record<string, FundType> }
+
+export interface YearTax {
+  year: number; stockNet: number; otherNet: number; carryInStock: number; carryInOther: number; offset: number;
+  base: number; allowance: number; taxable: number; tax: number; carryOutStock: number; carryOutOther: number;
+}
+
+type TaxFigures = { totalReturn: number | null; volatility: number | null; sharpe: number | null; maxDrawdown: number | null; basis: Basis | null };
+
+/** GET /api/simulations/:id/tax. `report` is null while the view is off. */
+export interface TaxReport {
+  settings: TaxSettings;
+  enabled: boolean;
+  rules: { asOf: string; rate: number; church: number[]; allowance: number; allowanceIsDefault: boolean; sources: string[] };
+  vorabpauschale: { computed: false; reason: string };
+  funds: { symbol: string; name: string; type: FundType; isDefault: boolean }[];
+  report: {
+    years: YearTax[]; total: number;
+    curve: { t: number; gross: number; net: number }[];
+    gross: TaxFigures; net: TaxFigures;
+    friction: { fees: number; tax: number; before: number; share: number | null };
+    hold: { tax: number; difference: number; gain: number };
+  } | null;
+}

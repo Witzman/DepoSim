@@ -14,6 +14,7 @@ import type { InstrumentSearch } from "./data/search.js";
 import { DEFAULT_FEES } from "./domain/fees.js";
 import { JUMP_REFUSED, applyRules, resolveRules } from "./domain/rules.js";
 import { parseAutoPause } from "./domain/autopause.js";
+import { parseTaxSettings } from "./domain/tax.js";
 import { SCENARIOS, scenarioById } from "./domain/scenario.js";
 import { describeError } from "./errors.js";
 import type { Fx } from "./fx.js";
@@ -87,6 +88,12 @@ const hintPrefBody = z.object({
   levels: z.array(z.number()).max(3).optional(),
 }).strict();
 
+const taxBody = z.object({
+  enabled: z.boolean().optional(),
+  church: z.union([z.literal(0), z.literal(0.08), z.literal(0.09)]).optional(),
+  allowance: z.number().min(0).max(100000).nullable().optional(),
+  fundTypes: z.record(z.string().max(20), z.enum(["equityFund", "mixedFund", "other"])).optional(),
+}).strict();
 const journalQuery = z.object({ depotId: z.coerce.number().int().optional() });
 const noteBody = z.object({ text: z.string().max(500, "Die Notiz darf höchstens 500 Zeichen haben.") });
 const TRADE_KEY = /^\d{1,12}:\d{1,12}$/;
@@ -678,6 +685,28 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     if (body.data.autoPause) store.setAutoPause(sim.id, parseAutoPause({ ...sim.autoPause, ...body.data.autoPause }));
     hub.broadcastSnapshot(sim.id);
     return store.getSimulation(sim.id);
+  });
+
+  app.get("/api/simulations/:id/tax", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    const query = journalQuery.safeParse(req.query);
+    if (!query.success) return invalid(reply, query.error);
+    const depots = store.listDepots(sim.id);
+    const depot = query.data.depotId === undefined ? depots.find((d) => d.id === session.defaultDepotId(sim.id)) : depots.find((d) => d.id === query.data.depotId);
+    if (!depot) return unknownDepot(reply);
+    if (depot.kind === "ghost") return reply.code(400).send({ error: "Ein Geisterdepot handelt nicht: es gibt nichts zu versteuern." });
+    return session.tax(sim.id, depot.id);
+  });
+
+  app.put("/api/simulations/:id/tax", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    const body = taxBody.safeParse(req.body);
+    if (!body.success) return invalid(reply, body.error);
+    const next = parseTaxSettings({ ...sim.tax, ...body.data, fundTypes: { ...sim.tax.fundTypes, ...(body.data.fundTypes ?? {}) } });
+    store.setTax(sim.id, next);
+    return next;
   });
 
   app.post("/api/simulations/:id/jump", async (req, reply) => {
