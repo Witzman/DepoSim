@@ -35,19 +35,20 @@ interface Props {
   /** Time lapse needs no open order. */
   hasOpenOrders?: boolean;
   /** The rules that stop the clock by themselves; absent where a stop makes no sense. */
-  autoPause?: { value: AutoPause; daily: boolean; onChange: (patch: Partial<AutoPause>) => void };
+  autoPause?: { value: AutoPause; daily: boolean; onChange: (patch: Partial<AutoPause>) => void | Promise<void> };
   onTempo: (t: Tempo) => void;
   onRun: () => void;
   onPause: () => void;
 }
 
 /** The switches of the auto-pause. They change at once on the page and are sent to the server in the background. */
-function AutoPauseMenu({ value, daily, onChange }: { value: AutoPause; daily: boolean; onChange: (patch: Partial<AutoPause>) => void }) {
+function AutoPauseMenu({ value, daily, onChange }: { value: AutoPause; daily: boolean; onChange: (patch: Partial<AutoPause>) => void | Promise<void> }) {
   const [ap, setAp] = useState(value);
   useEffect(() => setAp(value), [value]);
   const change = (patch: Partial<AutoPause>) => {
     setAp((prev) => ({ ...prev, ...patch }));
-    onChange(patch);
+    // A refusal (409 in a game without pause) must not leave a switch on that the server did not take.
+    void Promise.resolve(onChange(patch)).catch(() => setAp(value));
   };
   return (
         <details className="autopause" data-testid="autopause">

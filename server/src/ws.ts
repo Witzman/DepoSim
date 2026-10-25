@@ -46,6 +46,34 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
   // The simulation time at the last tick: a wait is over when the clock moves, not when one tick merely does not flag it.
   const lastTime = new Map<number, number>();
 
+  // The orders of a depot as last sent in a tick. A tick repeats them only when they changed: the full list of a busy
+  // depot made every tick (four a second) as big as its whole history. A client that attaches gets them in its snapshot.
+  const sentOrders = new Map<string, string>();
+  const ordersSignature = (orders: { id: number; status: string; qty: number; limitPrice?: number }[]) => {
+    let filled = 0;
+    const open: string[] = [];
+    for (const o of orders) {
+      if (o.status === "filled") filled++;
+      else if (o.status === "open") open.push(`${o.id}:${o.qty}:${o.limitPrice ?? ""}`);
+    }
+    return `${orders.length}|${filled}|${open.join(",")}`;
+  };
+  /** The snapshot as a tick carries it: without `simulation`, and without the order lists that did not change since the last tick. */
+  const tickRest = (id: number) => {
+    const { simulation: _simulation, ...rest } = session.snapshot(id);
+    const depots = rest.depots.map((d) => {
+      const key = `${id}:${d.id}`;
+      const signature = ordersSignature(d.orders);
+      if (sentOrders.get(key) === signature) {
+        const { orders: _orders, ...slim } = d;
+        return slim;
+      }
+      sentOrders.set(key, signature);
+      return d;
+    });
+    return { ...rest, depots };
+  };
+
   const send = (ws: WebSocket, m: unknown) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(m));
   };
@@ -73,8 +101,7 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
     loop.busy = true;
     try {
       const result: TickResult = session.tick(id, realMs);
-      const { simulation: _simulation, ...rest } = session.snapshot(id);
-      broadcast(id, { type: "tick", simulationTime: result.simulationTime, newBars: result.newBars, ...rest });
+      broadcast(id, { type: "tick", simulationTime: result.simulationTime, newBars: result.newBars, ...tickRest(id) });
       if (store.getSimulation(id)?.endedAt != null) {
         // A scenario reached its end: the clock stops, the result is the next thing to look at.
         stopLoop(id);
@@ -191,8 +218,7 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
           }
           stopLoop(id);
           const result = session.stepDays(id, 1);
-          const { simulation: _s, ...rest } = session.snapshot(id);
-          broadcast(id, { type: "tick", simulationTime: result.simulationTime, newBars: result.newBars, ...rest });
+          broadcast(id, { type: "tick", simulationTime: result.simulationTime, newBars: result.newBars, ...tickRest(id) });
           if (store.getSimulation(id)?.endedAt != null) {
             broadcast(id, { type: "notice", text: "Das Szenario ist zu Ende. Das Ergebnis steht im Dialog." });
             broadcast(id, snapshotMessage(id));
@@ -247,8 +273,7 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
         r = { ...next, newBars };
         if (kind === "candle" && next.stopped === null) break;
       }
-      const { simulation: _s, ...rest } = session.snapshot(id);
-      broadcast(id, { type: "tick", simulationTime: r.simulationTime, newBars: r.newBars, ...rest });
+      broadcast(id, { type: "tick", simulationTime: r.simulationTime, newBars: r.newBars, ...tickRest(id) });
       if (r.stopped) {
         if (r.stopped.rule === "end") broadcast(id, { type: "notice", text: "Das Szenario ist zu Ende. Das Ergebnis steht im Dialog." });
         else if (r.stopped.rule === "data") broadcast(id, { type: "notice", text: r.stopped.reason });
@@ -263,6 +288,7 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
       stopLoop(id);
       refreshAt.delete(id);
       lastTime.delete(id);
+      for (const key of [...sentOrders.keys()]) if (key.startsWith(`${id}:`)) sentOrders.delete(key);
       for (const ws of [...(clients.get(id) ?? [])]) ws.close(1000, "simulation removed");
       clients.delete(id);
     },
@@ -271,6 +297,7 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
       for (const id of [...loops.keys()]) stopLoop(id);
       for (const set of clients.values()) for (const ws of set) ws.close(1001, "server stopping");
       clients.clear();
+      sentOrders.clear();
     },
   };
   return hub;

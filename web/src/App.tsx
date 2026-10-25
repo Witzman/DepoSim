@@ -97,6 +97,7 @@ export function App() {
   const rawLimitRef = useRef(rawLimit);
   rawLimitRef.current = rawLimit;
   const [notice, setNotice] = useState<string | null>(null);
+  const [disconnected, setDisconnected] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ticketCommand, setTicketCommand] = useState<{ side: "buy" | "sell"; n: number }>({ side: "buy", n: 0 });
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -158,7 +159,9 @@ export function App() {
     } else if (m.type === "tick") {
       setSnapshot((prev) =>
         prev && {
-          ...prev, running: m.running, depots: m.depots, prices: m.prices, fx: m.fx, venues: m.venues, venueClosed: m.venueClosed,
+          ...prev, running: m.running,
+          depots: m.depots.map((d) => ({ ...d, orders: d.orders ?? prev.depots.find((p) => p.id === d.id)?.orders ?? [] })),
+          prices: m.prices, fx: m.fx, venues: m.venues, venueClosed: m.venueClosed,
           liveLimit: m.liveLimit, delayS: m.delayS, phase: m.phase,
           simulation: { ...prev.simulation, simulationTime: m.simulationTime },
         },
@@ -241,7 +244,8 @@ export function App() {
     setSnapshot(null);
     setNotice(null);
     if (selectedId === null) return;
-    const s = openSocket(selectedId, onMessage, () => {});
+    setDisconnected(false);
+    const s = openSocket(selectedId, onMessage, () => setDisconnected(true), () => setDisconnected(false));
     socket.current = s;
     return () => s.close();
   }, [selectedId, onMessage]);
@@ -543,6 +547,7 @@ export function App() {
 
         <main className="main stack">
           {loadError && <p className="banner error" role="alert">{loadError}</p>}
+          {disconnected && <p className="banner error" role="status" data-testid="disconnected">Die Verbindung zum Server ist abgebrochen. Sie wird neu aufgebaut; die Uhr steht so lange.</p>}
           {notice && <p className="banner" role="status">{notice}</p>}
 
           {live ? (
@@ -564,7 +569,7 @@ export function App() {
                     : undefined}
                   hasOpenOrders={snapshot?.depots.some((d) => d.orders.some((o) => o.status === "open")) ?? false}
                   autoPause={!live.live && live.endedAt === null && live.rules.pauseAllowed
-                    ? { value: live.autoPause, daily: live.resolution === "day", onChange: (patch) => { setAutoPause(live.id, patch).catch((e) => setNotice((e as Error).message)); } }
+                    ? { value: live.autoPause, daily: live.resolution === "day", onChange: (patch) => setAutoPause(live.id, patch).then(() => undefined, (e) => { setNotice((e as Error).message); throw e; }) }
                     : undefined}
                   onTempo={(t) => socket.current?.send({ type: "tempo", tempo: t })}
                   onRun={() => { setNotice(null); socket.current?.send({ type: "run" }); }}

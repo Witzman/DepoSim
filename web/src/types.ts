@@ -475,7 +475,8 @@ export type ServerMessage =
       simulationTime: number;
       newBars: Record<string, Bar[]>;
       running: boolean;
-      depots: DepotView[];
+      /** A depot without `orders` has the same orders as in the message before: the server sends them only when they changed. */
+      depots: (Omit<DepotView, "orders"> & { orders?: DepotView["orders"] })[];
       prices: Snapshot["prices"];
       fx: number | null;
       venues: Snapshot["venues"];

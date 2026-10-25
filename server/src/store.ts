@@ -145,6 +145,8 @@ export interface Store {
   setOrderStatus(orderId: number, status: OrderStatus): void;
   /** True if any simulation holds the symbol or has an open order in it. */
   symbolInUse(symbol: string): boolean;
+  /** True if any depot ever filled an order in the symbol or was booked a distribution or split for it: its history needs the instrument. */
+  symbolHasHistory(symbol: string): boolean;
   /** Everything inside commits together or not at all. */
   transaction<T>(fn: () => T): T;
 }
@@ -317,6 +319,10 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
           "select 1 from positions where symbol = ? and qty > 0 union all " +
             "select 1 from orders where symbol = ? and status = 'open' limit 1",
         )
+        .get(symbol, symbol) !== undefined,
+    symbolHasHistory: (symbol) =>
+      db
+        .prepare("select 1 from orders where symbol = ? and status = 'filled' union all select 1 from cash_events where symbol = ? limit 1")
         .get(symbol, symbol) !== undefined,
     transaction: (fn) => db.transaction(fn)(),
     createDepot: (simulationId, name) =>

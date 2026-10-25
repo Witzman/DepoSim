@@ -13,6 +13,8 @@ const MINUTE = 60;
 
 /** The collection counts as failed when its last success is older than this. */
 export const STALE_COLLECTION_S = 2 * DAY;
+/** How long after UTC midnight the day before still counts as running: the repair job runs at 02:30 Berlin (00:30 or 01:30 UTC). */
+const REPAIR_GRACE_S = 3 * 3600;
 /** Above this share of the expected bars a day is not "thin". Yahoo's own answer for thin ETFs was about a fifth (EXS1.DE 108 of 510). */
 const THIN_BELOW = 0.5;
 const MAX_GAP_LIST = 200;
@@ -200,7 +202,10 @@ export function createHealth(deps: {
 
   function dayStarts(days: number): { list: number[]; today: number } {
     const today = Math.floor(now() / DAY) * DAY;
-    return { list: Array.from({ length: days }, (_, i) => today - (days - 1 - i) * DAY), today };
+    // The evening collections leave the UTC day cut off (`complete = 0`) until the gap repair at 02:30 Berlin has run. Until
+    // then that day still counts as running, so the light does not turn yellow every night for a gap that mends itself.
+    const open = Math.floor((now() - REPAIR_GRACE_S) / DAY) * DAY;
+    return { list: Array.from({ length: days }, (_, i) => today - (days - 1 - i) * DAY), today: open };
   }
 
   const countByDay = db.prepare(

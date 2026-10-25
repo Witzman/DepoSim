@@ -393,6 +393,10 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     if (store.symbolInUse(inst.symbol)) {
       return reply.code(409).send({ error: "Das Wertpapier wird gehalten oder hat offene Orders." });
     }
+    // Tax, dividend calendar and hints read kind, sector and currency from the list: taking a title out would change old results.
+    if (store.symbolHasHistory(inst.symbol)) {
+      return reply.code(409).send({ error: "Das Wertpapier kommt in ausgeführten Orders oder Buchungen vor; es bleibt in der Liste, damit diese Ergebnisse gleich bleiben." });
+    }
     instruments.remove(inst.symbol);
     refreshClients();
     return reply.code(204).send();

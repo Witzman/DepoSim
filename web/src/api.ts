@@ -160,22 +160,61 @@ export interface Socket {
   close(): void;
 }
 
-export function openSocket(id: number, onMessage: (m: ServerMessage) => void, onClose: () => void): Socket {
-  const ws = new WebSocket(socketUrl(id, location));
-  ws.addEventListener("message", (e) => {
-    const m = parseServerMessage(String(e.data));
-    if (m) onMessage(m);
-  });
-  ws.addEventListener("close", onClose);
-  const queue: string[] = [];
-  ws.addEventListener("open", () => queue.splice(0).forEach((s) => ws.send(s)));
+/** Closed by the server for good (an unknown or removed simulation): connecting again would only ask the same. */
+const FINAL_CLOSE = new Set([1000, 1008]);
+const RECONNECT_FIRST_MS = 1000;
+const RECONNECT_MAX_MS = 15000;
+
+/**
+ * The socket of one simulation. When the connection drops (a deploy, a restart, a restore, a lost network) it connects again
+ * with growing pauses; the server answers every new connection with a snapshot. `onClose` is called at each drop and
+ * `onOpen` at each connection, so the page can say that it is waiting. What was sent while no connection stood is dropped:
+ * a "run" that arrives minutes late is not what the person meant.
+ */
+export function openSocket(id: number, onMessage: (m: ServerMessage) => void, onClose: () => void, onOpen: () => void = () => {}): Socket {
+  let ws: WebSocket;
+  let stopped = false;
+  let everOpen = false;
+  let delay = RECONNECT_FIRST_MS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let queue: string[] = [];
+
+  const connect = () => {
+    const socket = new WebSocket(socketUrl(id, location));
+    ws = socket;
+    socket.addEventListener("message", (e) => {
+      const m = parseServerMessage(String(e.data));
+      if (m) onMessage(m);
+    });
+    socket.addEventListener("open", () => {
+      everOpen = true;
+      delay = RECONNECT_FIRST_MS;
+      queue.splice(0).forEach((s) => socket.send(s));
+      onOpen();
+    });
+    socket.addEventListener("close", (e) => {
+      if (stopped || ws !== socket) return;
+      queue = [];
+      onClose();
+      if (FINAL_CLOSE.has(e.code)) return;
+      timer = setTimeout(connect, delay);
+      delay = Math.min(delay * 2, RECONNECT_MAX_MS);
+    });
+  };
+  connect();
+
   return {
     send(m) {
       const s = JSON.stringify(m);
       if (ws.readyState === WebSocket.OPEN) ws.send(s);
-      else queue.push(s);
+      else if (ws.readyState === WebSocket.CONNECTING && !everOpen) queue.push(s); // before the first connection: wait for it
+      // else: no connection now, and a late command would be a surprise
     },
-    close: () => ws.close(),
+    close() {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      ws.close();
+    },
   };
 }
 

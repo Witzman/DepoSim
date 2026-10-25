@@ -6,8 +6,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import { openDb } from "../src/db.js";
+import { DEFAULT_FEES } from "../src/domain/fees.js";
+import { createStore } from "../src/store.js";
 import { type JobDef, createJobs } from "../src/jobs.js";
-import { AAPL, D0, H, SAP, makeSource } from "./fakes.js";
+import { AAPL, D0, D1, H, SAP, makeSource } from "./fakes.js";
 
 const NOW = D0 + 5 * 86400;
 const START = D0 + 7 * H + 600;
@@ -121,5 +123,71 @@ describe("the API", () => {
     const res = await post(app, "/api/simulations", { name: "Zu alt", startAt: NOW - 40 * 86400 });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toMatch(/Minutenkurse gibt es nur für die letzten 29 Tage/);
+  });
+});
+
+describe("the watchlist", () => {
+  it("knows a symbol that has history: a filled order or a booking", () => {
+    const store = createStore(openDb(":memory:"));
+    const sim = store.createSimulation({ name: "S", startAt: 1000, startCash: 1_000_000, fees: DEFAULT_FEES });
+    const depot = store.listDepots(sim.id)[0];
+    expect(store.symbolHasHistory("SAP.DE")).toBe(false);
+    const open = store.insertOrder(depot.id, { symbol: "SAP.DE", side: "buy", kind: "limit", qty: 1, limitPrice: 10 }, 1000);
+    expect(store.symbolHasHistory("SAP.DE")).toBe(false); // an open order is `symbolInUse`, not history
+    store.markFilled(open, { filledSim: 1100, fillPrice: 10, gross: 1000, commission: 490, foreignFee: 0 });
+    expect(store.symbolHasHistory("SAP.DE")).toBe(true);
+    expect(store.symbolHasHistory("AAPL")).toBe(false);
+    store.addBooking(depot.id, { t: 1200, kind: "dividend", symbol: "AAPL", ref: "2026-10-22", amount: 5, text: "x" });
+    expect(store.symbolHasHistory("AAPL")).toBe(true);
+  });
+});
+
+describe("the tick", () => {
+  it("repeats the orders of a depot only when they changed", async () => {
+    const { app } = make();
+    const id = (await post(app, "/api/simulations", { name: "Tick", startAt: START })).json().id as number;
+    expect((await post(app, `/api/simulations/${id}/orders`, { symbol: "SAP.DE", side: "buy", kind: "limit", qty: 1, limitPrice: 1 })).statusCode).toBe(201);
+    await app.ready();
+    const msgs: any[] = [];
+    const ws = await app.injectWS(`/ws/simulations/${id}`, {}, { onInit: (w: any) => w.on("message", (d: Buffer) => msgs.push(JSON.parse(String(d)))) });
+    const until = async (cond: () => boolean) => { const end = Date.now() + 3000; while (!cond()) { if (Date.now() > end) throw new Error("timeout"); await new Promise((r) => setTimeout(r, 10)); } };
+    const ticks = () => msgs.filter((m) => m.type === "tick");
+    ws.send(JSON.stringify({ type: "tempo", tempo: 5 }));
+    ws.send(JSON.stringify({ type: "run" }));
+    await until(() => ticks().length >= 4);
+    expect(msgs[0].depots[0].orders).toHaveLength(1); // the snapshot has them
+    expect(ticks()[0].depots[0].orders).toHaveLength(1); // the first tick says what it sent last: nothing yet
+    expect(ticks().slice(1).every((t) => !("orders" in t.depots[0]))).toBe(true);
+
+    const seen = ticks().length;
+    expect((await post(app, `/api/simulations/${id}/orders`, { symbol: "SAP.DE", side: "buy", kind: "limit", qty: 1, limitPrice: 2 })).statusCode).toBe(201);
+    await until(() => ticks().slice(seen).some((t) => t.depots[0].orders?.length === 2));
+    ws.send(JSON.stringify({ type: "pause" }));
+    ws.close();
+  });
+});
+
+describe("the light", () => {
+  it("does not count the day before as a gap until the night repair had its time", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "deposim-light-"));
+    dirs.push(dir);
+    const path = join(dir, "d.sqlite");
+    const seed = openDb(path);
+    for (let i = 0; i < 30; i++) {
+      const t = D0 + 7 * H + i * 60;
+      seed.prepare("insert into bars (symbol, t, o, h, l, c, v) values ('SAP.DE', ?, 1, 1, 1, 1, 1)").run(t);
+    }
+    seed.prepare("insert into fetched_days (symbol, day_start, complete) values ('SAP.DE', ?, 0)").run(D0); // the evening collection: cut off at midnight
+    seed.close();
+    const clock = { t: D1 + 1 * H };
+    const { source } = makeSource();
+    const app = buildApp({ dbPath: path, marketData: source, instruments: [SAP, AAPL], now: () => clock.t, minGapMs: 0, jobSettings: { enabled: false, overrides: {} } });
+    open.push(app);
+    const cell = async () => (await app.inject({ url: "/api/data/coverage?days=2" })).json().rows.find((r: any) => r.symbol === "SAP.DE").cells[0];
+    expect(await cell()).toMatchObject({ day: "2026-10-22", state: "partial", today: true });
+    const early = (await app.inject({ url: "/api/data/status" })).json().gapCells;
+    clock.t = D1 + 4 * H;
+    expect(await cell()).toMatchObject({ today: false });
+    expect((await app.inject({ url: "/api/data/status" })).json().gapCells).toBeGreaterThan(early);
   });
 });
