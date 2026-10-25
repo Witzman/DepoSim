@@ -605,3 +605,5 @@ input.mini { width: 4.5em; }
 .rolling-svg .fan-inner { fill: color-mix(in srgb, var(--series-1) 30%, transparent); stroke: none; }
 .outlook .fan-swatch-inner, .outlook .fan-swatch-outer { height: 10px; border: 0; background: color-mix(in srgb, var(--series-1) 30%, transparent); }
 .outlook .fan-swatch-outer { background: color-mix(in srgb, var(--series-1) 14%, transparent); }
+.review-detail { padding: 6px 4px; } .review-path { width: 240px; max-width: 100%; height: auto; display: block; }
+.review-bar { display: inline-block; height: 10px; min-width: 2px; background: var(--series-1); border-radius: 2px; }

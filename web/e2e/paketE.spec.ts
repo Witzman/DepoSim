@@ -151,6 +151,10 @@ test.describe("journal", () => {
     const row = journal.getByTestId("journal-trades").getByRole("row").nth(1);
     await expect(row).toContainText(/[▲▼•]/);
 
+    await expect(journal.getByTestId("review-summary")).toBeVisible();
+    await row.getByRole("button", { name: "Nachbetrachtung" }).click();
+    await expect(journal.locator("[data-testid^=review-]").filter({ hasText: "nicht berechenbar" }).first()).toBeVisible(); // bought and sold in the same minute: no bar was held through
+
     const note = row.getByRole("textbox");
     await note.fill("zu nervös");
     await note.blur();

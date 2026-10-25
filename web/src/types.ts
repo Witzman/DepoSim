@@ -530,6 +530,29 @@ export interface JournalSale {
   horizons: JournalHorizon[];
 }
 
+/** What happened to a position between buy and sale (or until now): the deepest dip, the highest peak, what the exit took. */
+export interface Excursion {
+  maePct: number | null;
+  mfePct: number | null;
+  maeCents: number | null;
+  mfeCents: number | null;
+  efficiency: number | null;
+  entryPosition: number | null;
+  bars: number;
+  benchmark: { symbol: string; pnl: number; diff: number } | null;
+  path: number[];
+}
+
+export interface Excursions {
+  benchmark: string | null;
+  trades: Record<string, Excursion>;
+  open: (Excursion & { symbol: string; qty: number; openedSim: number })[];
+  summary: {
+    n: number; medianMaePct: number | null; medianMfePct: number | null; medianEfficiency: number | null;
+    efficiencyBuckets: { label: string; count: number }[]; benchmark: { n: number; beat: number };
+  };
+}
+
 /** The behaviour card of the journal: patterns in how the trades were made, every figure with its sample size. */
 export interface Behavior {
   minTrades: number;
@@ -549,6 +572,7 @@ export interface Behavior {
 export interface Journal {
   depotId: number;
   behavior: Behavior;
+  excursions: Excursions;
   simulationTime: number;
   trades: JournalTrade[];
   hitRate: { n: number; wins: number; rate: number | null; basis: string };

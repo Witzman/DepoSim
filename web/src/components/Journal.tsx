@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { BehaviorCard } from "./BehaviorCard.js";
+import { ReviewSummary, TradeReviewDetail } from "./TradeReview.js";
 import { getJournal, saveJournalNote } from "../api.js";
 import { arrowOf, formatDuration, formatEur, formatPercentPlain, formatRatio, signedEurArrow, signedPercent } from "../format.js";
 import { formatSimTime } from "../time.js";
@@ -93,6 +94,7 @@ export function Journal({ simulationId, depot, running, daily = false }: Props) 
 
 function JournalBody({ simulationId, data, daily }: { simulationId: number; data: Data; daily: boolean }) {
   const stats = tradeStats(data.trades);
+  const [reviewKey, setReviewKey] = useState<string | null>(null);
   return (
     <>
       {data.fewData && <p><span className="badge warn" data-testid="few-data">wenig Daten</span> <span className="muted">Unter 5 abgeschlossene Trades: die Zahlen sagen wenig.</span></p>}
@@ -127,22 +129,31 @@ function JournalBody({ simulationId, data, daily }: { simulationId: number; data
       {data.trades.length === 0 ? <p className="muted">Noch kein Trade abgeschlossen. Ein Trade ist ein Kauf, der ganz oder teilweise verkauft wurde.</p> : (
         <div className="scroll">
           <table className="positions num stacked" data-testid="journal-trades">
-            <thead><tr><th>Wertpapier</th><th>Stück</th><th>Verkauft</th><th>Gehalten</th><th>Netto G/V</th><th>Notiz</th></tr></thead>
+            <thead><tr><th>Wertpapier</th><th>Stück</th><th>Verkauft</th><th>Gehalten</th><th>Netto G/V</th><th>Notiz</th><th><span className="sr-only">Nachbetrachtung</span></th></tr></thead>
             <tbody>
               {data.trades.map((t) => (
-                <tr key={t.key} data-testid={`trade-${t.key}`}>
+                <Fragment key={t.key}>
+                <tr data-testid={`trade-${t.key}`}>
                   <td>{t.symbol}</td><td data-label="Stück">{t.qty}</td><td data-label="Verkauft">{formatSimTime(t.closedSim, daily)}</td><td data-label="Gehalten">{formatDuration(t.holdSeconds)}</td>
                   <td data-label="Netto G/V" className={t.netPnl > 0 ? "up" : t.netPnl < 0 ? "down" : "muted"}>
                     {signedEurArrow(t.netPnl)}{t.netPct !== null && <span> ({arrowOf(t.netPct)} {signedPercent(t.netPct / 100)})</span>}
                   </td>
                   <td data-label="Notiz"><NoteField simulationId={simulationId} trade={t} daily={daily} /></td>
+                  <td>
+                    <button type="button" className="btn small" aria-expanded={reviewKey === t.key} data-testid={`review-toggle-${t.key}`}
+                      onClick={() => setReviewKey(reviewKey === t.key ? null : t.key)}>Nachbetrachtung</button>
+                  </td>
                 </tr>
+                {reviewKey === t.key && <tr><td colSpan={7}><TradeReviewDetail trade={t} e={data.excursions.trades[t.key]} /></td></tr>}
+                </Fragment>
               ))}
             </tbody>
           </table>
         </div>
       )}
       <p className="muted">Netto: nach Provision und Auslandspauschale. Gekauft und verkauft wird nach FIFO zugeordnet.</p>
+
+      <ReviewSummary ex={data.excursions} trades={data.trades} />
 
       <BehaviorCard b={data.behavior} />
 
@@ -159,6 +170,13 @@ function JournalBody({ simulationId, data, daily }: { simulationId: number; data
         <ul className="plain num" data-testid="journal-open">
           {data.open.map((p) => (
             <li key={`${p.symbol}-${p.openedSim}`}>{p.symbol} · {p.qty} Stück · Kosten {formatEur(p.cost)} · seit {formatSimTime(p.openedSim, daily)}</li>
+          ))}
+        </ul>
+      )}
+      {data.excursions.open.length > 0 && (
+        <ul className="plain num" data-testid="journal-open-review">
+          {data.excursions.open.map((e) => (
+            <li key={`${e.symbol}-${e.openedSim}`}>{e.symbol} bis jetzt: größter Rückgang {e.maePct === null ? "—" : formatPercentPlain(e.maePct / 100)}, größter Buchgewinn {e.mfePct === null ? "—" : formatPercentPlain(e.mfePct / 100)}</li>
           ))}
         </ul>
       )}

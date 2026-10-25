@@ -22,7 +22,8 @@ import { type MarketEvent, marketEvents } from "./domain/marketEvents.js";
 import { type Analysis, type BetaPoint, BETA_WINDOW, analyze, rollingBeta } from "./domain/rolling.js";
 import { type Orderbook, buildOrderbook } from "./domain/orderbook.js";
 import { type Behavior, analyzeBehavior } from "./domain/behavior.js";
-import { type Journal, type JournalOrder, buildJournalCore } from "./domain/journal.js";
+import { type Excursion, type ExcursionBars, type ExcursionSummary, openExcursion, summarize, tradeExcursion } from "./domain/excursions.js";
+import { type Journal, type JournalOrder, type JournalTrade, type OpenLot, buildJournalCore } from "./domain/journal.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
 import type { Cent } from "./domain/money.js";
 import { applySplit, dividendCredit, showsSplit, splitOrder } from "./domain/events.js";
@@ -133,6 +134,16 @@ export interface BenchmarkCurve {
   currency: Instrument["currency"];
   /** The instrument's price in its own currency at the times of the first depot's curve. */
   points: Point[];
+}
+
+export type OpenExcursion = Excursion & { symbol: string; qty: number; openedSim: number };
+
+/** The after-the-fact figures of the journal: per closed trade by key, per open lot, and over all. */
+export interface Excursions {
+  benchmark: string | null;
+  trades: Record<string, Excursion>;
+  open: OpenExcursion[];
+  summary: ExcursionSummary;
 }
 
 export interface Curves {
@@ -947,6 +958,7 @@ export class SessionService {
   }
 
   private runCache = new Map<number, RunSummary>();
+  private excursionCache = new Map<string, Excursion>();
 
   /**
    * The round book entry of a simulation. A finished round never changes, so its figures are kept
@@ -1003,7 +1015,7 @@ export class SessionService {
   }
 
   /** Trades, hit rate, holding time and "too early" of one depot, computed now from its filled orders. */
-  journal(id: number, depotId: number): Journal & { bookings: Booking[]; depotId: number; simulationTime: number; behavior: Behavior } {
+  journal(id: number, depotId: number): Journal & { bookings: Booking[]; depotId: number; simulationTime: number; behavior: Behavior; excursions: Excursions } {
     const sim = this.sim(id);
     const filled: JournalOrder[] = [];
     for (const o of this.store.loadDepot(depotId).orders) {
@@ -1014,13 +1026,59 @@ export class SessionService {
       });
     }
     const bars = sim.resolution === "day" ? this.dailyBars() : this.archive;
-    const { journal, contexts } = buildJournalCore({ orders: filled, s: sim.simulationTime, bars, notes: this.store.notes(id) });
+    const { journal, contexts, openLots } = buildJournalCore({ orders: filled, s: sim.simulationTime, bars, notes: this.store.notes(id) });
     const curve = this.store.valueCurve(depotId, EVALUATION_POINTS);
     const meanValue = curve.length === 0 ? null : curve.reduce((a, p) => a + p.value, 0) / curve.length;
     const behavior = analyzeBehavior({
       orders: filled, trades: journal.trades, contexts, s: sim.simulationTime, bars, meanValue, intraday: sim.resolution !== "day",
     });
-    return { ...journal, bookings: this.store.bookings(depotId), depotId, simulationTime: sim.simulationTime, behavior };
+    const excursions = this.excursions(sim, depotId, journal.trades, openLots);
+    return { ...journal, bookings: this.store.bookings(depotId), depotId, simulationTime: sim.simulationTime, behavior, excursions };
+  }
+
+  /**
+   * MAE, MFE and the benchmark check of the closed trades and the open lots. A closed trade never changes once its buy day is
+   * over, so its figures are kept; open lots are worked out again each time.
+   */
+  private excursions(sim: Simulation, depotId: number, trades: JournalTrade[], openLots: OpenLot[]): Excursions {
+    const s = sim.simulationTime;
+    const bars = this.excursionBars(sim);
+    const bench = sim.benchmark;
+    const closed: Record<string, Excursion> = {};
+    for (const t of trades) {
+      const key = `${depotId}:${t.key}:${bench ?? ""}`;
+      const kept = this.excursionCache.get(key);
+      if (kept) { closed[t.key] = kept; continue; }
+      const e = tradeExcursion(t, s, bars, bench);
+      closed[t.key] = e;
+      if (s >= Math.floor(t.openedSim / DAY) * DAY + DAY) this.excursionCache.set(key, e);
+    }
+    const open: OpenExcursion[] = [];
+    for (const lot of openLots) {
+      const e = openExcursion(lot, s, bars, bench);
+      if (e) open.push({ ...e, symbol: lot.symbol, qty: lot.qty, openedSim: lot.openedSim });
+    }
+    return { benchmark: bench, trades: closed, open, summary: summarize(Object.values(closed)) };
+  }
+
+  /** The bars as the excursions read them: minute bars from the archive, or the daily bars of a daily simulation. */
+  private excursionBars(sim: Simulation): ExcursionBars {
+    if (sim.resolution === "day") {
+      const d = this.daily;
+      return {
+        lastCompleteBar: (symbol, s) => d?.lastComplete(symbol, s),
+        nextBarAfter: (symbol, t) => d?.nextAfter(symbol, t),
+        barsBetween: (symbol, from, to) => d?.between(symbol, from, to) ?? [],
+        barSeconds: DAY,
+      };
+    }
+    const a = this.archive;
+    return {
+      lastCompleteBar: (symbol, s) => a.lastCompleteBar(symbol, s),
+      nextBarAfter: (symbol, t) => a.nextBarAfter(symbol, t),
+      barsBetween: (symbol, from, to) => a.barsBetween(symbol, from, to),
+      barSeconds: 60,
+    };
   }
 
   /** True if the key names a trade of any normal depot of the simulation. */

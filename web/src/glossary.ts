@@ -224,6 +224,26 @@ export const GLOSSARY: Entry[] = [
     aliases: ["tilt", "rache", "revenge trading"],
   },
   {
+    id: "mae", name: "MAE (größter Rückgang im Trade)",
+    short: "Wie weit der Kurs nach dem Kauf zwischendurch unter deinen Einstand fiel.",
+    how: "Tiefster Kurs der Kerzen während der Haltezeit gegen den Kaufkurs, in Prozent (ohne Gebühren). Der Betrag in Euro rechnet den Prozentwert auf die Kosten des Postens um und ist bei US-Werten eine Näherung.",
+    pitfall: "Liegen die Verlierer im Mittel tiefer als die Gewinner, kann ein Stopp helfen, muss aber nicht: ein enger Stopp hätte auch Gewinner ausgestoppt.",
+    aliases: ["maximum adverse excursion", "rückgang", "stop"],
+  },
+  {
+    id: "mfe", name: "MFE (größter Buchgewinn im Trade)",
+    short: "Wie weit der Kurs nach dem Kauf zwischendurch über deinen Einstand stieg.",
+    how: "Höchster Kurs der Kerzen während der Haltezeit gegen den Kaufkurs, in Prozent (ohne Gebühren).",
+    aliases: ["maximum favorable excursion", "buchgewinn"],
+  },
+  {
+    id: "exitEfficiency", name: "Exit-Effizienz",
+    short: "Wie viel vom möglichen Gewinn der Ausstieg mitgenommen hat.",
+    how: "(Verkaufskurs minus Kaufkurs) durch (Höchstkurs minus Kaufkurs), ohne Gebühren. 100 % wäre der Verkauf am Höchstkurs. Ohne Kurs über dem Einstand gibt es keinen Wert.",
+    pitfall: "Der Höchstkurs ist erst im Nachhinein bekannt. Auch ein perfekter Plan nimmt selten alles mit.",
+    aliases: ["exit", "ausstieg", "gewinn mitgenommen"],
+  },
+  {
     id: "fees", name: "Gebührenbilanz",
     short: "Was Provision und Auslandspauschale gekostet haben.",
     how: "Summe aus Provision und Auslandspauschale aller ausgeführten Orders; „vom Start“ setzt sie ins Verhältnis zum Startkapital.",

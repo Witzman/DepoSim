@@ -111,6 +111,17 @@ export interface SaleContext {
   remaining: { symbol: string; qty: number; buyPrice: number }[];
 }
 
+/** A lot that is still held at the end of the journal. */
+export interface OpenLot {
+  symbol: string;
+  qty: number;
+  /** Own currency. */
+  buyPrice: number;
+  openedSim: number;
+  /** With its share of the buy fees, in cents. */
+  cost: Cent;
+}
+
 export const MIN_TRADES = 5;
 /** Later close above sale price times this counts as "too early". */
 export const TOO_EARLY_FACTOR = 1.02;
@@ -170,7 +181,7 @@ export function buildJournal(input: JournalInput): Journal {
 }
 
 /** The journal and, per sale, what stood at that moment. One FIFO pass serves both. */
-export function buildJournalCore(input: JournalInput): { journal: Journal; contexts: SaleContext[] } {
+export function buildJournalCore(input: JournalInput): { journal: Journal; contexts: SaleContext[]; openLots: OpenLot[] } {
   const { s, bars, notes } = input;
   const contexts: SaleContext[] = [];
   const orders = [...input.orders].sort((a, b) => a.filledSim - b.filledSim || a.id - b.id);
@@ -298,5 +309,8 @@ export function buildJournalCore(input: JournalInput): { journal: Journal; conte
     fewData: trades.length < MIN_TRADES,
     note: NOTE,
   };
-  return { journal, contexts };
+  const openLots = [...lots.values()].flatMap((q) =>
+    q.filter((l) => l.qty > 0).map((l): OpenLot => ({ symbol: l.order.symbol, qty: l.qty, buyPrice: l.order.fillPrice, openedSim: l.order.filledSim, cost: l.cost })),
+  );
+  return { journal, contexts, openLots };
 }

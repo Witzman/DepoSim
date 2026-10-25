@@ -26,6 +26,14 @@ describe("glossary", () => {
     }
   });
 
+  it("explains the review of the trades", () => {
+    const ids = hintIds(source("TradeReview.tsx"));
+    for (const id of ["mae", "mfe", "exitEfficiency"]) {
+      expect(ids, id).toContain(id);
+      expect(entryOf(id), id).toBeDefined();
+    }
+  });
+
   it("explains the behaviour card", () => {
     const ids = hintIds(source("BehaviorCard.tsx"));
     for (const id of ["disposition", "turnover", "chasing", "afterLoss"]) {
