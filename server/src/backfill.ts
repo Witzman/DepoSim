@@ -1,7 +1,7 @@
 import { FX_SYMBOL, VENUES } from "./config.js";
 import type { Archive } from "./data/archive.js";
 import { MarketDataError } from "./data/marketdata.js";
-import { venueOpenAt } from "./domain/venues.js";
+import { sessionFor, venueOpenAt } from "./domain/venues.js";
 import { describeError } from "./errors.js";
 import type { InstrumentRegistry } from "./instruments.js";
 import type { SessionService } from "./session.js";
@@ -121,12 +121,19 @@ export function createBackfill(deps: {
     return null;
   }
 
+  /** True on a day the symbol's market is shut (weekend, holiday): Yahoo has nothing there, so nothing is asked. The exchange rate runs round the clock. */
+  function noTrading(symbol: string, dayStart: number): boolean {
+    const inst = instruments.list().find((i) => i.symbol === symbol);
+    const venue = inst && VENUES.find((v) => v.id === inst.venue);
+    return venue !== undefined && !sessionFor(venue, dayName(dayStart)).trading;
+  }
+
   /** Finished UTC days only: the day that is still running is not "missing", it is not over. */
   function plan(days: number) {
     const today = Math.floor(now() / DAY) * DAY;
     const symbols = [...instruments.list().map((i) => i.symbol), FX_SYMBOL];
     const reachFrom = today - REACH_DAYS * DAY;
-    return archive.missingDays(symbols, today - days * DAY, today).map((m) => ({ ...m, inReach: m.dayStart >= reachFrom }));
+    return archive.missingDays(symbols, today - days * DAY, today, noTrading).map((m) => ({ ...m, inReach: m.dayStart >= reachFrom }));
   }
 
   return {

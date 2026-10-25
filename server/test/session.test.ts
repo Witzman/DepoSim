@@ -366,6 +366,14 @@ describe("tick", () => {
 });
 
 describe("snapshot", () => {
+  it("names the holiday that shuts a market on the simulated day, and nothing on a normal day", () => {
+    const goodFriday = Date.parse("2026-04-03T09:00:00Z") / 1000;
+    const holiday = setup({ startAt: goodFriday });
+    expect(holiday.svc.snapshot(holiday.id).venueClosed).toEqual({ XETRA: "Feiertag: Karfreitag", US: "Feiertag: Karfreitag" });
+    const normal = setup();
+    expect(normal.svc.snapshot(normal.id).venueClosed).toEqual({});
+  });
+
   it("reports prices, the exchange rate, open markets, value and the running flag", async () => {
     const t = setup();
     await t.svc.start(t.id);

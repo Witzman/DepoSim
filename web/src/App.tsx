@@ -122,7 +122,7 @@ export function App() {
     } else if (m.type === "tick") {
       setSnapshot((prev) =>
         prev && {
-          ...prev, running: m.running, depots: m.depots, prices: m.prices, fx: m.fx, venues: m.venues,
+          ...prev, running: m.running, depots: m.depots, prices: m.prices, fx: m.fx, venues: m.venues, venueClosed: m.venueClosed,
           liveLimit: m.liveLimit, delayS: m.delayS, phase: m.phase,
           simulation: { ...prev.simulation, simulationTime: m.simulationTime },
         },
@@ -398,7 +398,7 @@ export function App() {
           {live && (
             <>
             <Collapsible narrow={narrow} title="Watchlist">
-              <Watchlist instruments={watchlist} prices={snapshot?.prices ?? {}} venues={snapshot?.venues}
+              <Watchlist instruments={watchlist} prices={snapshot?.prices ?? {}} venues={snapshot?.venues} venueClosed={snapshot?.venueClosed}
                 selected={symbol} onSelect={setSymbol} onRemove={removeTitle} onBackfill={() => setBackfillOpen(true)} showBackfill={!narrow} />
             </Collapsible>
             {narrow && <button className="btn" data-testid="backfill-open" onClick={() => setBackfillOpen(true)}>Fehlende Kurse nachladen</button>}

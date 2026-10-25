@@ -79,8 +79,8 @@ describe("GET /api/archive/missing", () => {
     const body = res.json();
     expect(body).toMatchObject({ days: 7, daysIsAssumption: true, blocked: null });
     expect(body.reachDays).toBeGreaterThan(7);
-    // 3 series (SAP, AAPL, exchange rate) x 7 finished days
-    expect(body.items).toHaveLength(21);
+    // SAP and AAPL on the 5 weekdays of the 7 finished days (Sat and Sun are shut), the exchange rate on all 7
+    expect(body.items).toHaveLength(17);
     expect(body.items[0]).toEqual({ symbol: expect.any(String), day: "2026-10-26", dayStart: NOW - DAY, state: "never", inReach: true });
   });
 
@@ -88,6 +88,17 @@ describe("GET /api/archive/missing", () => {
     const { app } = make({ now: D0 + 10 * H }); // Thursday 12:00 Berlin
     const body = (await get(app, "/api/archive/missing")).json();
     expect(body.blocked).toMatch(/Xetra/);
+  });
+
+  it("leaves out weekends and holidays for the stocks, not for the exchange rate", async () => {
+    // Monday 2026-04-06 (Ostermontag) 12:00 UTC is a Xetra holiday and New York is still shut (08:00).
+    const EASTER_MON = Date.parse("2026-04-06T12:00:00Z") / 1000;
+    const { app } = make({ now: EASTER_MON });
+    const items = (await get(app, "/api/archive/missing")).json().items as { symbol: string; day: string }[];
+    const days = (sym: string) => items.filter((i) => i.symbol === sym).map((i) => i.day);
+    expect(days("SAP.DE")).toEqual(["2026-04-02", "2026-04-01", "2026-03-31", "2026-03-30"]); // not Good Friday, not the weekend
+    expect(days("AAPL")).toEqual(["2026-04-02", "2026-04-01", "2026-03-31", "2026-03-30"]);
+    expect(days("EURUSD=X")).toContain("2026-04-04");
   });
 
   it("rejects a range that is not a number of days", async () => {
@@ -112,8 +123,8 @@ describe("POST /api/archive/backfill", () => {
     expect(res.statusCode).toBe(200);
     const report = res.json();
     expect(report).toMatchObject({ days: 7, daysIsAssumption: true, stoppedByRateLimit: false });
-    expect(report.counts).toEqual({ loaded: 5, empty: 16, error: 0, skipped: 0, outOfRange: 0 });
-    expect(calls).toHaveLength(21);
+    expect(report.counts).toEqual({ loaded: 5, empty: 12, error: 0, skipped: 0, outOfRange: 0 });
+    expect(calls).toHaveLength(17);
     const sapD0 = report.items.find((i: any) => i.symbol === "SAP.DE" && i.dayStart === D0);
     expect(sapD0).toEqual({ symbol: "SAP.DE", day: "2026-10-22", dayStart: D0, status: "loaded", label: "geladen", bars: 60 });
     const sapEmpty = report.items.find((i: any) => i.symbol === "SAP.DE" && i.dayStart === D0 - DAY);
@@ -121,7 +132,7 @@ describe("POST /api/archive/backfill", () => {
     // asked again, nothing is missing any more
     const again = (await backfill(app)).json();
     expect(again.items).toEqual([]);
-    expect(calls).toHaveLength(21);
+    expect(calls).toHaveLength(17);
   });
 
   it("stops at the first 429 and reports the rest as skipped", async () => {
@@ -129,7 +140,7 @@ describe("POST /api/archive/backfill", () => {
     const report = (await backfill(app)).json();
     expect(calls).toHaveLength(4);
     expect(report.stoppedByRateLimit).toBe(true);
-    expect(report.counts.skipped).toBe(21 - 4);
+    expect(report.counts.skipped).toBe(17 - 4);
     expect(report.counts.error).toBe(1);
     const statuses = report.items.map((i: any) => i.status);
     expect(statuses.slice(0, 3).every((s: string) => s === "loaded" || s === "empty")).toBe(true);
@@ -161,6 +172,20 @@ describe("POST /api/archive/backfill", () => {
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toMatch(/Xetra.*geöffnet/);
     expect(calls).toEqual([]);
+  });
+
+  it("runs on a Xetra holiday when only Xetra stocks are listed and the US is shut", async () => {
+    // Good Friday 2026-04-03, 12:00 Berlin: both shut, and Xetra would count as open without the calendar.
+    const GOOD_FRIDAY = Date.parse("2026-04-03T10:00:00Z") / 1000;
+    const { source } = makeSource();
+    const app = buildApp({ dbPath: ":memory:", marketData: source, instruments: [SAP], now: () => GOOD_FRIDAY, minGapMs: 0, tickMs: 20 });
+    open.push(app);
+    expect((await get(app, "/api/archive/missing")).json().blocked).toBeNull();
+    expect((await post(app)).statusCode).toBe(202);
+    // Thursday 2026-04-02 is a normal day: the same call is refused while Xetra trades.
+    const thursday = buildApp({ dbPath: ":memory:", marketData: source, instruments: [SAP], now: () => Date.parse("2026-04-02T10:00:00Z") / 1000, minGapMs: 0, tickMs: 20 });
+    open.push(thursday);
+    expect((await get(thursday, "/api/archive/missing")).json().blocked).toMatch(/Xetra/);
   });
 
   it("answers 409 while a live simulation runs", async () => {
@@ -205,16 +230,16 @@ describe("POST /api/archive/backfill", () => {
 
     const res = await post(app);
     expect(res.statusCode).toBe(202);
-    expect(res.json()).toEqual({ running: true, startedAt: NOW, finishedAt: null, done: 0, total: 14, report: null });
+    expect(res.json()).toEqual({ running: true, startedAt: NOW, finishedAt: null, done: 0, total: 12, report: null });
     const mid = (await get(app, "/api/archive/backfill")).json();
-    expect(mid).toMatchObject({ running: true, finishedAt: null, total: 14, report: null });
+    expect(mid).toMatchObject({ running: true, finishedAt: null, total: 12, report: null });
 
     release();
     for (let i = 0; i < 500 && (await get(app, "/api/archive/backfill")).json().running; i++) await new Promise((r) => setTimeout(r, 5));
     const done = (await get(app, "/api/archive/backfill")).json();
-    expect(done).toMatchObject({ running: false, startedAt: NOW, finishedAt: NOW, done: 14, total: 14 });
+    expect(done).toMatchObject({ running: false, startedAt: NOW, finishedAt: NOW, done: 12, total: 12 });
     expect(done.report).toMatchObject({ days: 7, stoppedByRateLimit: false });
-    expect(done.report.items).toHaveLength(14);
+    expect(done.report.items).toHaveLength(12);
   });
 
   it("rejects a bad range", async () => {

@@ -1,4 +1,4 @@
-import { type Instrument, MAX_DEPOTS, type Venue } from "./config.js";
+import { type Instrument, MAX_DEPOTS, VENUES, type Venue } from "./config.js";
 import type { InstrumentRegistry } from "./instruments.js";
 import type { Archive } from "./data/archive.js";
 import { type Bar, MarketDataError } from "./data/marketdata.js";
@@ -9,6 +9,7 @@ import {
 import { type AllocationLine, planAllocation } from "./domain/allocation.js";
 import { type Breakdown, type FeeLedger, breakdown, feeLedger } from "./domain/breakdown.js";
 import { type Correlation, type Metrics, type Point, type Relative, computeMetrics, correlationMatrix, relativeTo, thin } from "./domain/metrics.js";
+import { closedDayReason } from "./domain/venues.js";
 import { type Orderbook, buildOrderbook } from "./domain/orderbook.js";
 import { type Journal, type JournalOrder, buildJournal } from "./domain/journal.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
@@ -72,6 +73,8 @@ export interface Snapshot {
   prices: Record<string, { price: number; barT: number }>;
   fx: number | null;
   venues: Record<Venue, boolean>;
+  /** Per market: "Feiertag: Karfreitag" when the calendar shuts the whole simulated day. Absent otherwise. */
+  venueClosed: Partial<Record<Venue, string>>;
   /** The latest simulation time that may be shown: now minus the delay. */
   liveLimit: number;
   delayS: number;
@@ -623,6 +626,34 @@ export class SessionService {
       });
   }
 
+  /** The markets that are shut for a holiday on the day of UTC second `t`, with the German reason. */
+  private holidays(t: number): Partial<Record<Venue, string>> {
+    const out: Partial<Record<Venue, string>> = {};
+    for (const v of VENUES) {
+      const reason = v.hasSource ? closedDayReason(v, t) : undefined;
+      if (reason?.startsWith("Feiertag")) out[v.id as Venue] = reason;
+    }
+    return out;
+  }
+
+  /**
+   * For a live simulation: "Markt geschlossen (Feiertag: Karfreitag)" when, right now, the calendar
+   * shuts the whole day on every market that has an instrument on the list (a weekend counts).
+   * Undefined for a replay, for an open day, or when only some of the markets are shut.
+   */
+  closedNotice(id: number): string | undefined {
+    if (!this.sim(id).live) return undefined;
+    const used = new Set<string>(this.instruments.map((i) => i.venue));
+    const reasons = new Set<string>();
+    for (const v of VENUES) {
+      if (!used.has(v.id)) continue;
+      const reason = closedDayReason(v, this.now());
+      if (!reason) return undefined;
+      reasons.add(reason);
+    }
+    return reasons.size === 0 ? undefined : `Markt geschlossen (${[...reasons].join("; ")})`;
+  }
+
   snapshot(id: number): Snapshot {
     const simulation = this.sim(id);
     const s = simulation.simulationTime;
@@ -664,6 +695,7 @@ export class SessionService {
       prices,
       fx: this.archive.lastCompleteBar(this.fx, s)?.c ?? null,
       venues: { XETRA: this.venueOpen("XETRA", s), US: this.venueOpen("US", s) },
+      venueClosed: this.holidays(s),
       liveLimit: limitL,
       delayS: this.delayS,
       phase,

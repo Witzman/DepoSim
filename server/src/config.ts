@@ -47,13 +47,15 @@ export interface VenueInfo {
   closes: string;
   /** False: there is no usable price source, so the market is shown but nothing can be added or traded on it. */
   hasSource: boolean;
+  /** Which trading calendar (holidays, short days) applies. Absent: none is known, every weekday counts as a trading day. */
+  calendar?: "XETRA" | "NYSE";
   note: string;
 }
 
 export const VENUES: VenueInfo[] = [
-  { id: "XETRA", name: "Xetra", timeZone: "Europe/Berlin", opens: "09:00", closes: "17:30", hasSource: true,
+  { id: "XETRA", name: "Xetra", timeZone: "Europe/Berlin", opens: "09:00", closes: "17:30", hasSource: true, calendar: "XETRA",
     note: "Minutenbalken von Yahoo (gemessen)." },
-  { id: "US", name: "US-Börsen", timeZone: "America/New_York", opens: "09:30", closes: "16:00", hasSource: true,
+  { id: "US", name: "US-Börsen", timeZone: "America/New_York", opens: "09:30", closes: "16:00", hasSource: true, calendar: "NYSE",
     note: "Minutenbalken von Yahoo (gemessen)." },
   { id: "FRANKFURT", name: "Frankfurt", timeZone: "Europe/Berlin", opens: "08:00", closes: "22:00", hasSource: false,
     note: "Yahoo liefert für .F nur lückenhafte Minutenbalken (gemessen 2026-10-24: 16 bis 124 am Tag, Lücken bis zu drei Stunden, ETFs gar keine). Damit ließe sich nicht ehrlich handeln." },

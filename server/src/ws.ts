@@ -77,7 +77,13 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
           more = await session.loadMore(id);
           loop.last = performance.now(); // the time spent loading is not simulation time
         }
-        if (!more && result.liveEdge) {
+        const closed = more ? undefined : session.closedNotice(id);
+        if (closed) {
+          // A holiday or a weekend: no prices will come today. Say so, instead of waiting or "end of data".
+          stopLoop(id);
+          broadcast(id, { type: "notice", text: `${closed}.` });
+          broadcast(id, snapshotMessage(id));
+        } else if (!more && result.liveEdge) {
           // The market is running and the prices are a little late: wait, do not stop.
           if (!waiting.has(id)) {
             waiting.add(id);

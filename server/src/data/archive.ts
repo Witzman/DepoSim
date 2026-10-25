@@ -7,7 +7,8 @@ export interface Archive {
   /** Fetches the day once per symbol. A day that is not over yet is fetched again next time. */
   ensureDay(symbol: string, dayStartT: number): Promise<void>;
   /** Days in `[fromDayT, toDayT)` never fetched or not complete yet, newest first, then by symbol. */
-  missingDays(symbols: string[], fromDayT: number, toDayT: number): MissingDay[];
+  /** `skip` leaves out the (symbol, day) pairs on which the market does not trade. */
+  missingDays(symbols: string[], fromDayT: number, toDayT: number, skip?: (symbol: string, dayStartT: number) => boolean): MissingDay[];
   /** Fetches one day from the source and stores it. Returns how many bars were stored; 0 is a day without trading. */
   fetchDay(symbol: string, dayStartT: number): Promise<number>;
   /** Bars with `fromT <= t < toT`, oldest first. */
@@ -102,10 +103,11 @@ export function createArchive(db: Db, source: MarketData, opts: ArchiveOptions =
       await loadOnce(symbol, dayStartT);
     },
 
-    missingDays(symbols, fromDayT, toDayT) {
+    missingDays(symbols, fromDayT, toDayT, skip) {
       const out: MissingDay[] = [];
       for (let dayStart = toDayT - DAY; dayStart >= fromDayT; dayStart -= DAY) {
         for (const symbol of symbols) {
+          if (skip?.(symbol, dayStart)) continue;
           const row = selectDay.get(symbol, dayStart) as { complete: number } | undefined;
           if (row?.complete === 1) continue;
           out.push({ symbol, dayStart, state: row ? "incomplete" : "never" });

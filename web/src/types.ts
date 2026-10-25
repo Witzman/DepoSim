@@ -242,6 +242,8 @@ export interface Snapshot {
   prices: Record<string, { price: number; barT: number }>;
   fx: number | null;
   venues: Record<Venue, boolean>;
+  /** Per market: the German reason ("Feiertag: Karfreitag") when the calendar shuts the whole day. */
+  venueClosed?: Partial<Record<Venue, string>>;
   /** The latest simulation time that may be shown: the present minus the delay. */
   liveLimit: number;
   delayS: number;
@@ -259,6 +261,7 @@ export type ServerMessage =
       prices: Snapshot["prices"];
       fx: number | null;
       venues: Snapshot["venues"];
+      venueClosed?: Snapshot["venueClosed"];
       liveLimit: number;
       delayS: number;
       phase: Snapshot["phase"];

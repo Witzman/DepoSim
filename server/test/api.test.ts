@@ -405,6 +405,18 @@ describe("the clock of a live simulation (websocket)", () => {
     expect(t.app.session.isRunning(id)).toBe(true);
   });
 
+  it("says the market is shut on a holiday, not 'waiting' and not 'end of data'", async () => {
+    const XMAS = Date.parse("2026-12-25T12:00:00Z") / 1000; // 1. Weihnachtstag, a Friday: Xetra is shut
+    const t = makeLive({ now: XMAS });
+    const id = await sim(t.app, { live: true, startAt: T0700 });
+    const { msgs, send } = await connect(t.app, id);
+    send({ type: "run" });
+    await until(() => msgs.some((m) => m.type === "notice"));
+    const notices = msgs.filter((m) => m.type === "notice").map((m) => m.text);
+    expect(notices).toEqual(["Markt geschlossen (Feiertag: 1. Weihnachtstag)."]);
+    expect(t.app.session.isRunning(id)).toBe(false);
+  });
+
   it("keeps its refresh time across a pause and a new start: a press on Start does not ask the source again", async () => {
     const t = makeLive({ now: D0 + 5 * 86400, liveRefreshS: 5 });
     const id = await sim(t.app, { startAt: D1 + 9 * H }); // a replay at the end of its data, far from the present

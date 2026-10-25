@@ -5,6 +5,7 @@ interface Props {
   instruments: Instrument[];
   prices: Snapshot["prices"];
   venues: Snapshot["venues"] | undefined;
+  venueClosed?: Snapshot["venueClosed"];
   selected: string;
   onSelect: (symbol: string) => void;
   onRemove: (symbol: string) => void;
@@ -18,7 +19,7 @@ const VENUES: { venue: Venue; label: string }[] = [
   { venue: "US", label: "US-Börsen" },
 ];
 
-export function Watchlist({ instruments, prices, venues, selected, onSelect, onRemove, onBackfill, showBackfill = true }: Props) {
+export function Watchlist({ instruments, prices, venues, venueClosed, selected, onSelect, onRemove, onBackfill, showBackfill = true }: Props) {
   return (
     <section className="card" aria-label="Watchlist" data-testid="watchlist">
       {VENUES.map(({ venue, label }) => {
@@ -30,7 +31,7 @@ export function Watchlist({ instruments, prices, venues, selected, onSelect, onR
             <div className="row">
               <h2>{label}</h2>
               <span className={open ? "up" : "muted"} data-testid={`venue-${venue}`}>
-                {venues === undefined ? "" : open ? "● offen" : "○ geschlossen"}
+                {venues === undefined ? "" : open ? "● offen" : venueClosed?.[venue] ? `○ geschlossen (${venueClosed[venue]})` : "○ geschlossen"}
               </span>
             </div>
             <ul className="watch">
