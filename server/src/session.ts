@@ -243,6 +243,12 @@ export class SessionService {
     this.running.delete(id);
   }
 
+  /** Stops every clock and forgets what a short tick left over: after a restore the ids mean other simulations. */
+  reset(): void {
+    this.running.clear();
+    this.carry.clear();
+  }
+
   /** Not stored: after a restart every simulation is paused. */
   isRunning(id: number): boolean {
     return this.running.has(id);

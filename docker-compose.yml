@@ -14,6 +14,11 @@ services:
       net.ipv4.ip_unprivileged_port_start: 0
     volumes:
       - deposim-data:/data
+      # Daily backups land in /data/backups (same volume) unless BACKUP_DIR points elsewhere. To have the
+      # server's Borg backup take them, bind a host path that Borg includes and set BACKUP_DIR; the host
+      # path is not decided yet (notes/reference/deploy.md, "Backup"). The folder must be writable by uid 1000.
+      #   - /var/backups/deposim:/backup
+      # and under `environment:` BACKUP_DIR=/backup
 
 volumes:
   deposim-data:

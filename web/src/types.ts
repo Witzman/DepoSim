@@ -418,3 +418,15 @@ export interface LongtermJob {
   stoppedByRateLimit: boolean;
   error?: string;
 }
+
+export interface BackupStatus {
+  enabled: boolean;
+  dir: string | null;
+  keep: number;
+  /** UTC seconds of the newest daily backup. */
+  lastAt: number | null;
+  lastName: string | null;
+  lastBytes: number | null;
+  error: { at: number; message: string } | null;
+  log: { at: number; ok: boolean; text: string }[];
+}

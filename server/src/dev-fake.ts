@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 // The real app with made-up prices. For `npm run dev:fake` and the browser tests, never the image.
 import { WATCHLIST, FX_SYMBOL } from "./config.js";
 import type { Bar, DailyData, DailyBarRow, DividendRow, MarketData } from "./data/marketdata.js";
@@ -100,6 +103,8 @@ export async function startFake(port: number) {
   const app = buildApp({
     dbPath: ":memory:", marketData: fakeMarketData(fakeNow), dailyData: fakeDailyData(), search: fakeSearch, minGapMs: 0, tickMs: 100,
     now: fakeNow, catchUpTempo: 6000, liveRefreshS: 1,
+    // a scratch folder, so the browser tests see a backup state and the real one is never touched
+    backupDir: mkdtempSync(join(tmpdir(), "deposim-fake-backup-")),
   });
   await app.listen({ port, host: "127.0.0.1" });
   return app;

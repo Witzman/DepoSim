@@ -7,6 +7,11 @@ function positive(value: string | undefined, fallback: number): number {
   return value !== undefined && Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+/** Where the daily backup goes: an own folder, set by the environment so that the server's backup can reach it. */
+export const BACKUP_DIR = process.env.BACKUP_DIR;
+/** How many daily backups are kept. */
+export const BACKUP_KEEP = Number(process.env.BACKUP_KEEP) > 0 ? Math.floor(Number(process.env.BACKUP_KEEP)) : 7;
+
 export interface Settings {
   /** How far behind the present the price source is, in seconds. Not measured yet. */
   liveDelayS: number;

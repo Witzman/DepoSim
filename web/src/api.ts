@@ -1,5 +1,5 @@
 import type {
-  AllocationLine, BackfillJob, Bar, ClientMessage, CompareResult, CostPreview, Curves, Depot, Evaluation, Instrument, Journal, JournalNoteResult,
+  AllocationLine, BackfillJob, BackupStatus, Bar, ClientMessage, CompareResult, CostPreview, Curves, Depot, Evaluation, Instrument, Journal, JournalNoteResult,
   Longterm, LongtermJob, MissingList, OrderInput, Orderbook, SearchHit, ServerMessage, Simulation, VenueInfo,
 } from "./types.js";
 
@@ -77,6 +77,22 @@ export const removeDepot = (id: number, depotId: number) =>
   request<void>(`/api/simulations/${id}/depots/${depotId}`, { method: "DELETE" });
 export const addGhost = (id: number, depotId: number) =>
   request<Depot>(`/api/simulations/${id}/depots/${depotId}/ghost`, json("POST", {}));
+
+export const getBackupStatus = () => request<BackupStatus>("/api/backup/status");
+/** The file goes up as it is; the server checks it and answers with what it saved before replacing. */
+export const restoreBackup = (file: Blob) =>
+  request<{ simulations: number; savedBefore: string }>("/api/backup/restore?confirm=ja", {
+    method: "POST", headers: { "content-type": "application/octet-stream" }, body: file,
+  });
+export async function importSimulation(file: File): Promise<Simulation> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await file.text());
+  } catch {
+    throw new ApiError("Die Datei ist kein JSON.", 0);
+  }
+  return request<Simulation>("/api/simulations/import", json("POST", parsed));
+}
 
 export const getVenues = () => request<VenueInfo[]>("/api/venues");
 export const getMissing = () => request<MissingList>("/api/archive/missing");

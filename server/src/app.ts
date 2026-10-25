@@ -5,6 +5,7 @@ import fastifyWebsocket from "@fastify/websocket";
 import Fastify, { type FastifyInstance } from "fastify";
 import { registerApi } from "./api.js";
 import { createBackfill } from "./backfill.js";
+import { type BackupService, createBackupService } from "./backup.js";
 import { FX_SYMBOL, type Instrument, WATCHLIST } from "./config.js";
 import { createArchive } from "./data/archive.js";
 import type { DailyData, MarketData } from "./data/marketdata.js";
@@ -38,11 +39,18 @@ export interface AppOptions {
   catchUpTempo?: number;
   /** The shortest time between two refreshes of today's prices, in seconds. */
   liveRefreshS?: number;
+  /** Folder of the daily backups; without it there are none. */
+  backupDir?: string;
+  /** How many daily backups are kept. */
+  backupKeep?: number;
+  /** How often the daily backup is looked at, in ms; 0: never (tests call it themselves). */
+  backupCheckMs?: number;
 }
 
 declare module "fastify" {
   interface FastifyInstance {
     session: SessionService;
+    backup: BackupService;
   }
 }
 
@@ -66,8 +74,22 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   const hub = createHub(session, store, opts.tickMs ?? 250, opts.liveRefreshS ?? 60);
 
   const app = Fastify({ logger: process.env.NODE_ENV !== "test" });
+  const backup = createBackupService({
+    db, dir: opts.backupDir, keep: opts.backupKeep, now: opts.now ?? (() => Date.now() / 1000),
+    log: (text, ok) => (ok ? app.log.info(text) : app.log.error(text)),
+  });
   app.decorate("session", session);
+  app.decorate("backup", backup);
+  // The first look is at once (a missed night is made up), then every hour; a failure is in the job log, never thrown.
+  const checkMs = opts.backupCheckMs ?? 3_600_000;
+  let backupTimer: NodeJS.Timeout | undefined;
+  if (opts.backupDir && checkMs > 0) {
+    setTimeout(() => void backup.runDaily(), 5_000).unref();
+    backupTimer = setInterval(() => void backup.runDaily(), checkMs);
+    backupTimer.unref();
+  }
   app.addHook("onClose", async () => {
+    if (backupTimer) clearInterval(backupTimer);
     hub.stopAll();
     db.close();
   });
@@ -80,7 +102,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   });
 
   app.get("/healthz", async (_req, reply) => reply.type("text/plain").send("ok"));
-  registerApi(app, { store, session, archive, instruments, search: opts.search ?? createYahooSearch(), hub, backfill, longterm });
+  registerApi(app, { store, session, archive, instruments, search: opts.search ?? createYahooSearch(), hub, backfill, longterm, db, backup, now: opts.now ?? (() => Date.now() / 1000) });
 
   if (existsSync(WEB_DIST)) {
     app.register(fastifyStatic, { root: WEB_DIST });

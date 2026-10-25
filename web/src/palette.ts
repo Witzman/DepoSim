@@ -8,7 +8,7 @@ export type Entry =
   | { kind: "hit"; hit: SearchHit }
   | { kind: "command"; id: CommandId; label: string };
 
-export type CommandId = "backfill" | "ghost" | "journal" | "compare" | "orderbook" | "longterm";
+export type CommandId = "backfill" | "ghost" | "journal" | "compare" | "orderbook" | "longterm" | "backup";
 
 /** The commands of Paket E; the palette gets the ids that make sense right now. */
 export const COMMANDS: { id: CommandId; label: string; words: string[] }[] = [
@@ -17,6 +17,7 @@ export const COMMANDS: { id: CommandId; label: string; words: string[] }[] = [
   { id: "journal", label: "Journal öffnen", words: ["journal", "trades", "trefferquote", "notiz", "auswertung"] },
   { id: "compare", label: "Simulationsvergleich öffnen", words: ["simulationsvergleich", "vergleich", "vergleichen", "auswertung"] },
   { id: "longterm", label: "Langzeitvergleich öffnen", words: ["langzeitvergleich", "langzeit", "vergleich", "etf", "dividende", "ausschüttung", "auswertung"] },
+  { id: "backup", label: "Sicherung, Export und Import öffnen", words: ["sicherung", "backup", "wiederherstellen", "export", "import", "csv", "herunterladen"] },
   { id: "orderbook", label: "Orderbuch ein- oder ausklappen", words: ["orderbuch", "tiefe", "order", "handel"] },
 ];
 

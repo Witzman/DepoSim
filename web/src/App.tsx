@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  type Socket, addDepot, addGhost, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, getBars, getWatchlist, listSimulations,
+  type Socket, addDepot, addGhost, addInstrument, cancelOrder, createSimulation, deleteSimulation, endSimulation, getBackupStatus, getBars, getWatchlist, listSimulations,
   openSocket, removeDepot, setBenchmark, removeInstrument, renameDepot,
 } from "./api.js";
 import { AllocationDialog } from "./components/AllocationDialog.js";
@@ -20,6 +20,8 @@ import { DepotSwitch } from "./components/DepotSwitch.js";
 import { OrderTicket } from "./components/OrderTicket.js";
 import { OrdersPanel } from "./components/OrdersPanel.js";
 import { MobileBar } from "./components/MobileBar.js";
+import { BackupDialog } from "./components/BackupDialog.js";
+import { backupLine } from "./backup.js";
 import { Palette } from "./components/Palette.js";
 import { ShortcutHelp } from "./components/ShortcutHelp.js";
 import { SimulationPicker } from "./components/SimulationPicker.js";
@@ -30,7 +32,7 @@ import { canGhost, pickDepot } from "./view.js";
 import type { CommandId } from "./palette.js";
 import { useNarrow } from "./useNarrow.js";
 import { useTheme } from "./theme.js";
-import type { Bar, Instrument, ServerMessage, Simulation, Snapshot, Tempo } from "./types.js";
+import type { BackupStatus, Bar, Instrument, ServerMessage, Simulation, Snapshot, Tempo } from "./types.js";
 
 const SELECTED_KEY = "deposim-selected";
 
@@ -82,6 +84,9 @@ export function App() {
   const [allocationOpen, setAllocationOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [backfillOpen, setBackfillOpen] = useState(false);
+  const [backupOpen, setBackupOpen] = useState(false);
+  const [backupState, setBackupState] = useState<BackupStatus | null>(null);
+  const restored = useRef(false);
   const [orderbookOpen, setOrderbookOpen] = useState(false);
   const [scrollTo, setScrollTo] = useState<{ id: string; n: number } | null>(null);
   const narrow = useNarrow();
@@ -105,6 +110,11 @@ export function App() {
       })
       .catch((e) => setLoadError(e.message));
   }, []);
+
+  // The status line shows the last daily backup; read at the start and whenever the dialog closes.
+  useEffect(() => {
+    if (!backupOpen) getBackupStatus().then(setBackupState).catch(() => setBackupState(null));
+  }, [backupOpen]);
 
   const onMessage = useCallback((m: ServerMessage) => {
     if (m.type === "snapshot") {
@@ -281,6 +291,7 @@ export function App() {
 
   function runCommand(id: CommandId) {
     if (id === "backfill") return setBackfillOpen(true);
+    if (id === "backup") return setBackupOpen(true);
     if (id === "ghost") return void newGhost();
     if (id === "longterm") return setView("longterm");
     if (id === "orderbook") {
@@ -360,6 +371,15 @@ export function App() {
           </span>
         )}
         <span className="spacer" />
+        {backupState && (() => {
+          // On a phone the bar has no room: the line shows only when something is wrong; the palette opens the dialog.
+          const line = backupLine(backupState, Date.now() / 1000);
+          if (narrow && !line.bad) return null;
+          return (
+            <button className={`btn small${line.bad ? " error" : ""}`} data-testid="backup-status" onClick={() => setBackupOpen(true)}
+              title={line.text}>{narrow ? (line.bad ? "Sicherung !" : "Sicherung") : line.text}</button>
+          );
+        })()}
         <button className="btn small" data-testid="palette-open" onClick={() => setPaletteOpen(true)}
           aria-label="Suche und Befehle öffnen (Strg+K)" title="Strg+K">Suche</button>
         <button className="btn small" data-testid="theme-toggle" onClick={toggle} aria-label="Hell oder Dunkel umschalten">
@@ -490,13 +510,19 @@ export function App() {
           onSell={() => { setView("trade"); setTicketCommand((c) => ({ side: "sell", n: c.n + 1 })); }}
           onToggleRun={() => socket.current?.send({ type: runningRef.current ? "pause" : "run" })} />
       )}
+      <BackupDialog open={backupOpen} simulationId={selectedId}
+        onClose={() => { setBackupOpen(false); if (restored.current) window.location.reload(); }}
+        onChanged={(what) => {
+          if (what === "restored") restored.current = true; // the page is read again when the dialog closes
+          else listSimulations().then(setSimulations).catch((e) => setNotice(e.message));
+        }} />
       <BackfillDialog open={backfillOpen} onClose={() => setBackfillOpen(false)} />
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
       <Palette
         open={paletteOpen} instruments={watchlist} simulations={simulations} selectedId={selectedId}
         onClose={() => setPaletteOpen(false)} onPickInstrument={setSymbol} onPickSimulation={setSelectedId}
         onToggleTheme={toggle} onShowHelp={() => setHelpOpen(true)} onAdd={addTitle}
-        commands={selectedId === null ? ["backfill", "longterm"] : ["backfill", "ghost", "journal", "compare", "orderbook", "longterm"]} onCommand={runCommand}
+        commands={selectedId === null ? ["backfill", "backup", "longterm"] : ["backfill", "backup", "ghost", "journal", "compare", "orderbook", "longterm"]} onCommand={runCommand}
       />
     </div>
   );

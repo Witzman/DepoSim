@@ -1,5 +1,8 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
+import { type BackupService, BackupError, restoreInto } from "./backup.js";
+import { ExchangeError, barsCsv, exportSimulation, importSimulation, ordersCsv, valuesCsv } from "./exchange.js";
+import type { Db } from "./db.js";
 import { DEFAULT_DAYS, MAX_DAYS, type Backfill } from "./backfill.js";
 import { FX_SYMBOL, type Instrument, SOURCELESS_SUFFIXES, VENUES } from "./config.js";
 import type { Archive } from "./data/archive.js";
@@ -71,7 +74,20 @@ interface Deps {
   hub: Hub;
   backfill: Backfill;
   longterm: Longterm;
+  db: Db;
+  backup: BackupService;
+  now: () => number;
 }
+
+const archiveExportQuery = z.object({
+  symbol: z.string().regex(/^[A-Za-z0-9.^=-]{1,15}$/),
+  kind: z.enum(["minute", "day"]).default("minute"),
+  from: z.coerce.number().int().positive(),
+  to: z.coerce.number().int().positive(),
+});
+
+/** The largest upload (a backup or a simulation file). The archive is not in them, so this is far above any real size. */
+const UPLOAD_LIMIT = 100 * 1024 * 1024;
 
 const invalid = (reply: FastifyReply, err: z.ZodError) => {
   const issue = err.issues[0];
@@ -79,7 +95,7 @@ const invalid = (reply: FastifyReply, err: z.ZodError) => {
   return reply.code(400).send({ error: `Ungültige Eingabe (${where}): ${issue.message}` });
 };
 
-export function registerApi(app: FastifyInstance, { store, session, archive, instruments, search, hub, backfill, longterm }: Deps) {
+export function registerApi(app: FastifyInstance, { store, session, archive, instruments, search, hub, backfill, longterm, db, backup, now }: Deps) {
   const simulationOf = (params: unknown) => {
     const id = Number((params as { id?: string }).id);
     return Number.isInteger(id) ? store.getSimulation(id) : undefined;
@@ -116,6 +132,71 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     return reply.code(202).send(result.job);
   });
   app.get("/api/longterm/refresh", async () => longterm.status());
+
+  // ---- Sicherung, Export, Import (#46) ----
+  let restoring = false;
+  app.addContentTypeParser("application/octet-stream", { parseAs: "buffer", bodyLimit: UPLOAD_LIMIT }, (_req, body, done) => done(null, body));
+  const stamp = () => new Date(now() * 1000).toISOString().slice(0, 10);
+  const attachment = (reply: FastifyReply, type: string, name: string) =>
+    reply.header("content-type", type).header("content-disposition", `attachment; filename="${name}"`).header("cache-control", "no-store");
+
+  app.get("/api/backup/status", async () => backup.status());
+
+  app.get("/api/backup", async (_req, reply) => {
+    try {
+      const { name, data } = await backup.snapshot();
+      return attachment(reply, "application/vnd.sqlite3", name).send(data);
+    } catch (err) {
+      return reply.code(500).send({ error: `Die Sicherung ist fehlgeschlagen: ${describeError(err)}` });
+    }
+  });
+
+  app.post("/api/backup/restore", { bodyLimit: UPLOAD_LIMIT }, async (req, reply) => {
+    if ((req.query as { confirm?: string }).confirm !== "ja") {
+      return reply.code(400).send({ error: "Das Wiederherstellen ersetzt alle Simulationen und braucht eine Bestätigung." });
+    }
+    if (!Buffer.isBuffer(req.body)) return reply.code(400).send({ error: "Es fehlt die Sicherungsdatei (Inhaltstyp application/octet-stream)." });
+    const busy = backfill.status().running ? "Es läuft ein Nachladen." : longterm.status().running ? "Es läuft das Laden der Tagesdaten." : restoring ? "Es läuft schon eine Wiederherstellung." : null;
+    if (busy) return reply.code(409).send({ error: `${busy} Bitte warten, dann erneut versuchen.` });
+    restoring = true;
+    try {
+      // The file is checked first; only a good one costs the running clocks and gets a safety backup of the current state.
+      let before = "";
+      const result = await restoreInto(db, req.body, async () => {
+        try {
+          before = await backup.preRestore();
+        } catch (err) {
+          throw new BackupError(`Der aktuelle Stand konnte nicht gesichert werden: ${describeError(err)}`);
+        }
+        hub.stopAll();
+        session.reset();
+      });
+      return { ...result, savedBefore: before };
+    } catch (err) {
+      if (err instanceof BackupError) return reply.code(400).send({ error: `${err.message} Nichts wurde geändert.` });
+      throw err;
+    } finally {
+      restoring = false;
+    }
+  });
+
+  app.post("/api/simulations/import", { bodyLimit: UPLOAD_LIMIT }, async (req, reply) => {
+    try {
+      const made = importSimulation(db, req.body, (symbol) => instruments.get(symbol) !== undefined, now());
+      return reply.code(201).send(store.getSimulation(made.id));
+    } catch (err) {
+      if (err instanceof ExchangeError) return reply.code(400).send({ error: `${err.message} Nichts wurde geändert.` });
+      throw err;
+    }
+  });
+
+  app.get("/api/archive/export.csv", async (req, reply) => {
+    const query = archiveExportQuery.safeParse(req.query);
+    if (!query.success) return invalid(reply, query.error);
+    const { symbol, kind, from, to } = query.data;
+    if (to <= from) return reply.code(400).send({ error: "Das Ende muss nach dem Anfang liegen." });
+    return attachment(reply, "text/csv; charset=utf-8", `kurse-${symbol}-${kind === "minute" ? "minuten" : "tage"}.csv`).send(barsCsv(db, symbol, kind, from, to));
+  });
 
   app.get("/api/watchlist", async () => instruments.list().map(shown));
 
@@ -263,6 +344,24 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     const unknown = ids.find((id) => !store.getSimulation(id));
     if (unknown !== undefined) return reply.code(404).send({ error: `Unbekannte Simulation ${unknown}.` });
     return { simulations: ids.map((id) => session.compare(id)), note: COMPARE_NOTE };
+  });
+
+  app.get("/api/simulations/:id/export", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    return attachment(reply, "application/json; charset=utf-8", `simulation-${sim.id}-${stamp()}.json`).send(JSON.stringify(exportSimulation(db, sim.id, now())));
+  });
+
+  app.get("/api/simulations/:id/orders.csv", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    return attachment(reply, "text/csv; charset=utf-8", `simulation-${sim.id}-orders.csv`).send(ordersCsv(db, sim.id));
+  });
+
+  app.get("/api/simulations/:id/values.csv", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    return attachment(reply, "text/csv; charset=utf-8", `simulation-${sim.id}-depotwerte.csv`).send(valuesCsv(db, sim.id));
   });
 
   app.get("/api/simulations/:id/bars", async (req, reply) => {
