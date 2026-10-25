@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getArchiveInfo, getCoverage, getDataStatus, getGaps, getJobs, getSources, runJob } from "../api.js";
+import { getArchiveInfo, getCoverage, getDataStatus, getFlags, getGaps, getJobs, getSources, runJob } from "../api.js";
 import { CALL_COLUMNS, LIGHT_WORD, STATE_WORD, ago, dayLong, formatBytes, until, utcTime } from "../data.js";
 import { CoverageGrid } from "./CoverageGrid.js";
-import type { ArchiveInfo, Coverage, DataStatus, GapReport, JobsOverview, SourceSummary } from "../types.js";
+import type { ArchiveInfo, Coverage, DataStatus, FlagReport, GapReport, JobsOverview, SourceSummary } from "../types.js";
 
 const REFRESH_MS = 15_000;
 const de = (n: number) => n.toLocaleString("de-DE");
@@ -27,6 +27,7 @@ export function DataView({ onChanged, onClose }: Props) {
   const [sources, setSources] = useState<SourceSummary[] | null>(null);
   const [archive, setArchive] = useState<ArchiveInfo | null>(null);
   const [jobs, setJobs] = useState<JobsOverview | null>(null);
+  const [flags, setFlags] = useState<FlagReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [picked, setPicked] = useState<{ symbol: string; day: string } | null>(null);
   const [gaps, setGaps] = useState<GapReport | null>(null);
@@ -37,9 +38,9 @@ export function DataView({ onChanged, onClose }: Props) {
 
   const load = useCallback(async () => {
     try {
-      const [st, cov, src, arc, jb] = await Promise.all([getDataStatus(), getCoverage(30), getSources(), getArchiveInfo(), getJobs()]);
+      const [st, cov, src, arc, jb, fl] = await Promise.all([getDataStatus(), getCoverage(30), getSources(), getArchiveInfo(), getJobs(), getFlags()]);
       if (!alive.current) return;
-      setStatus(st); setCoverage(cov); setSources(src); setArchive(arc); setJobs(jb);
+      setStatus(st); setCoverage(cov); setSources(src); setArchive(arc); setJobs(jb); setFlags(fl);
       setError(null);
     } catch (e) {
       if (alive.current) setError((e as Error).message);
@@ -224,6 +225,37 @@ export function DataView({ onChanged, onClose }: Props) {
               </table>
             </div>
           </>
+        ) : <p className="muted">Lädt …</p>}
+      </section>
+
+      <section className="card" aria-label="Kurskontrolle">
+        <h2>Kurskontrolle</h2>
+        {flags ? (
+          flags.bySymbol.length === 0 ? <p className="muted" data-testid="flags-none">Keine auffälligen Balken.</p> : (
+            <>
+              <p className="muted">
+                Verdächtige Balken werden markiert, nie gelöscht oder geändert. Ausreißer sind in der Simulation nicht handelbar und im Chart hohl.
+                Anteil der Ausreißer an allen Minutenbalken: <span className="num">{(flags.spikeShare * 100).toLocaleString("de-DE", { maximumFractionDigits: 4 })} %</span>.
+              </p>
+              <dl className="facts" data-testid="flag-counts">
+                <div><dt>Ausreißer</dt><dd className="num">{de(flags.counts.spike)}</dd></div>
+                <div><dt>Abweichung vom Tagesschluss</dt><dd className="num">{de(flags.counts.daily)}</dd></div>
+                <div><dt>Strukturfehler (nicht gespeichert)</dt><dd className="num">{de(flags.counts.struct)}</dd></div>
+                <div><dt>Doppelte oder rückwärtige Minuten</dt><dd className="num">{de(flags.counts.dup + flags.counts.time)}</dd></div>
+              </dl>
+              <div className="table-wrap">
+                <table data-testid="flag-table">
+                  <caption className="muted">Neueste Markierungen{flags.truncated ? " (die ersten 500)" : ""}</caption>
+                  <thead><tr><th>Wert</th><th>Zeit (UTC)</th><th>Art</th><th>Einzelheit</th></tr></thead>
+                  <tbody>
+                    {flags.flags.slice(0, 50).map((f) => (
+                      <tr key={`${f.symbol}|${f.t}|${f.kind}`}><td>{f.symbol}</td><td className="num">{new Date(f.t * 1000).toISOString().slice(0, 16).replace("T", " ")}</td><td>{f.label}</td><td>{f.detail}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )
         ) : <p className="muted">Lädt …</p>}
       </section>
 

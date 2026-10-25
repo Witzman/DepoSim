@@ -24,7 +24,13 @@ function colors() {
   return { text: css("--muted"), grid: css("--grid"), border: css("--border"), surface: css("--surface"), up: css("--up"), down: css("--down") };
 }
 
-const candle = (b: Bar) => ({ time: b.t as UTCTimestamp, open: b.o, high: b.h, low: b.l, close: b.c });
+/** A bar marked as an outlier (#50) is drawn hollow: no fill, only the outline in the colour of its direction. */
+const candle = (b: Bar) => {
+  const base = { time: b.t as UTCTimestamp, open: b.o, high: b.h, low: b.l, close: b.c };
+  if (!b.flagged) return base;
+  const edge = b.c >= b.o ? css("--up") : css("--down");
+  return { ...base, color: "rgba(0,0,0,0)", borderColor: edge, wickColor: edge };
+};
 const volume = (b: Bar) => ({
   time: b.t as UTCTimestamp, value: b.v, color: (b.c >= b.o ? css("--up") : css("--down")) + "66",
 });
@@ -424,6 +430,11 @@ export function Chart({ bars: raw, prefs: view, onPrefs, fills, lead, theme, sim
             )}
             <span className="muted">Vol <b>{Math.round(legendBar.v).toLocaleString("de-DE")}</b></span>
             {view.type === "heikin" && <span className="muted">Heikin-Ashi</span>}
+            {legendBar.flagged && (
+              <span className="down" data-testid="ohlc-flagged" title="Die Kurskontrolle hält diesen Balken für einen Ausreißer: er löst keine Orders aus und gibt keinen Kurs.">
+                Ausreißer, nicht handelbar
+              </span>
+            )}
           </div>
         )}
         <div className="chart" data-testid="chart" data-bars={bars.length} data-panes={panes}

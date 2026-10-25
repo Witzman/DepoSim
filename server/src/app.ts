@@ -9,6 +9,7 @@ import { type Jobs, createJobs } from "./jobs.js";
 import { createBackfill } from "./backfill.js";
 import { type BackupService, createBackupService } from "./backup.js";
 import { FX_SYMBOL, type Instrument, type JobSettings, WATCHLIST } from "./config.js";
+import { dailyTolerance } from "./domain/quality.js";
 import { createArchive } from "./data/archive.js";
 import { createSourceStats, instrumentDaily, instrumentEcb, instrumentMarketData, instrumentSearch } from "./data/instrumented.js";
 import { type EcbSource, createEcb } from "./data/ecb.js";
@@ -80,7 +81,10 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   const stats = createSourceStats(db, nowS);
   const store = createStore(db);
   const instruments = new InstrumentRegistry(db, opts.instruments ?? WATCHLIST);
-  const archive = createArchive(db, instrumentMarketData(opts.marketData ?? createYahoo(), stats), { minGapMs: opts.minGapMs, now: opts.now });
+  const archive = createArchive(db, instrumentMarketData(opts.marketData ?? createYahoo(), stats), {
+    minGapMs: opts.minGapMs, now: opts.now,
+    dailyTolerance: (symbol) => { const i = instruments.get(symbol); return dailyTolerance(i?.venue ?? "", i?.kind); },
+  });
   const session = new SessionService({
     store, archive, instruments, fxSymbol: FX_SYMBOL, now: opts.now,
     delayS: opts.liveDelayS, catchUpTempo: opts.catchUpTempo,

@@ -2,7 +2,7 @@ import type { Archive } from "./data/archive.js";
 import type { Backfill, BackfillReport } from "./backfill.js";
 import { REACH_DAYS } from "./backfill.js";
 import type { BackupService } from "./backup.js";
-import { VENUES, type VenueId } from "./config.js";
+import { FX_SYMBOL, VENUES, type VenueId } from "./config.js";
 import type { Db } from "./db.js";
 import { localTime, sessionFor } from "./domain/venues.js";
 import type { Fx } from "./fx.js";
@@ -14,6 +14,9 @@ const DAY = 86400;
 
 /** How long job records are kept. */
 const KEEP_RUNS_DAYS = 90;
+
+/** How many days back the nightly plausibility check looks. */
+export const CHECK_DAYS = 30;
 
 /** What a backfill report says about a scheduled run. */
 function outcomeOf(report: BackfillReport, what: string): JobOutcome {
@@ -91,6 +94,24 @@ export function buildJobDefs(deps: {
         const text = `${counts.loaded} geladen, ${counts.current} aktuell` + (counts.error ? `, ${counts.error} Fehler` : "") + (counts.skipped ? `, ${counts.skipped} übersprungen` : "") + ".";
         if (job.error) throw new Error(job.error);
         return { status: counts.error > 0 || job.stoppedByRateLimit ? "partial" : "ok", message: text, counts };
+      },
+    },
+    {
+      // After the collections and the daily prices: the comparison with the daily close needs those.
+      name: "pruefung", label: "Plausibilitätsprüfung der Kurse", at: "03:45", usesSource: false,
+      async run() {
+        const to = (Math.floor(now() / DAY) + 1) * DAY;
+        const symbols = [...instruments.list().map((i) => i.symbol), FX_SYMBOL];
+        let bars = 0, spike = 0, daily = 0;
+        for (const symbol of symbols) {
+          const r = deps.archive.recheck(symbol, to - CHECK_DAYS * DAY, to);
+          bars += r.bars; spike += r.spike; daily += r.daily;
+        }
+        return {
+          status: "ok",
+          message: `${symbols.length} Reihen, ${bars} Balken geprüft: ${spike} Ausreißer, ${daily} Abweichungen vom Tagesschluss.`,
+          counts: { series: symbols.length, bars, spike, daily },
+        };
       },
     },
     {

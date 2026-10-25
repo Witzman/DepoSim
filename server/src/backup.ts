@@ -6,7 +6,7 @@ import { type Db, openDb } from "./db.js";
 import { describeError } from "./errors.js";
 
 /** Tables of the price archive: it can be fetched again (for 30 days), so a backup leaves it out. */
-export const ARCHIVE_TABLES = ["bars", "fetched_days", "daily_bars", "dividends", "daily_fetched", "fx_daily", "fx_fetched", "job_runs", "source_stats"];
+export const ARCHIVE_TABLES = ["bars", "fetched_days", "bar_flags", "daily_bars", "dividends", "daily_fetched", "fx_daily", "fx_fetched", "job_runs", "source_stats"];
 /** What a restore replaces, in the order they are written (parents first). */
 const USER_TABLES = ["simulations", "instruments", "depots", "orders", "positions", "depot_values", "journal_notes"];
 

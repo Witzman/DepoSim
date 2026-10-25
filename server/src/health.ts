@@ -2,6 +2,7 @@ import { FX_SYMBOL, VENUES, type Instrument, type VenueInfo } from "./config.js"
 import type { BackupService } from "./backup.js";
 import type { SourceStats, SourceSummary } from "./data/instrumented.js";
 import type { Db } from "./db.js";
+import { type Flag, type FlagKind, KIND_LABEL } from "./domain/quality.js";
 import { sessionFor } from "./domain/venues.js";
 import type { InstrumentRegistry } from "./instruments.js";
 import { REACH_DAYS } from "./backfill.js";
@@ -90,6 +91,8 @@ export interface DataStatus {
 
 export interface ArchiveInfo {
   rows: { bars: number; dailyBars: number; fetchedDays: number };
+  /** Bars marked by the plausibility check (#50), by kind. */
+  flags: Record<FlagKind, number>;
   fileBytes: number;
   /** Bars by calendar week of the bar (not of the fetch), newest last, and what they weigh on average. */
   weeks: { weekStart: string; bars: number; estimatedBytes: number }[];
@@ -98,7 +101,28 @@ export interface ArchiveInfo {
   backupEnabled: boolean;
 }
 
+export interface FlagRow extends Flag {
+  symbol: string;
+  label: string;
+}
+
+export interface FlagReport {
+  /** All flags in the archive by kind. */
+  counts: Record<FlagKind, number>;
+  /** Flags by symbol, most first. */
+  bySymbol: { symbol: string; spike: number; daily: number; other: number }[];
+  /** Share of the stored bars marked as outliers. */
+  spikeShare: number;
+  flags: FlagRow[];
+  /** More flags matched than are listed. */
+  truncated: boolean;
+}
+
+const MAX_FLAGS = 500;
+
 export interface Health {
+  /** Marked bars (#50), newest first; `from` is UTC seconds, `symbol` narrows to one series. */
+  flags(opts?: { symbol?: string; from?: number }): FlagReport;
   coverage(days?: number): Coverage;
   gaps(symbol: string, day: string): GapReport | null;
   sources(): SourceSummary[];
@@ -232,13 +256,39 @@ export function createHealth(deps: {
     if (gaps > 0) {
       reasons.push({ level: "yellow", text: `${gaps} Handelstage der letzten ${REACH_DAYS} Tage sind nicht vollständig geladen (siehe Raster).` });
     }
+    const marked = flagCounts();
+    if (marked.spike > 0) {
+      reasons.push({ level: "info", text: `${marked.spike} Balken sind als Ausreißer markiert; die Simulation handelt nicht darauf (siehe Kurskontrolle).` });
+    }
     for (const label of col.failedJobs) reasons.push({ level: "yellow", text: `Der letzte Lauf „${label}“ ist fehlgeschlagen.` });
 
     const level = reasons.reduce<Level>((a, r) => (r.level !== "info" && RANK[r.level] > RANK[a] ? r.level : a), "green");
     return { level, reasons, lastCollectionAt: col.lastOk, gapCells: gaps, rateLimited24h: limited };
   }
 
+  const flagCounts = (): Record<FlagKind, number> => {
+    const out: Record<FlagKind, number> = { struct: 0, spike: 0, daily: 0, dup: 0, time: 0 };
+    for (const r of db.prepare("select kind, count(*) as n from bar_flags group by kind").all() as { kind: FlagKind; n: number }[]) out[r.kind] = r.n;
+    return out;
+  };
+
   return {
+    flags(opts = {}) {
+      const where = "(? is null or symbol = ?) and t >= ?";
+      const args = [opts.symbol ?? null, opts.symbol ?? null, opts.from ?? 0];
+      const rows = db.prepare(`select symbol, t, kind, detail from bar_flags where ${where} order by t desc limit ${MAX_FLAGS + 1}`).all(...args) as (Flag & { symbol: string })[];
+      const per = db.prepare(
+        "select symbol, sum(kind = 'spike') as spike, sum(kind = 'daily') as daily, sum(kind not in ('spike', 'daily')) as other " +
+          "from bar_flags group by symbol order by spike desc, daily desc, symbol",
+      ).all() as { symbol: string; spike: number; daily: number; other: number }[];
+      const counts = flagCounts();
+      const bars = (db.prepare("select count(*) as n from bars").get() as { n: number }).n;
+      return {
+        counts, bySymbol: per, spikeShare: bars > 0 ? counts.spike / bars : 0,
+        flags: rows.slice(0, MAX_FLAGS).map((r) => ({ ...r, label: KIND_LABEL[r.kind] ?? r.kind })), truncated: rows.length > MAX_FLAGS,
+      };
+    },
+
     coverage(days = 30) {
       const { list, today } = dayStarts(days);
       const counts = new Map<string, number>();
@@ -316,7 +366,7 @@ export function createHealth(deps: {
       const perWeek = db.prepare("select cast((t - 345600) / 604800 as integer) as w, count(*) as n from bars where t >= ? group by w order by w").all(from) as { w: number; n: number }[];
       const backupStatus = backup.status();
       return {
-        rows, fileBytes,
+        rows, flags: flagCounts(), fileBytes,
         weeks: perWeek.slice(-8).map((r) => ({ weekStart: dayName(r.w * WEEK + 345600), bars: r.n, estimatedBytes: Math.round(r.n * (bytesPerBar ?? 0)) })),
         bytesPerBar: bytesPerBar === null ? null : Math.round(bytesPerBar),
         lastBackupAt: backupStatus.lastAt, backupEnabled: backupStatus.enabled,

@@ -57,6 +57,8 @@ export interface Bar {
   l: number;
   c: number;
   v: number;
+  /** Marked as an outlier by the plausibility check (#50): drawn hollow, not traded on. */
+  flagged?: boolean;
 }
 
 export interface Instrument {
@@ -503,8 +505,19 @@ export interface SourceSummary {
   lastAt: number | null;
 }
 
+export type FlagKind = "struct" | "spike" | "daily" | "dup" | "time";
+
+export interface FlagReport {
+  counts: Record<FlagKind, number>;
+  bySymbol: { symbol: string; spike: number; daily: number; other: number }[];
+  spikeShare: number;
+  flags: { symbol: string; t: number; kind: FlagKind; detail: string; label: string }[];
+  truncated: boolean;
+}
+
 export interface ArchiveInfo {
   rows: { bars: number; dailyBars: number; fetchedDays: number };
+  flags: Record<FlagKind, number>;
   fileBytes: number;
   weeks: { weekStart: string; bars: number; estimatedBytes: number }[];
   bytesPerBar: number | null;

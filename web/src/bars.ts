@@ -31,6 +31,7 @@ export function aggregate(bars: Bar[], tf: Timeframe): Bar[] {
       last.l = Math.min(last.l, b.l);
       last.c = b.c;
       last.v += b.v;
+      if (b.flagged) last.flagged = true;
     } else {
       out.push({ ...b });
       key = k;
@@ -46,7 +47,7 @@ export function heikinAshi(bars: Bar[]): Bar[] {
     const c = (b.o + b.h + b.l + b.c) / 4;
     const prev = out[out.length - 1];
     const o = prev ? (prev.o + prev.c) / 2 : (b.o + b.c) / 2;
-    out.push({ t: b.t, o, h: Math.max(b.h, o, c), l: Math.min(b.l, o, c), c, v: b.v });
+    out.push({ t: b.t, o, h: Math.max(b.h, o, c), l: Math.min(b.l, o, c), c, v: b.v, ...(b.flagged ? { flagged: true } : {}) });
   }
   return out;
 }

@@ -6,6 +6,7 @@ import type { Db } from "./db.js";
 import { DEFAULT_DAYS, MAX_DAYS, type Backfill } from "./backfill.js";
 import { FX_SYMBOL, type Instrument, SOURCELESS_SUFFIXES, VENUES } from "./config.js";
 import type { Archive } from "./data/archive.js";
+import { BLOCKING_KINDS } from "./domain/quality.js";
 import { MarketDataError } from "./data/marketdata.js";
 import type { InstrumentSearch } from "./data/search.js";
 import { DEFAULT_FEES } from "./domain/fees.js";
@@ -181,6 +182,11 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     return report;
   });
   app.get("/api/data/source", async () => ({ sources: health.sources() }));
+  app.get("/api/data/flags", async (req, reply) => {
+    const q = z.object({ symbol: z.string().min(1).optional(), from: z.coerce.number().int().min(0).optional() }).safeParse(req.query);
+    if (!q.success) return invalid(reply, q.error);
+    return health.flags(q.data);
+  });
   app.get("/api/data/archive", async () => health.archive());
 
   // ---- Sicherung, Export, Import (#46) ----
@@ -423,9 +429,14 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     if (!instruments.get(query.data.symbol)) {
       return reply.code(400).send({ error: `Unbekanntes Wertpapier ${query.data.symbol}.` });
     }
+    // Bars marked as outliers (#50) go out with `flagged`, so the chart can draw them hollow.
+    const bars = archive.barsBefore(query.data.symbol, sim.simulationTime, query.data.limit);
+    const marked = bars.length
+      ? new Set(archive.flagsBetween(query.data.symbol, bars[0].t, bars[bars.length - 1].t + 1, BLOCKING_KINDS).map((f) => f.t))
+      : new Set<number>();
     return {
       symbol: query.data.symbol,
-      bars: archive.barsBefore(query.data.symbol, sim.simulationTime, query.data.limit),
+      bars: marked.size ? bars.map((b) => (marked.has(b.t) ? { ...b, flagged: true } : b)) : bars,
     };
   });
 

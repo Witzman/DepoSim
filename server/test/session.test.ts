@@ -917,3 +917,39 @@ describe("ghost depots", () => {
     expect(t.svc.evaluation(t.id).depots.map((d) => d.kind)).toEqual(["ghost", "normal"]);
   });
 });
+
+describe("bars marked as outliers (#50)", () => {
+  const flag = (t: ReturnType<typeof setup>, barT: number) =>
+    t.db.prepare("insert into bar_flags (symbol, t, kind, detail) values ('SAP.DE', ?, 'spike', 'test')").run(barT);
+
+  it("does not fire a limit order on a marked bar; the next sound bar does", async () => {
+    const t = setup();
+    await t.svc.start(t.id);
+    flag(t, D0 + 7 * H + 15 * 60); // bar 15: close 105, low 104.5 would trigger the buy limit 105
+    const r = t.svc.placeOrder(t.id, t.depotId, { symbol: "SAP.DE", side: "buy", kind: "limit", qty: 1, limitPrice: 105 });
+    const id = (r as { orderId: number }).orderId;
+    t.svc.setTempo(t.id, 60);
+    t.svc.tick(t.id, 5000); // up to bar 14
+    t.svc.tick(t.id, 1000); // bar 15, marked
+    expect(orderOf(t, id).status).toBe("open");
+    t.svc.tick(t.id, 1000); // bar 16 (close 104, low 103.5)
+    expect(orderOf(t, id)).toMatchObject({ status: "filled", fillPrice: 105, filledSim: D0 + 7 * H + 17 * 60 });
+  });
+
+  it("prices a market order on the last sound bar", async () => {
+    const t = setup();
+    await t.svc.start(t.id);
+    flag(t, D0 + 7 * H + 9 * 60); // the last bar at the start (close 109)
+    const r = t.svc.placeOrder(t.id, t.depotId, { symbol: "SAP.DE", side: "buy", kind: "market", qty: 1 });
+    expect(orderOf(t, (r as { orderId: number }).orderId).fillPrice).toBeCloseTo(108 * 1.0005, 3); // bar 8 closed at 108
+  });
+
+  it("does not hand a marked bar out as a new bar", async () => {
+    const t = setup();
+    await t.svc.start(t.id);
+    flag(t, D0 + 7 * H + 10 * 60);
+    t.svc.setTempo(t.id, 60);
+    const r = t.svc.tick(t.id, 3000);
+    expect(r.newBars["SAP.DE"].map((b) => b.t)).toEqual([D0 + 7 * H + 660, D0 + 7 * H + 720]);
+  });
+});

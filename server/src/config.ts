@@ -39,7 +39,7 @@ export interface JobSettings {
 }
 
 /** The job names are those of `jobs.ts`; `sammlung-xetra` reads `JOB_SAMMLUNG_XETRA`. */
-export const JOB_NAMES = ["sammlung-xetra", "sammlung-us", "luecken", "tageskurse", "wechselkurse", "sicherung", "pflege"];
+export const JOB_NAMES = ["sammlung-xetra", "sammlung-us", "luecken", "tageskurse", "pruefung", "wechselkurse", "sicherung", "pflege"];
 
 export function readJobSettings(env: Record<string, string | undefined>, names: string[] = JOB_NAMES): JobSettings {
   const overrides: JobSettings["overrides"] = {};

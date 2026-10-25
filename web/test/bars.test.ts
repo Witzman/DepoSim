@@ -16,6 +16,13 @@ describe("aggregate", () => {
     expect(five[0]).toEqual({ t: T0, o: 10, h: 16, l: 8, c: 15, v: 5 });
     expect(five[1]).toEqual({ t: T0 + 300, o: 15, h: 21, l: 13, c: 20, v: 5 });
   });
+  it("keeps the outlier mark (#50) when a candle holds a marked minute, and not otherwise", () => {
+    const marked = minute.map((b, i) => (i === 7 ? { ...b, flagged: true } : b));
+    const five = aggregate(marked, "5m");
+    expect(five[0].flagged).toBeUndefined();
+    expect(five[1].flagged).toBe(true);
+    expect(heikinAshi([marked[7]])[0].flagged).toBe(true);
+  });
   it("does not change its input", () => {
     const before = JSON.stringify(minute);
     aggregate(minute, "15m");

@@ -29,6 +29,13 @@ create table if not exists daily_bars (
   v integer not null,
   primary key (symbol, day)
 );
+create table if not exists bar_flags (
+  symbol text not null,
+  t integer not null,
+  kind text not null,
+  detail text not null,
+  primary key (symbol, t, kind)
+);
 create table if not exists dividends (
   symbol text not null,
   ex_day text not null,

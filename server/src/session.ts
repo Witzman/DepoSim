@@ -9,6 +9,7 @@ import {
 import { type AllocationLine, planAllocation } from "./domain/allocation.js";
 import { type Breakdown, type FeeLedger, breakdown, feeLedger } from "./domain/breakdown.js";
 import { type Correlation, type Metrics, type Point, type Relative, computeMetrics, correlationMatrix, relativeTo, thin } from "./domain/metrics.js";
+import { BLOCKING_KINDS } from "./domain/quality.js";
 import { closedDayReason } from "./domain/venues.js";
 import { type Orderbook, buildOrderbook } from "./domain/orderbook.js";
 import { type Journal, type JournalOrder, buildJournal } from "./domain/journal.js";
@@ -17,6 +18,8 @@ import type { Cent } from "./domain/money.js";
 import type { Depot, DepotKind, OrderRecord, Simulation, Store } from "./store.js";
 
 const DAY = 86400;
+/** Prices for the simulation skip bars marked as outliers (#50). */
+const SOUND = { skipFlagged: true } as const;
 const LOOKAHEAD_DAYS = 7;
 const DEFAULT_DELAY_S = 900;
 const DEFAULT_CATCH_UP_TEMPO = 300;
@@ -303,7 +306,9 @@ export class SessionService {
     const newBars: Record<string, Bar[]> = {};
     const flat: { symbol: string; bar: Bar }[] = [];
     for (const symbol of symbols) {
-      const bars = this.archive.barsBetween(symbol, sOld - 59, target - 59);
+      // A bar marked as an outlier (#50) triggers nothing and is not shown as new; the price stays at the last sound bar.
+      const blocked = new Set(this.archive.flagsBetween(symbol, sOld - 59, target - 59, BLOCKING_KINDS).map((f) => f.t));
+      const bars = this.archive.barsBetween(symbol, sOld - 59, target - 59).filter((b) => !blocked.has(b.t));
       if (bars.length > 0) newBars[symbol] = bars;
       for (const bar of bars) flat.push({ symbol, bar });
     }
@@ -441,7 +446,7 @@ export class SessionService {
     if (!inst) return undefined;
     const s = this.sim(id).simulationTime;
     return buildOrderbook({
-      symbol: inst.symbol, currency: inst.currency, bar: this.archive.lastCompleteBar(inst.symbol, s), venueOpen: this.venueOpen(inst.venue, s),
+      symbol: inst.symbol, currency: inst.currency, bar: this.archive.lastCompleteBar(inst.symbol, s, SOUND), venueOpen: this.venueOpen(inst.venue, s),
     });
   }
 
@@ -560,7 +565,7 @@ export class SessionService {
     if (!inst) return { depots, benchmark: null };
     const points: Point[] = [];
     for (const p of (depots.find((d) => d.kind === "normal") ?? depots[0])?.points ?? []) {
-      const bar = this.archive.lastCompleteBar(inst.symbol, p.t);
+      const bar = this.archive.lastCompleteBar(inst.symbol, p.t, SOUND);
       if (bar) points.push({ t: p.t, value: bar.c });
     }
     return { depots, benchmark: { symbol: inst.symbol, name: inst.name, currency: inst.currency, points } };
@@ -660,7 +665,7 @@ export class SessionService {
 
     const prices: Snapshot["prices"] = {};
     for (const inst of this.instruments) {
-      const bar = this.archive.lastCompleteBar(inst.symbol, s);
+      const bar = this.archive.lastCompleteBar(inst.symbol, s, SOUND);
       if (bar) prices[inst.symbol] = { price: bar.c, barT: bar.t };
     }
     const refs = this.refsAt(s);
@@ -693,7 +698,7 @@ export class SessionService {
       running: this.isRunning(id),
       depots,
       prices,
-      fx: this.archive.lastCompleteBar(this.fx, s)?.c ?? null,
+      fx: this.archive.lastCompleteBar(this.fx, s, SOUND)?.c ?? null,
       venues: { XETRA: this.venueOpen("XETRA", s), US: this.venueOpen("US", s) },
       venueClosed: this.holidays(s),
       liveLimit: limitL,
@@ -726,10 +731,10 @@ export class SessionService {
 
   /** The last known price of an instrument, with the exchange rate for USD. */
   private refAt(inst: Instrument, s: number): Ref | undefined {
-    const bar = this.archive.lastCompleteBar(inst.symbol, s);
+    const bar = this.archive.lastCompleteBar(inst.symbol, s, SOUND);
     if (!bar) return undefined;
     if (inst.currency === "EUR") return { price: bar.c, currency: "EUR" };
-    const eurUsd = this.archive.lastCompleteBar(this.fx, s)?.c;
+    const eurUsd = this.archive.lastCompleteBar(this.fx, s, SOUND)?.c;
     return eurUsd === undefined ? undefined : { price: bar.c, currency: "USD", eurUsd };
   }
 
@@ -747,7 +752,7 @@ export class SessionService {
       if (inst.currency === "EUR") {
         ref = { price, currency: "EUR" };
       } else {
-        const eurUsd = this.archive.lastCompleteBar(this.fx, bar.t + 60)?.c;
+        const eurUsd = this.archive.lastCompleteBar(this.fx, bar.t + 60, SOUND)?.c;
         if (eurUsd === undefined) continue; // cannot price it yet, it stays open
         ref = { price, currency: "USD", eurUsd };
       }
