@@ -566,3 +566,9 @@ html[data-motion="reduced"] .guide-pulse { animation: none; }
 .card-text { width: 100%; margin-top: 8px; font: inherit; }
 .runbook-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .run-card .actions { flex-wrap: wrap; }
+.dividends h3 { margin: 12px 0 4px; }
+.div-lines, .div-past, .plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.div-lines > li { padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.div-past { margin-top: 4px; gap: 2px; }
+.dividends label.inline { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; font-size: 0.85em; }
+table.plain { border-collapse: collapse; } table.plain th, table.plain td { padding: 2px 12px 2px 0; text-align: left; } table.plain .num { text-align: right; }

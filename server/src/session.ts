@@ -16,6 +16,7 @@ import { type Diversification, type HeldSeries, diversify } from "./domain/diver
 import { HINT_ORDER, HINT_RULES, type Hint, type HintRule, type RuleConfig, defaultConfig, evaluateHints, orderNotes } from "./domain/hints.js";
 import { type GoalOutcome, evaluateGoals, scenarioById } from "./domain/scenario.js";
 import { GRADE_FORMULA, type Grade, gradeRun } from "./domain/grade.js";
+import { type Calendar, buildCalendar } from "./domain/dividendCalendar.js";
 import { type Orderbook, buildOrderbook } from "./domain/orderbook.js";
 import { type Journal, type JournalOrder, buildJournal } from "./domain/journal.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
@@ -670,6 +671,41 @@ export class SessionService {
       benchmarkReturn: ev.benchmark?.metrics.totalReturn ?? null, fees: row.fees.total,
     });
     return { scenarioId: scenario.id, title: scenario.title, finished: sim.endedAt !== null, simulationTime: sim.simulationTime, endAt: sim.endAt, depotId: depot.id, ...outcome };
+  }
+
+  /**
+   * The distributions of the titles a depot holds or held, up to the last finished day: what the source knows, what the depot
+   * was credited, yields, and the income by month and year. Nothing after the simulation time.
+   */
+  dividendCalendar(id: number, depotId: number): Calendar {
+    const sim = this.sim(id);
+    const day = sim.resolution === "day";
+    const state = this.store.loadDepot(depotId);
+    const refs = this.refsAt(sim.simulationTime, day);
+    const bookings = this.store.bookings(depotId).filter((b) => b.kind === "dividend");
+    const iso = (t: number) => new Date(t * 1000).toISOString().slice(0, 10);
+    const today = iso(sim.simulationTime - 1);
+    const symbols = [...new Set([...state.positions.keys(), ...bookings.map((b) => b.symbol)])].sort();
+    const eurUsd = [...refs.values()].find((r) => r.eurUsd !== undefined)?.eurUsd;
+    const titles = symbols.flatMap((symbol) => {
+      const inst = this.registry.get(symbol);
+      if (!inst) return [];
+      const pos = state.positions.get(symbol);
+      const ref = refs.get(symbol);
+      const rate = inst.currency === "USD" ? (ref?.eurUsd ?? eurUsd ?? 1) : 1;
+      return [{
+        symbol, name: inst.name, qty: pos?.qty ?? 0, cost: pos?.cost ?? 0, rate, currency: inst.currency,
+        priceEur: ref ? ref.price / (ref.currency === "USD" ? (ref.eurUsd ?? 1) : 1) : null,
+        known: this.events?.known ? this.events.known(symbol) : this.events !== undefined,
+        dividends: this.events?.dividends(symbol, "2019-01-01", today) ?? [],
+        credited: bookings.filter((b) => b.symbol === symbol).map((b) => ({ exDay: b.ref, amount: b.amount })),
+      }];
+    });
+    const metrics = computeMetrics(this.store.valueCurve(depotId, EVALUATION_POINTS));
+    return buildCalendar({
+      today, startCash: sim.startCash, totalReturn: metrics.totalReturn, titles,
+      bookings: bookings.map((b) => ({ exDay: b.ref, amount: b.amount, paidDay: iso(b.t) })),
+    });
   }
 
   private runCache = new Map<number, RunSummary>();

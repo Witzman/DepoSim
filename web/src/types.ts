@@ -130,6 +130,27 @@ export interface ScenarioResult {
   goals: GoalResult[];
 }
 
+/** GET /api/simulations/:id/dividends */
+export interface DividendCalendar {
+  today: string;
+  lines: {
+    symbol: string;
+    name: string;
+    qty: number;
+    known: boolean;
+    past: { exDay: string; perShare: number; currency: "EUR" | "USD"; credited: number | null; source: "Yahoo" }[];
+    last12mPerShare: number | null;
+    yield12m: number | null;
+    yieldOnCost: number | null;
+    expectedYear: number | null;
+    months: number[];
+    pattern: string | null;
+  }[];
+  income: { total: number; count: number; byYear: { year: string; amount: number }[]; byMonth: { month: string; amount: number }[] };
+  returnSplit: { fromDistributions: number; fromPrice: number | null; total: number | null };
+  note: string;
+}
+
 export type GradeLetter = "A" | "B" | "C" | "D" | "E";
 
 export interface GradePart {

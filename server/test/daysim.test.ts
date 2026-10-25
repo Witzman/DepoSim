@@ -115,6 +115,25 @@ describe("a simulation by days", () => {
     expect(t.store.bookings(t.depotId)).toHaveLength(1);
   });
 
+  it("builds the dividend calendar from what is booked and known, and shows no payment past the clock", () => {
+    const d = tradingDays();
+    const t = setup({ dividends: [{ exDay: isoOf(d[1]), amount: 2 }, { exDay: isoOf(d[8]), amount: 3 }] });
+    t.store.saveBalance(t.depotId, 900_000, new Map([[SAP.symbol, { qty: 10, cost: 50_000 }]]));
+    t.svc.stepDays(t.id, 4);
+    const cal = t.svc.dividendCalendar(t.id, t.depotId);
+    const sap = cal.lines.find((l) => l.symbol === SAP.symbol)!;
+    expect(sap.known).toBe(true);
+    expect(sap.past).toEqual([{ exDay: isoOf(d[1]), perShare: 2, currency: "EUR", credited: 2000, source: "Yahoo" }]); // d[8] is still ahead
+    expect(sap.yield12m).toBeCloseTo(2 / 103.5, 12);
+    expect(sap.yieldOnCost).toBeCloseTo(2 / 50, 12);
+    expect(cal.income.total).toBe(2000);
+    expect(cal.income.byMonth).toEqual([{ month: isoOf(d[1]).slice(0, 7), amount: 2000 }]);
+    expect(cal.returnSplit.fromDistributions).toBeCloseTo(2000 / 1_000_000, 12);
+
+    t.svc.stepDays(t.id, 8);
+    expect(t.svc.dividendCalendar(t.id, t.depotId).lines.find((l) => l.symbol === SAP.symbol)!.past.map((p) => p.exDay)).toEqual([isoOf(d[8]), isoOf(d[1])]);
+  });
+
   it("says end of data when no bar is left, and the time stays", () => {
     const t = setup();
     const r = t.svc.stepDays(t.id, 20);

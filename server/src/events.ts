@@ -7,6 +7,8 @@ export interface Events {
   ensure(symbol: string): Promise<void>;
   /** The same, but a failure is thrown (a rate limit, the network); a symbol the source does not know is no failure. */
   ensureStrict(symbol: string): Promise<void>;
+  /** True once the source was asked for this symbol, so an empty list means "none" and not "never asked". */
+  known?(symbol: string): boolean;
   dividends(symbol: string, fromDay: string, toDay: string): { exDay: string; amount: number }[];
   splits(symbol: string, fromDay: string, toDay: string): { day: string; numerator: number; denominator: number }[];
 }
@@ -62,6 +64,7 @@ export function createEvents(deps: { db: Db; source: DailyData; now: () => numbe
       return p;
     },
     ensureStrict: (symbol) => fetchOne(symbol, true),
+    known: (symbol) => fetched.get(symbol) !== undefined,
     dividends: (symbol, fromDay, toDay) => selectDiv.all(symbol, fromDay, toDay) as { exDay: string; amount: number }[],
     splits: (symbol, fromDay, toDay) => selectSplit.all(symbol, fromDay, toDay) as { day: string; numerator: number; denominator: number }[],
   };
