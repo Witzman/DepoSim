@@ -197,6 +197,30 @@ export interface Slice {
   share: number;
 }
 
+export interface Diversification {
+  concentration: {
+    weights: { symbol: string; weight: number }[];
+    largest: number;
+    top3: number;
+    hhi: number;
+    effectiveCount: number;
+  };
+  /** Null, with `reason`, when there are too few common values or only one position. */
+  measured: {
+    basis: Basis;
+    n: number;
+    until: number;
+    symbols: string[];
+    matrix: number[][];
+    lines: { symbol: string; weight: number; volatility: number; riskShare: number }[];
+    volatility: number;
+    ratio: number;
+    left: string[];
+    remarks: string[];
+  } | null;
+  reason?: string;
+}
+
 export interface Evaluation {
   depots: {
     id: number;
@@ -207,6 +231,8 @@ export interface Evaluation {
     vsBenchmark: Relative | null;
     fees: { orders: number; commission: number; foreign: number; total: number; shareOfStart: number };
     breakdown: { sector: Slice[]; country: Slice[]; currency: Slice[] };
+    /** Null without positions. */
+    diversification: Diversification | null;
   }[];
   correlation: { ids: number[]; basis: Basis | null; matrix: (number | null)[][] };
   benchmark: { symbol: string; name: string; metrics: Metrics } | null;

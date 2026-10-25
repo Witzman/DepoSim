@@ -5,7 +5,7 @@ import { reliabilityOf } from "../glossary.js";
 import { formatSimTime } from "../time.js";
 import { Hint } from "./Hint.js";
 import { PRESET_LABEL, describeRules } from "../rules.js";
-import type { Evaluation as Data, Metrics, Rules, Slice } from "../types.js";
+import type { Diversification, Evaluation as Data, Metrics, Rules, Slice } from "../types.js";
 
 const REFRESH_MS = 5000;
 const seriesColor = (i: number) => `var(--series-${(i % 8) + 1})`;
@@ -55,6 +55,61 @@ function Bar({ title, slices }: { title: string; slices: Slice[] }) {
           </ul>
         </>
       )}
+    </div>
+  );
+}
+
+const pct0 = (x: number) => `${Math.round(x * 100)} %`;
+
+/** Concentration of the weights, then how the positions mix: correlation heatmap and risk share beside the money share. */
+function Diversify({ d }: { d: Diversification | null }) {
+  if (!d) return null;
+  const c = d.concentration;
+  const m = d.measured;
+  return (
+    <div className="dist" data-testid="diversification">
+      <h3>Streuung der Positionen</h3>
+      <dl className="totals num journal-figures" data-testid="concentration">
+        <dt>Größte Position<Hint id="concentration" /></dt><dd>{pct0(c.largest)} <span className="muted">{c.weights[0]?.symbol}</span></dd>
+        <dt>Größte drei</dt><dd>{pct0(c.top3)}</dd>
+        <dt>Herfindahl-Index (HHI)</dt><dd>{formatRatio(c.hhi)}</dd>
+        <dt>Wirkt wie so viele gleich große Positionen</dt><dd data-testid="effective-count">{formatRatio(c.effectiveCount)} <span className="muted">(gehalten: {c.weights.length})</span></dd>
+      </dl>
+      {!m ? <p className="muted" data-testid="diversification-reason">{d.reason}</p> : (
+        <>
+          <p className="muted" data-testid="diversification-basis">Aus {m.n} Renditen auf {basisLabel(m.basis)}, bis {formatSimTime(m.until)}.{m.left.length > 0 && ` Ohne ${m.left.join(", ")}: zu wenige gemeinsame Werte.`}</p>
+          <h4>Korrelation der Positionen<Hint id="positionCorrelation" /></h4>
+          <div className="scroll">
+            <table className="positions num heat" data-testid="position-correlation">
+              <thead><tr><th />{m.symbols.map((s) => <th key={s}>{s}</th>)}</tr></thead>
+              <tbody>
+                {m.symbols.map((s, i) => (
+                  <tr key={s}>
+                    <th scope="row">{s}</th>
+                    {m.matrix[i].map((x, j) => <td key={j} className="cell" style={{ "--heat": Math.max(0, x) } as React.CSSProperties}>{formatRatio(x)}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <h4>Anteil am Geld und am Risiko<Hint id="riskShare" /></h4>
+          <div className="risk-bars" data-testid="risk-shares">
+            {m.lines.map((l) => (
+              <div className="pair" key={l.symbol}>
+                <span>{l.symbol}</span>
+                <span className="track" role="img" aria-label={`${l.symbol}: ${pct0(l.weight)} des Geldes, ${pct0(l.riskShare)} des Risikos`}>
+                  <span className="weight" style={{ width: `${Math.min(l.weight, 1) * 100}%` }} />
+                  <span className="risk" style={{ width: `${Math.min(Math.max(l.riskShare, 0), 1) * 100}%` }} />
+                </span>
+                <span className="num">{pct0(l.weight)} / {pct0(l.riskShare)}</span>
+              </div>
+            ))}
+          </div>
+          <p className="muted">Grau: Anteil am Geld. Farbe: Anteil am Risiko. Depot-Volatilität {formatPercentPlain(m.volatility)} p. a.; Diversifikationsquotient <strong data-testid="diversification-ratio">{formatRatio(m.ratio)}</strong><Hint id="diversificationRatio" />.</p>
+          {m.remarks.map((r) => <p key={r} data-testid="diversification-remark">{r}</p>)}
+        </>
+      )}
+      <p className="muted">Gewichte nach dem heutigen Wert, Renditen aus dem Fenster seit dem Start. Haben sich die Gewichte in dieser Zeit geändert, gilt die Rechnung für die Kurse der Positionen, nicht für das Depot. Ein ETF zählt als eine Position.</p>
     </div>
   );
 }
@@ -184,6 +239,7 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark, ru
         <Bar title="Sektor" slices={active.breakdown.sector} />
         <Bar title="Handelsland" slices={active.breakdown.country} />
         <Bar title="Währung" slices={active.breakdown.currency} />
+        <Diversify d={active.diversification} />
         <p className="muted">Handelsland ist das Land der Börse, nicht der Firmensitz. Fonds stehen als „ETF/Fonds“.</p>
       </section>
 

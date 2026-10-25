@@ -12,6 +12,7 @@ import { type Correlation, type Metrics, type Point, type Relative, computeMetri
 import { BLOCKING_KINDS } from "./domain/quality.js";
 import { CLOCK_STOPPED_REFUSED } from "./domain/rules.js";
 import { closedDayReason } from "./domain/venues.js";
+import { type Diversification, type HeldSeries, diversify } from "./domain/diversification.js";
 import { type Orderbook, buildOrderbook } from "./domain/orderbook.js";
 import { type Journal, type JournalOrder, buildJournal } from "./domain/journal.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
@@ -104,7 +105,7 @@ export interface Curves {
 }
 
 export interface Evaluation {
-  depots: { id: number; name: string; kind: DepotKind; startedAt: number; metrics: Metrics; vsBenchmark: Relative | null; fees: FeeLedger; breakdown: Breakdown }[];
+  depots: { id: number; name: string; kind: DepotKind; startedAt: number; metrics: Metrics; vsBenchmark: Relative | null; fees: FeeLedger; breakdown: Breakdown; diversification: Diversification | null }[];
   correlation: Correlation;
   benchmark: { symbol: string; name: string; metrics: Metrics } | null;
   note: string;
@@ -614,6 +615,7 @@ export class SessionService {
         vsBenchmark: benchSeries ? relativeTo(points, benchSeries) : null,
         fees: feeLedger(state.orders, sim.startCash),
         breakdown: breakdown(held, state.cash, this.instruments),
+        diversification: diversify(this.heldSeries(sim, held, state.positions)),
       };
     });
     const benchmark: Evaluation["benchmark"] = inst && benchSeries
@@ -755,6 +757,38 @@ export class SessionService {
     if (inst.currency === "EUR") return { price: bar.c, currency: "EUR" };
     const eurUsd = this.archive.lastCompleteBar(this.fx, s, SOUND)?.c;
     return eurUsd === undefined ? undefined : { price: bar.c, currency: "USD", eurUsd };
+  }
+
+  /**
+   * The held positions with their prices in EUR from the start of the simulation up to its time and
+   * not a minute beyond. A USD price is divided by the rate of the same minute (the last one known).
+   */
+  private heldSeries(sim: Simulation, held: { symbol: string; value: Cent }[], positions: DepotState["positions"]): HeldSeries[] {
+    const from = sim.startAt - 59;
+    const to = sim.simulationTime - 59;
+    let rates: Map<number, number> | undefined;
+    const out: HeldSeries[] = [];
+    for (const h of held) {
+      if (!positions.has(h.symbol)) continue;
+      const inst = this.registry.get(h.symbol);
+      if (!inst) continue;
+      const blocked = new Set(this.archive.flagsBetween(h.symbol, from, to, BLOCKING_KINDS).map((f) => f.t));
+      const bars = this.archive.barsBetween(h.symbol, from, to).filter((b) => !blocked.has(b.t));
+      let points: Point[];
+      if (inst.currency === "USD") {
+        rates ??= new Map(this.archive.barsBetween(this.fx, from, to).map((b) => [b.t, b.c]));
+        let last: number | undefined;
+        points = [];
+        for (const b of bars) {
+          last = rates.get(b.t) ?? last;
+          if (last !== undefined) points.push({ t: b.t + 60, value: b.c / last });
+        }
+      } else {
+        points = bars.map((b) => ({ t: b.t + 60, value: b.c }));
+      }
+      out.push({ symbol: h.symbol, value: h.value, points });
+    }
+    return out;
   }
 
   /** The dividends and splits of the symbols and days that the bars of a tick touch. */

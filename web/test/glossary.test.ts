@@ -19,7 +19,8 @@ describe("glossary", () => {
   it("explains every figure that the evaluation shows", () => {
     const ids = hintIds(source("Evaluation.tsx"));
     for (const id of ["return", "basis", "volatility", "maxDrawdown", "sharpe", "sortino", "calmar", "var95", "bestStep", "worstStep",
-      "upShare", "beta", "alpha", "trackingError", "informationRatio", "hitShare", "correlation", "fees", "distribution"]) {
+      "upShare", "beta", "alpha", "trackingError", "informationRatio", "hitShare", "correlation", "fees", "distribution",
+      "concentration", "positionCorrelation", "riskShare", "diversificationRatio"]) {
       expect(ids, id).toContain(id);
     }
   });

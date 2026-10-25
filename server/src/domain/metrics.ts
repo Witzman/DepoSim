@@ -6,9 +6,9 @@ export interface Point {
 /** The step of the returns a figure is computed from. The coarsest one with enough returns is used. */
 export type Basis = "day" | "hour" | "5min";
 
-const LADDER: Basis[] = ["day", "hour", "5min"];
+export const LADDER: Basis[] = ["day", "hour", "5min"];
 /** Periods per year: 252 trading days, about 8 trading hours a day. An estimate, and shown as one. */
-const PERIODS: Record<Basis, number> = { day: 252, hour: 252 * 8, "5min": 252 * 96 };
+export const PERIODS: Record<Basis, number> = { day: 252, hour: 252 * 8, "5min": 252 * 96 };
 export const MIN_RETURNS = 10;
 /** A volatility below this is a flat line: a Sharpe ratio from it would divide by noise. */
 const FLAT = 1e-12;
@@ -17,11 +17,11 @@ const berlinDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" 
 const bucketOf = (t: number, basis: Basis): string | number =>
   basis === "day" ? berlinDate.format(t * 1000) : Math.floor(t / (basis === "hour" ? 3600 : 300));
 
-interface Bucketed extends Point {
+export interface Bucketed extends Point {
   key: string | number;
 }
 
-function bucketed(points: Point[], basis: Basis): Bucketed[] {
+export function bucketed(points: Point[], basis: Basis): Bucketed[] {
   const out: Bucketed[] = [];
   for (const p of points) {
     const key = bucketOf(p.t, basis);

@@ -495,3 +495,12 @@ dialog.glossary input { width: 100%; box-sizing: border-box; }
 .badge.rules { border-color: var(--accent); color: var(--accent); margin-left: 8px; text-transform: none; letter-spacing: 0; }
 fieldset.rules { border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 6px; }
 fieldset.rules legend { color: var(--muted); font-size: 0.85rem; padding: 0 4px; }
+
+/* Diversification (#35): the heatmap carries its numbers; colour is only the second cue. */
+.heat td.cell { text-align: center; background: color-mix(in srgb, var(--accent) calc(var(--heat, 0) * 70%), transparent); }
+.risk-bars { display: grid; gap: 6px; }
+.risk-bars .pair { display: grid; grid-template-columns: 6rem 1fr 4.5rem; gap: 8px; align-items: center; }
+.risk-bars .track { position: relative; height: 10px; background: var(--border); border-radius: 5px; }
+.risk-bars .track span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; }
+.risk-bars .weight { background: var(--muted); opacity: 0.6; }
+.risk-bars .risk { background: var(--accent); height: 5px; top: 2.5px; }
