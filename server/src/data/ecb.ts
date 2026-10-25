@@ -12,7 +12,10 @@ export interface EcbSource {
 }
 
 const BASE = "https://www.ecb.europa.eu/stats/eurofxref/";
-const FILES = { full: "eurofxref-hist.csv", recent: "eurofxref-hist-90d.csv" } as const;
+// `eurofxref-hist-90d.csv` answers 404 since 2026-10-25 (measured; the ECB took it down, the .xml twin and the full file stay).
+// "recent" therefore reads the full file and keeps the last 90 days.
+const FILE = "eurofxref-hist.csv";
+const RECENT_DAYS = 90;
 
 /**
  * The ECB file: a header `Date,USD,JPY,...,` and one row per publication day, newest first, every
@@ -48,14 +51,17 @@ export function createEcb(fetchFn: typeof fetch = fetch): EcbSource {
     async fetch(range) {
       let res: Response;
       try {
-        res = await fetchFn(BASE + FILES[range], { signal: timeoutSignal() });
+        res = await fetchFn(BASE + FILE, { signal: timeoutSignal() });
       } catch (err) {
         throw new MarketDataError("network", `request to the ECB failed: ${(err as Error).message}`);
       }
       if (res.status === 429) throw new MarketDataError("rate_limited", "the ECB answered 429");
       if (res.status >= 500) throw new MarketDataError("network", `the ECB answered ${res.status}`);
       if (!res.ok) throw new MarketDataError("bad_shape", `the ECB answered ${res.status}`);
-      return parseEcbCsv(await res.text());
+      const rows = parseEcbCsv(await res.text());
+      if (range === "full") return rows;
+      const cutoff = new Date(Date.parse(rows[rows.length - 1].day) - RECENT_DAYS * 86_400_000).toISOString().slice(0, 10);
+      return rows.filter((r) => r.day >= cutoff);
     },
   };
 }

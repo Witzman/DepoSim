@@ -33,7 +33,7 @@ describe("parseEcbCsv", () => {
 describe("createEcb", () => {
   const answer = (status: number, body = CSV) => (async () => new Response(body, { status })) as typeof fetch;
 
-  it("asks the full file or the 90 days file", async () => {
+  it("asks the full file for both ranges and keeps only the last 90 days for 'recent'", async () => {
     const urls: string[] = [];
     const fetchFn = (async (url: string) => (urls.push(url), new Response(CSV))) as unknown as typeof fetch;
     const ecb = createEcb(fetchFn);
@@ -41,8 +41,11 @@ describe("createEcb", () => {
     await ecb.fetch("recent");
     expect(urls).toEqual([
       "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.csv",
-      "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.csv",
+      "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.csv",
     ]);
+    const long = "Date,USD,\n2026-10-23,1.1,\n2026-07-25,1.2,\n2026-07-24,1.3,\n";
+    const recent = await createEcb((async () => new Response(long)) as typeof fetch).fetch("recent");
+    expect(recent.map((r) => r.day)).toEqual(["2026-07-25", "2026-10-23"]);
   });
 
   it("names the kind of failure", async () => {
