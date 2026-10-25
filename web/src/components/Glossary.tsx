@@ -5,9 +5,11 @@ import { EntryText } from "./Hint.js";
 interface Props {
   open: boolean;
   onClose: () => void;
+  /** Filled into the search when the dialog opens (the "Warum?" of a hint). */
+  initialQuery?: string;
 }
 
-export function Glossary({ open, onClose }: Props) {
+export function Glossary({ open, onClose, initialQuery = "" }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -16,7 +18,7 @@ export function Glossary({ open, onClose }: Props) {
     const d = dialog.current;
     if (!d) return;
     if (open && !d.open) {
-      setQuery("");
+      setQuery(initialQuery);
       d.showModal();
       input.current?.focus();
     }

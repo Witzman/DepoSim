@@ -26,6 +26,7 @@ import { BackupDialog } from "./components/BackupDialog.js";
 import { backupLine } from "./backup.js";
 import { Palette } from "./components/Palette.js";
 import { Glossary } from "./components/Glossary.js";
+import { Hints } from "./components/Hints.js";
 import { ShortcutHelp } from "./components/ShortcutHelp.js";
 import { SimulationPicker } from "./components/SimulationPicker.js";
 import { Watchlist } from "./components/Watchlist.js";
@@ -87,6 +88,9 @@ export function App() {
   const [allocationOpen, setAllocationOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [glossaryOpen, setGlossaryOpen] = useState(false);
+  const [glossaryQuery, setGlossaryQuery] = useState("");
+  const [hintsOpen, setHintsOpen] = useState(false);
+  const [hintCount, setHintCount] = useState(0);
   const [backfillOpen, setBackfillOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
   const [backupState, setBackupState] = useState<BackupStatus | null>(null);
@@ -407,6 +411,10 @@ export function App() {
               title={line.text}>{narrow ? (line.bad ? "Sicherung !" : "Sicherung") : line.text}</button>
           );
         })()}
+        {live && depot && (
+          <button className="btn small" data-testid="hints-open" onClick={() => setHintsOpen(true)}
+            aria-label={`Hinweise: ${hintCount}`} title="Hinweise und Einstellungen">Hinweise{hintCount > 0 && <span className="badge warn" data-testid="hints-count">{hintCount}</span>}</button>
+        )}
         <button className="btn small" data-testid="palette-open" onClick={() => setPaletteOpen(true)}
           aria-label="Suche und Befehle öffnen (Strg+K)" title="Strg+K">Suche</button>
         <button className="btn small" data-testid="theme-toggle" onClick={toggle} aria-label="Hell oder Dunkel umschalten">
@@ -469,6 +477,11 @@ export function App() {
                 <DepotSwitch depots={snapshot.depots} activeId={depot.id} disabled={locked}
                   onSelect={setActiveDepotId} onAdd={newDepot} onRename={renameActive} onRemove={removeActive}
                   onAllocate={() => setAllocationOpen(true)} onGhost={() => void newGhost()} />
+              )}
+              {depot && (
+                <Hints simulationId={live.id} depotId={depot.id} running={snapshot?.running ?? false} showCard={view === "trade"}
+                  version={depot.orders.filter((o) => o.status === "filled").length} settingsOpen={hintsOpen} onSettings={setHintsOpen}
+                  onCount={setHintCount} onWhy={(q) => { setGlossaryQuery(q); setGlossaryOpen(true); }} />
               )}
               {view === "data" ? (
                 <DataView onChanged={readLight} />
@@ -552,7 +565,7 @@ export function App() {
         }} />
       <BackfillDialog open={backfillOpen} onClose={() => setBackfillOpen(false)} />
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
-      <Glossary open={glossaryOpen} onClose={() => setGlossaryOpen(false)} />
+      <Glossary open={glossaryOpen} initialQuery={glossaryQuery} onClose={() => { setGlossaryOpen(false); setGlossaryQuery(""); }} />
       <Palette
         open={paletteOpen} instruments={watchlist} simulations={simulations} selectedId={selectedId}
         onClose={() => setPaletteOpen(false)} onPickInstrument={setSymbol} onPickSimulation={setSelectedId}

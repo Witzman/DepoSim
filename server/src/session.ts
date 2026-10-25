@@ -13,6 +13,7 @@ import { BLOCKING_KINDS } from "./domain/quality.js";
 import { CLOCK_STOPPED_REFUSED } from "./domain/rules.js";
 import { closedDayReason } from "./domain/venues.js";
 import { type Diversification, type HeldSeries, diversify } from "./domain/diversification.js";
+import { HINT_ORDER, HINT_RULES, type Hint, type HintRule, type RuleConfig, defaultConfig, evaluateHints, orderNotes } from "./domain/hints.js";
 import { type Orderbook, buildOrderbook } from "./domain/orderbook.js";
 import { type Journal, type JournalOrder, buildJournal } from "./domain/journal.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
@@ -147,10 +148,19 @@ export interface Comparison {
 
 export const COMPARE_POINTS = 400;
 
+export interface HintsResult {
+  depotId: number;
+  simulationTime: number;
+  hints: Hint[];
+  /** Hints that apply but were hidden by the person. */
+  hiddenCount: number;
+  rules: { rule: HintRule; label: string; unit: string; defaults: number[]; enabled: boolean; levels: number[]; hidden: boolean }[];
+}
+
 export type PlaceResult = { ok: true; orderId: number } | { ok: false; reason: string };
 
 /** `problem` is why the order would be rejected; the cost is shown anyway. */
-export type PreviewResult = { ok: true; cost: CostPreview; problem?: string } | { ok: false; reason: string };
+export type PreviewResult = { ok: true; cost: CostPreview; problem?: string; notes?: string[] } | { ok: false; reason: string };
 
 export class SessionService {
   private readonly store: Store;
@@ -413,7 +423,86 @@ export class SessionService {
     const priceable = Number.isInteger(o.qty) && o.qty > 0 && (o.kind === "market" || (o.limitPrice ?? 0) > 0);
     if (!priceable) return { ok: false, reason: checked.ok ? "Ungültiger Auftrag." : checked.reason };
     const cost = previewCost(o.side, o.qty, ref, o.kind, o.limitPrice, sim.fees);
-    return checked.ok ? { ok: true, cost } : { ok: true, cost, problem: checked.reason };
+    const notes = this.orderRemarks(sim, state, o, ref, cost);
+    const extra = notes.length > 0 ? { notes } : {};
+    return checked.ok ? { ok: true, cost, ...extra } : { ok: true, cost, problem: checked.reason, ...extra };
+  }
+
+  /** What the order would do to the weight of its position, and a flat fee that is large next to it. */
+  private orderRemarks(sim: Simulation, state: DepotState, o: NewOrder, ref: Ref, cost: CostPreview): string[] {
+    const refs = this.refsAt(sim.simulationTime);
+    const held = state.positions.get(o.symbol);
+    const afterValue = (held ? positionValue(held, refs.get(o.symbol)) : 0) + (o.side === "buy" ? cost.gross : 0);
+    return orderNotes({
+      side: o.side, symbol: o.symbol, depotValue: depotValue(state, refs), afterValue, foreignFee: cost.foreign, orderTotal: cost.total,
+    }, this.hintConfig(sim.id).config);
+  }
+
+  private hintConfig(id: number): { config: Record<HintRule, RuleConfig>; hidden: Set<string> } {
+    const prefs = this.store.hintPrefs(id);
+    const config = defaultConfig();
+    const hidden = new Set<string>();
+    for (const rule of HINT_ORDER) {
+      const p = prefs[rule];
+      if (!p) continue;
+      config[rule] = { enabled: p.enabled, levels: p.levels && p.levels.length === HINT_RULES[rule].defaults.length ? p.levels : config[rule].levels };
+      if (p.hidden) hidden.add(rule);
+    }
+    return { config, hidden };
+  }
+
+  /** The hints that apply to a depot at the simulation time, and the settings of every rule. */
+  hints(id: number, depotId: number): HintsResult | undefined {
+    const sim = this.sim(id);
+    const depot = this.store.listDepots(id).find((d) => d.id === depotId);
+    if (!depot) return undefined;
+    const state = this.store.loadDepot(depotId);
+    const refs = this.refsAt(sim.simulationTime);
+    const known = new Map(this.instruments.map((i) => [i.symbol, i]));
+    const curve = this.store.valueCurve(depotId, EVALUATION_POINTS);
+    const { config, hidden } = this.hintConfig(id);
+    const trades = depot.kind === "normal" ? this.journal(id, depotId).trades : [];
+    const all = evaluateHints({
+      depotValue: depotValue(state, refs),
+      cash: state.cash,
+      startCash: sim.startCash,
+      positions: [...state.positions].map(([symbol, pos]) => {
+        const i = known.get(symbol);
+        return {
+          symbol, value: positionValue(pos, refs.get(symbol)), currency: i?.currency ?? "EUR",
+          sector: i ? (i.kind === "ETF" ? "ETF/Fonds" : i.sector ?? "Unbekannt") : "Unbekannt",
+        };
+      }),
+      curve,
+      now: sim.simulationTime,
+      feeShareOfStart: feeLedger(state.orders, sim.startCash).shareOfStart,
+      trades,
+      metricsBasis: computeMetrics(curve).basis,
+    }, config);
+    return {
+      depotId,
+      simulationTime: sim.simulationTime,
+      hints: all.filter((h) => !hidden.has(h.rule)),
+      hiddenCount: all.filter((h) => hidden.has(h.rule)).length,
+      rules: HINT_ORDER.map((rule) => ({
+        rule, label: HINT_RULES[rule].label, unit: HINT_RULES[rule].unit, defaults: HINT_RULES[rule].defaults,
+        enabled: config[rule].enabled, levels: config[rule].levels, hidden: hidden.has(rule),
+      })),
+    };
+  }
+
+  setHintPref(id: number, rule: string, patch: { enabled?: boolean; hidden?: boolean; levels?: number[] }): { ok: true } | { ok: false; reason: string } {
+    if (!(rule in HINT_RULES)) return { ok: false, reason: "Unbekannte Regel." };
+    const r = rule as HintRule;
+    if (patch.levels !== undefined) {
+      const want = HINT_RULES[r].defaults.length;
+      if (patch.levels.length !== want || want === 0) return { ok: false, reason: "Diese Regel hat keine Schwelle zu ändern." };
+      if (patch.levels.some((x) => !Number.isFinite(x) || x < 0) || patch.levels.some((x, i) => i > 0 && x < patch.levels![i - 1])) {
+        return { ok: false, reason: "Die Schwellen müssen aufsteigend und nicht negativ sein." };
+      }
+    }
+    this.store.setHintPref(id, rule, patch);
+    return { ok: true };
   }
 
   addDepot(id: number, name?: string): { ok: true; depot: Depot } | { ok: false; reason: string } {

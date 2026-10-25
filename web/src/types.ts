@@ -197,6 +197,35 @@ export interface Slice {
   share: number;
 }
 
+export interface Hint {
+  rule: string;
+  severity: "info" | "warn";
+  text: string;
+  measure: number;
+  threshold: number;
+  unit: "share" | "count" | "none";
+  /** Id of the glossary entry that explains it. */
+  why: string;
+}
+
+export interface HintRule {
+  rule: string;
+  label: string;
+  unit: "share" | "count" | "none";
+  defaults: number[];
+  enabled: boolean;
+  levels: number[];
+  hidden: boolean;
+}
+
+export interface HintsResult {
+  depotId: number;
+  simulationTime: number;
+  hints: Hint[];
+  hiddenCount: number;
+  rules: HintRule[];
+}
+
 export interface Diversification {
   concentration: {
     weights: { symbol: string; weight: number }[];

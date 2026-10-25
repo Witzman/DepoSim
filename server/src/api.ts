@@ -66,6 +66,12 @@ const allocateBody = z.object({
 const compareQuery = z.object({ ids: z.string().default("") });
 const COMPARE_NOTE = "Jede Kurve reicht bis zur eigenen Simulationszeit; es gibt keine gemeinsame Zeitachse. Werte in Prozent vom ersten Punkt.";
 
+const hintPrefBody = z.object({
+  enabled: z.boolean().optional(),
+  hidden: z.boolean().optional(),
+  levels: z.array(z.number()).max(3).optional(),
+}).strict();
+
 const journalQuery = z.object({ depotId: z.coerce.number().int().optional() });
 const noteBody = z.object({ text: z.string().max(500, "Die Notiz darf höchstens 500 Zeichen haben.") });
 const TRADE_KEY = /^\d{1,12}:\d{1,12}$/;
@@ -474,7 +480,7 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     }
     const result = session.previewOrder(sim.id, order, depotId);
     if (!result.ok) return reply.code(400).send({ error: result.reason });
-    return { cost: result.cost, problem: result.problem };
+    return { cost: result.cost, problem: result.problem, notes: result.notes };
   });
 
   app.post("/api/simulations/:id/orders", async (req, reply) => {
@@ -505,6 +511,24 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     const sim = simulationOf(req.params);
     if (!sim) return notFound(reply);
     return session.evaluation(sim.id);
+  });
+
+  app.get("/api/simulations/:id/hints", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    const query = journalQuery.safeParse(req.query);
+    if (!query.success) return invalid(reply, query.error);
+    const result = session.hints(sim.id, query.data.depotId ?? session.defaultDepotId(sim.id));
+    return result ?? reply.code(404).send({ error: "Unbekanntes Depot." });
+  });
+
+  app.put("/api/simulations/:id/hints/:rule", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    const body = hintPrefBody.safeParse(req.body);
+    if (!body.success) return invalid(reply, body.error);
+    const done = session.setHintPref(sim.id, (req.params as { rule: string }).rule, body.data);
+    return done.ok ? reply.code(204).send() : reply.code(400).send({ error: done.reason });
   });
 
   app.get("/api/simulations/:id/journal", async (req, reply) => {

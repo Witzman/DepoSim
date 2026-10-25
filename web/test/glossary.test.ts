@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { HINT_RULES } from "../../server/src/domain/hints.js";
 import { GLOSSARY, entryOf, reliabilityOf, searchGlossary } from "../src/glossary.js";
 
 const source = (name: string) => readFileSync(new URL(`../src/components/${name}`, import.meta.url), "utf8");
@@ -36,6 +37,12 @@ describe("glossary", () => {
     for (const file of ["Evaluation.tsx", "Journal.tsx"]) {
       for (const id of hintIds(source(file))) expect(entryOf(id), `${file}: ${id}`).toBeDefined();
     }
+  });
+});
+
+describe("hints", () => {
+  it("point every rule's 'Warum?' at a glossary entry", () => {
+    for (const [rule, info] of Object.entries(HINT_RULES)) expect(entryOf(info.why), rule).toBeDefined();
   });
 });
 

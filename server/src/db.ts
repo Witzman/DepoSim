@@ -156,6 +156,14 @@ create table if not exists cash_events (
   text text not null,
   primary key (depot_id, kind, symbol, ref)
 );
+create table if not exists hint_prefs (
+  simulation_id integer not null references simulations (id) on delete cascade,
+  rule text not null,
+  enabled integer not null default 1,
+  hidden integer not null default 0,
+  levels_json text,
+  primary key (simulation_id, rule)
+);
 create table if not exists orders (
   id integer primary key,
   depot_id integer not null references depots (id) on delete cascade,

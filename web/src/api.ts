@@ -1,5 +1,5 @@
 import type {
-  AllocationLine, ArchiveInfo, FlagReport, BackfillJob, BackupStatus, Coverage, DataStatus, GapReport, JobsOverview, SourceSummary, Bar, ClientMessage, CompareResult, CostPreview, Curves, Depot, Evaluation, Instrument, Journal, JournalNoteResult,
+  AllocationLine, ArchiveInfo, FlagReport, BackfillJob, BackupStatus, Coverage, DataStatus, GapReport, HintsResult, JobsOverview, SourceSummary, Bar, ClientMessage, CompareResult, CostPreview, Curves, Depot, Evaluation, Instrument, Journal, JournalNoteResult,
   Longterm, LongtermJob, MissingList, OrderInput, Orderbook, SearchHit, ServerMessage, Simulation, Rules, VenueInfo,
 } from "./types.js";
 
@@ -62,7 +62,7 @@ export async function getBars(id: number, symbol: string, limit: number): Promis
 }
 
 export const previewOrder = (id: number, o: OrderInput) =>
-  request<{ cost: CostPreview; problem?: string }>(`/api/simulations/${id}/orders/preview`, json("POST", o));
+  request<{ cost: CostPreview; problem?: string; notes?: string[] }>(`/api/simulations/${id}/orders/preview`, json("POST", o));
 export const placeOrder = async (id: number, o: OrderInput) =>
   (await request<{ orderId: number }>(`/api/simulations/${id}/orders`, json("POST", o))).orderId;
 export const cancelOrder = (id: number, orderId: number) =>
@@ -102,6 +102,9 @@ export const getMissing = () => request<MissingList>("/api/archive/missing");
 export const startBackfill = () => request<BackfillJob>("/api/archive/backfill", json("POST", {}));
 export const getBackfill = () => request<BackfillJob>("/api/archive/backfill");
 
+export const getHints = (id: number, depotId: number) => request<HintsResult>(`/api/simulations/${id}/hints?depotId=${depotId}`);
+export const setHintPref = (id: number, rule: string, patch: { enabled?: boolean; hidden?: boolean; levels?: number[] }) =>
+  request<void>(`/api/simulations/${id}/hints/${rule}`, json("PUT", patch));
 export const getJournal = (id: number, depotId: number) => request<Journal>(`/api/simulations/${id}/journal?depotId=${depotId}`);
 export const saveJournalNote = (id: number, tradeKey: string, text: string) =>
   request<JournalNoteResult>(`/api/simulations/${id}/journal/${encodeURIComponent(tradeKey)}`, json("PUT", { text }));

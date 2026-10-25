@@ -75,7 +75,16 @@ export interface Booking {
   text: string;
 }
 
+/** What the person set for one hint rule of one simulation. Absent rules are on, shown and at their default thresholds. */
+export interface HintPref {
+  enabled: boolean;
+  hidden: boolean;
+  levels: number[] | null;
+}
+
 export interface Store {
+  hintPrefs(simulationId: number): Record<string, HintPref>;
+  setHintPref(simulationId: number, rule: string, patch: Partial<HintPref>): void;
   /** Writes a booking once: false, and nothing changed, if the depot already has that kind, symbol and ref. */
   addBooking(depotId: number, b: Booking): boolean;
   bookings(depotId: number): Booking[];
@@ -310,6 +319,21 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
       }
       db.prepare("insert or replace into journal_notes (simulation_id, trade_key, text, updated_at) values (?, ?, ?, ?)")
         .run(simulationId, tradeKey, text, at);
+    },
+    hintPrefs: (simulationId) =>
+      Object.fromEntries(
+        (db.prepare("select rule, enabled, hidden, levels_json from hint_prefs where simulation_id = ?").all(simulationId) as {
+          rule: string; enabled: number; hidden: number; levels_json: string | null;
+        }[]).map((r) => [r.rule, { enabled: r.enabled === 1, hidden: r.hidden === 1, levels: r.levels_json ? (JSON.parse(r.levels_json) as number[]) : null }]),
+      ),
+    setHintPref: (simulationId, rule, patch) => {
+      const row = db.prepare("select enabled, hidden, levels_json from hint_prefs where simulation_id = ? and rule = ?").get(simulationId, rule) as
+        { enabled: number; hidden: number; levels_json: string | null } | undefined;
+      const enabled = patch.enabled ?? (row ? row.enabled === 1 : true);
+      const hidden = patch.hidden ?? (row ? row.hidden === 1 : false);
+      const levels = patch.levels !== undefined ? patch.levels : row?.levels_json ? (JSON.parse(row.levels_json) as number[]) : null;
+      db.prepare("insert or replace into hint_prefs (simulation_id, rule, enabled, hidden, levels_json) values (?, ?, ?, ?, ?)")
+        .run(simulationId, rule, enabled ? 1 : 0, hidden ? 1 : 0, levels ? JSON.stringify(levels) : null);
     },
     addBooking: (depotId, b) =>
       db.prepare("insert or ignore into cash_events (depot_id, t, kind, symbol, ref, amount, text) values (?, ?, ?, ?, ?, ?, ?)")

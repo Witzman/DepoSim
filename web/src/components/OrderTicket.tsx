@@ -22,6 +22,7 @@ export function OrderTicket({ simulationId, depotId, instrument, priceKey, disab
   const [limit, setLimit] = useState("");
   const [cost, setCost] = useState<CostPreview | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [notes, setNotes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const qtyInput = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -47,6 +48,7 @@ export function OrderTicket({ simulationId, depotId, instrument, priceKey, disab
     if (!order || disabled || qty.trim() === "" || (kind === "limit" && limit.trim() === "")) {
       setCost(null);
       setProblem(null);
+      setNotes([]);
       return;
     }
     let current = true;
@@ -56,10 +58,12 @@ export function OrderTicket({ simulationId, depotId, instrument, priceKey, disab
           if (!current) return;
           setCost(r.cost);
           setProblem(r.problem ?? null);
+          setNotes(r.notes ?? []);
         })
         .catch((e: Error) => {
           if (!current) return;
           setCost(null);
+          setNotes([]);
           setProblem(e.message);
         });
     }, 200);
@@ -124,6 +128,7 @@ export function OrderTicket({ simulationId, depotId, instrument, priceKey, disab
         </dl>
       )}
       {problem && <p className="error" role="status" data-testid="ticket-problem">{problem}</p>}
+      {notes.map((n) => <p key={n} className="note-hint" role="status" data-testid="ticket-note">{n}</p>)}
 
       <button type="submit" className="btn primary" disabled={!canSend}>{word}</button>
     </form>
