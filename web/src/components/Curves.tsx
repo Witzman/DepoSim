@@ -14,6 +14,19 @@ const MIN_STEP_S = 60;
 const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const seriesColor = (i: number) => css(`--series-${(i % 8) + 1}`);
 
+type Fed = Map<string, { n: number; sig: string }>;
+/**
+ * Puts the data on a series. When the data only grew at the end since the last time (the usual case: a minute of simulated time
+ * adds a point), just the new points are added; setting all of them again on every minute is what made a long run slow.
+ */
+function feed(fed: Fed, key: string, series: ISeriesApi<"Line">, data: { time: UTCTimestamp; value: number }[], sig: string) {
+  const prev = fed.get(key);
+  const grew = prev !== undefined && prev.n > 0 && data.length >= prev.n && data.length - prev.n <= 50 && sig === prev.sig;
+  if (grew) for (let i = prev.n - 1; i < data.length; i++) series.update(data[i]);
+  else series.setData(data);
+  fed.set(key, { n: data.length, sig });
+}
+
 interface Props {
   simulationId: number;
   /** The depots as they are now; each tick adds a point to the curves. */
@@ -39,6 +52,7 @@ export function Curves({ simulationId, depots, simulationTime, theme, instrument
   const dd = useRef<HTMLDivElement>(null);
   const ddChart = useRef<IChartApi | null>(null);
   const ddLines = useRef(new Map<number, ISeriesApi<"Line">>());
+  const fed = useRef<Fed>(new Map());
   const idKey = depots.map((d) => d.id).join(",");
 
   // The stored curves: again when the set of depots changes.
@@ -113,7 +127,7 @@ export function Curves({ simulationId, depots, simulationTime, theme, instrument
     });
     const wanted = new Set(curves.map((x) => x.id));
     for (const [id, series] of ddLines.current) {
-      if (!wanted.has(id)) { api.removeSeries(series); ddLines.current.delete(id); }
+      if (!wanted.has(id)) { api.removeSeries(series); ddLines.current.delete(id); fed.current.delete(`d${id}`); }
     }
     curves.forEach((curve, i) => {
       let series = ddLines.current.get(curve.id);
@@ -122,7 +136,7 @@ export function Curves({ simulationId, depots, simulationTime, theme, instrument
         ddLines.current.set(curve.id, series);
       }
       series.applyOptions({ color: seriesColor(i), lineStyle: curve.kind === "ghost" ? LineStyle.LargeDashed : STYLES[i % STYLES.length] });
-      series.setData(underwater(curve.points).map((p) => ({ time: p.t as UTCTimestamp, value: p.pct })));
+      feed(fed.current, `d${curve.id}`, series, underwater(curve.points).map((p) => ({ time: p.t as UTCTimestamp, value: p.pct })), `${curve.points[0]?.t}:${curve.points[0]?.value}`);
     });
     if (curves.some((x) => x.points.length > 1)) api.timeScale().fitContent();
   }, [curves, theme]);
@@ -142,16 +156,18 @@ export function Curves({ simulationId, depots, simulationTime, theme, instrument
       if (!wanted.has(id)) {
         api.removeSeries(series);
         lines.current.delete(id);
+        fed.current.delete(`m${id}`);
       }
     }
     if (benchLine.current && !bench) {
       api.removeSeries(benchLine.current);
       benchLine.current = null;
+      fed.current.delete("bench");
     }
     if (bench) {
       benchLine.current ??= api.addSeries(LineSeries, { lineWidth: 3, lineStyle: LineStyle.SparseDotted, priceLineVisible: false });
       benchLine.current.applyOptions({ color: c.muted });
-      benchLine.current.setData(normalize(bench.points).map((p) => ({ time: p.t as UTCTimestamp, value: p.pct })));
+      feed(fed.current, "bench", benchLine.current, normalize(bench.points).map((p) => ({ time: p.t as UTCTimestamp, value: p.pct })), `${bench.symbol}:${bench.points[0]?.t}:${bench.points[0]?.value}`);
     }
     curves.forEach((curve, i) => {
       let series = lines.current.get(curve.id);
@@ -160,7 +176,7 @@ export function Curves({ simulationId, depots, simulationTime, theme, instrument
         lines.current.set(curve.id, series);
       }
       series.applyOptions({ color: seriesColor(i), lineStyle: curve.kind === "ghost" ? LineStyle.LargeDashed : STYLES[i % STYLES.length] });
-      series.setData(normalize(curve.points).map((p) => ({ time: p.t as UTCTimestamp, value: p.pct })));
+      feed(fed.current, `m${curve.id}`, series, normalize(curve.points).map((p) => ({ time: p.t as UTCTimestamp, value: p.pct })), `${curve.points[0]?.t}:${curve.points[0]?.value}`);
     });
     if (curves.some((x) => x.points.length > 1)) api.timeScale().fitContent();
   }, [curves, bench, theme]);

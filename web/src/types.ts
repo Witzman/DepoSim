@@ -451,6 +451,8 @@ export interface OrderInput {
   limitPrice?: number;
   /** The depot the order is for; the first one when left out. */
   depotId?: number;
+  /** One id for one attempt: the server places an order with the same id only once. */
+  clientId?: string;
 }
 
 export interface Snapshot {

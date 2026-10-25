@@ -25,7 +25,7 @@ import { createEvents } from "./events.js";
 import { createLongterm } from "./longterm.js";
 import { SessionService } from "./session.js";
 import { createStore } from "./store.js";
-import { createHub } from "./ws.js";
+import { MAX_SOCKET_MESSAGE, createHub } from "./ws.js";
 
 export interface AppOptions {
   dbPath: string;
@@ -147,7 +147,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
     if (host !== req.headers.host) return reply.code(403).send({ error: "Anfrage von einer fremden Seite." });
   });
 
-  app.register(fastifyWebsocket);
+  app.register(fastifyWebsocket, { options: { maxPayload: MAX_SOCKET_MESSAGE } });
   app.register(async (instance) => {
     instance.get("/ws/simulations/:id", { websocket: true }, (socket, req) => {
       hub.attach(socket, Number((req.params as { id: string }).id));

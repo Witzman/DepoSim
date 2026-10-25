@@ -27,6 +27,9 @@ export function OrderTicket({ simulationId, depotId, instrument, priceKey, disab
   const [busy, setBusy] = useState(false);
   const qtyInput = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  // The id of the attempt in progress: the same order sent again (a double click, a retry after a lost answer) keeps it, so the
+  // server places it once. A changed order, or a placed one, starts a new attempt.
+  const attempt = useRef<{ order: string; id: string } | null>(null);
 
   useEffect(() => {
     if (command.n === 0) return;
@@ -79,7 +82,10 @@ export function OrderTicket({ simulationId, depotId, instrument, priceKey, disab
     if (!order) return;
     setBusy(true);
     try {
-      await placeOrder(simulationId, order);
+      const same = JSON.stringify(order);
+      if (attempt.current?.order !== same) attempt.current = { order: same, id: (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`) };
+      await placeOrder(simulationId, { ...order, clientId: attempt.current.id });
+      attempt.current = null;
       setProblem(null);
     } catch (err) {
       setProblem((err as Error).message);

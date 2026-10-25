@@ -201,6 +201,7 @@ export class SessionService {
     this.excursionCache.clear();
     this.derivedCache.clear();
     this.eventsCache.clear();
+    this.evaluationCache.clear();
   }
 
   /** Forgets what is kept in memory for a simulation that is deleted: SQLite may give its id to the next one. */
@@ -210,6 +211,7 @@ export class SessionService {
     this.runCache.delete(id);
     this.lastOpen.delete(id);
     this.eventsCache.clear();
+    this.evaluationCache.delete(id);
     // Depot ids can come back too, and nothing tells which depots a simulation had: drop the figures worked out from prices.
     this.excursionCache.clear();
     this.derivedCache.clear();
@@ -221,13 +223,10 @@ export class SessionService {
   }
 
   /**
-   * Moves the time on and evaluates every bar that finished in between, once, in time order.
-   * The fills and the new time are written in one transaction: if anything throws, none of it
-   * happened and the same bars are still waiting to be evaluated.
-   */
-  /**
    * Moves the clock by `realMs` of real time, or, with `cap`, not past that simulation time (a jump goes to a target in
-   * steps). The signals tell what the tick did: orders executed, dividends booked.
+   * steps), and evaluates every bar that finished in between, once, in time order. The fills and the new time are written in one
+   * transaction: if anything throws, none of it happened and the same bars are still waiting. The signals tell what the tick did:
+   * orders executed, dividends booked.
    */
   tick(id: number, realMs: number, cap?: number): TickResult {
     this.signals = noSignals();
@@ -822,6 +821,7 @@ export class SessionService {
   dataChanged(): void {
     this.dataVersion++;
     this.eventsCache.clear();
+    this.evaluationCache.clear();
     this.excursionCache.clear();
     this.derivedCache.clear();
   }
@@ -1108,6 +1108,24 @@ export class SessionService {
   /** Figures per depot, how the depots move together, and the benchmark measured the same way. */
   evaluation(id: number): Evaluation {
     const sim = this.sim(id);
+    // Figures on a curve of minute points do not change within the minute, and with the depots as they are: the panel and the
+    // goals ask every few seconds, and a pause or a slow clock gives the same answer again.
+    const state = this.store.listDepots(id).map((d) => {
+      const s = this.store.loadDepot(d.id);
+      return `${d.id}:${d.name}:${s.cash}:${[...s.positions].map(([k, p]) => `${k}=${p.qty}`).join(",")}:${s.orders.filter((o) => o.status === "filled").length}:${s.orders.filter((o) => o.status === "open").length}`;
+    });
+    const key = `${Math.floor(sim.simulationTime / 60)}|${this.dataVersion}|${sim.benchmark ?? ""}|${state.join(";")}`;
+    const kept = this.evaluationCache.get(id);
+    if (kept && kept.key === key) return kept.value;
+    const value = this.evaluationUncached(sim);
+    this.evaluationCache.set(id, { key, value });
+    return value;
+  }
+
+  private evaluationCache = new Map<number, { key: string; value: Evaluation }>();
+
+  private evaluationUncached(sim: Simulation): Evaluation {
+    const id = sim.id;
     const refs = this.refsAt(sim.simulationTime, sim.resolution === "day");
     const curves = this.store.listDepots(id).map((d) => ({ depot: d, points: this.store.valueCurve(d.id, EVALUATION_POINTS) }));
     const inst = sim.benchmark ? this.registry.get(sim.benchmark) : undefined;

@@ -15,6 +15,10 @@ const message = z.discriminatedUnion("type", [
   z.object({ type: z.literal("jump"), to: z.enum(["candle", "hour", "close", "open", "day"]), symbol: z.string().max(20).optional() }),
 ]);
 
+/** The biggest message a client may send (the longest real one is under 100 bytes), and how many in a second. */
+export const MAX_SOCKET_MESSAGE = 1024;
+const MESSAGES_PER_SECOND = 40;
+
 /** How much simulated time one piece of a jump plays before the event loop gets a turn. */
 const JUMP_PIECE_S = 2 * 3600;
 
@@ -180,7 +184,15 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
       // The notice goes out once per wait; a client that joins during it would see a standing clock without a reason.
       if (waiting.has(id)) send(ws, { type: "notice", text: "Warte auf neue Kurse …" });
 
+      let windowStart = 0;
+      let inWindow = 0;
       ws.on("message", (raw) => {
+        const at = performance.now();
+        if (at - windowStart >= 1000) { windowStart = at; inWindow = 0; }
+        if (++inWindow > MESSAGES_PER_SECOND) {
+          if (inWindow === MESSAGES_PER_SECOND + 1) send(ws, { type: "error", text: "Zu viele Nachrichten in kurzer Zeit." });
+          return; // a client that floods is not answered; the page sends a handful at most
+        }
         let parsed: z.infer<typeof message>;
         try {
           parsed = message.parse(JSON.parse(String(raw)));

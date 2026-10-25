@@ -6,6 +6,8 @@ import { describeError } from "./errors.js";
 import { FX_SYMBOL } from "./config.js";
 
 const DAY = 86400;
+/** The longest hole between two stored days that is filled with the day before (a long weekend with a holiday, not more). */
+const MAX_FILL_DAYS = 7;
 
 /** Where a rate comes from. */
 export type FxSourceKind = "yahoo-minute" | "ecb";
@@ -123,7 +125,10 @@ export function createFx(deps: { db: Db; source: EcbSource; now: () => number; l
         for (const [ccy, real] of byCcy) {
           const days = [...real.keys()].sort();
           // Start from what is stored, so a gap between it and this answer is filled too.
-          const before = lastBefore.get(ccy, days[0]) as { day: string; rate: number } | undefined;
+          // A stored rate older than a week is not carried over the hole to this answer: a rate "filled" for months would pass for
+          // a weekend. The days before the answer then stay without a rate, which `rateOn` reports as stale.
+          const found = lastBefore.get(ccy, days[0]) as { day: string; rate: number } | undefined;
+          const before = found && (Date.parse(`${days[0]}T00:00:00Z`) - Date.parse(`${found.day}T00:00:00Z`)) / 86_400_000 <= MAX_FILL_DAYS ? found : undefined;
           let carry = before?.rate;
           let day = before ? addDays(before.day, 1) : days[0];
           const last = days[days.length - 1];

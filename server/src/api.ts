@@ -61,6 +61,8 @@ const orderBody = z.object({
   qty: z.number(),
   limitPrice: z.number().optional(),
   depotId: z.number().int().optional(),
+  /** Chosen by the page for one attempt: the same id again (a retry, a double click) gets the order that was already placed. */
+  clientId: z.string().min(1).max(64).optional(),
 });
 
 const autoPauseBody = z.object({
@@ -168,6 +170,8 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     app.log.error(err);
     return publicError(err);
   };
+  /** The orders placed with a `clientId`, oldest first, so that a repeated request does not place a second one. */
+  const placedOrders = new Map<string, { orderId: number }>();
   const notFound = (reply: FastifyReply) => reply.code(404).send({ error: "Unbekannte Simulation." });
 
   app.get("/api/venues", async () =>
@@ -192,7 +196,6 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
 
   app.get("/api/archive/backfill", async () => backfill.status());
 
-  // Wechselkurse (#51): the ECB reference rates, one per day. Without `from` the last 90 days.
   // The scheduler (#48): what is planned, what ran. A hand start answers at once; the run goes on in the background.
   app.get("/api/jobs", async () => ({ enabled: jobs.enabled, jobs: jobs.list(), runs: jobs.runs(30) }));
   app.post("/api/jobs/:name/run", async (req, reply) => {
@@ -201,6 +204,7 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     return reply.code(202).send({ queued: true });
   });
 
+  // Wechselkurse (#51): the ECB reference rates, one per day. Without `from` the last 90 days.
   app.get("/api/fx", async (req, reply) => {
     const q = req.query as { ccy?: string; from?: string; to?: string };
     const ccy = (q.ccy ?? "USD").toUpperCase();
@@ -552,7 +556,7 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     if (!sim) return notFound(reply);
     const body = orderBody.safeParse(req.body);
     if (!body.success) return invalid(reply, body.error);
-    const { depotId, ...order } = body.data;
+    const { depotId, clientId: _clientId, ...order } = body.data;
     if (depotId !== undefined && !store.listDepots(sim.id).some((d) => d.id === depotId)) {
       return reply.code(400).send({ error: "Unbekanntes Depot." });
     }
@@ -566,9 +570,16 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     if (!sim) return notFound(reply);
     const body = orderBody.safeParse(req.body);
     if (!body.success) return invalid(reply, body.error);
-    const { depotId, ...order } = body.data;
+    const { depotId, clientId, ...order } = body.data;
+    const key = clientId === undefined ? null : `${sim.id}:${clientId}`;
+    const placedBefore = key === null ? undefined : placedOrders.get(key);
+    if (placedBefore !== undefined) return reply.code(201).send({ orderId: placedBefore.orderId });
     const result = session.placeOrder(sim.id, depotId ?? session.defaultDepotId(sim.id), order);
     if (!result.ok) return reply.code(400).send({ error: result.reason });
+    if (key !== null) {
+      if (placedOrders.size >= 500) placedOrders.delete(placedOrders.keys().next().value as string);
+      placedOrders.set(key, { orderId: result.orderId });
+    }
     hub.broadcastSnapshot(sim.id);
     return reply.code(201).send({ orderId: result.orderId });
   });
@@ -576,6 +587,11 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
   const depotOf = (sim: { id: number }, params: unknown) => {
     const depotId = Number((params as { depotId?: string }).depotId);
     return store.listDepots(sim.id).find((d) => d.id === depotId);
+  };
+  /** The depot named in the query, or the default one when none is named; undefined if it is not of this simulation. */
+  const chosenDepot = (sim: { id: number }, depotId: number | undefined) => {
+    const depots = store.listDepots(sim.id);
+    return depots.find((d) => d.id === (depotId ?? session.defaultDepotId(sim.id)));
   };
   const unknownDepot = (reply: FastifyReply) => reply.code(404).send({ error: "Unbekanntes Depot." });
 
@@ -643,9 +659,8 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     if (!sim) return notFound(reply);
     const query = journalQuery.safeParse(req.query);
     if (!query.success) return invalid(reply, query.error);
-    const depots = store.listDepots(sim.id);
-    const depot = query.data.depotId === undefined ? depots.find((d) => d.id === session.defaultDepotId(sim.id)) : depots.find((d) => d.id === query.data.depotId);
-    if (!depot) return unknownDepot(reply);
+    const depot = chosenDepot(sim, query.data.depotId);
+        if (!depot) return unknownDepot(reply);
     return session.rolling(sim.id, depot.id);
   });
 
@@ -654,9 +669,8 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     if (!sim) return notFound(reply);
     const query = journalQuery.safeParse(req.query);
     if (!query.success) return invalid(reply, query.error);
-    const depots = store.listDepots(sim.id);
-    const depot = query.data.depotId === undefined ? depots.find((d) => d.id === session.defaultDepotId(sim.id)) : depots.find((d) => d.id === query.data.depotId);
-    if (!depot) return unknownDepot(reply);
+    const depot = chosenDepot(sim, query.data.depotId);
+        if (!depot) return unknownDepot(reply);
     return session.dividendCalendar(sim.id, depot.id);
   });
 
@@ -665,9 +679,8 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     if (!sim) return notFound(reply);
     const query = journalQuery.safeParse(req.query);
     if (!query.success) return invalid(reply, query.error);
-    const depots = store.listDepots(sim.id);
-    const depot = query.data.depotId === undefined ? depots.find((d) => d.id === session.defaultDepotId(sim.id)) : depots.find((d) => d.id === query.data.depotId);
-    if (!depot) return unknownDepot(reply);
+    const depot = chosenDepot(sim, query.data.depotId);
+        if (!depot) return unknownDepot(reply);
     if (depot.kind === "ghost") return reply.code(400).send({ error: "Ein Geisterdepot hat kein Journal." });
     return session.journal(sim.id, depot.id);
   });
@@ -707,9 +720,8 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     if (!sim) return notFound(reply);
     const query = journalQuery.safeParse(req.query);
     if (!query.success) return invalid(reply, query.error);
-    const depots = store.listDepots(sim.id);
-    const depot = query.data.depotId === undefined ? depots.find((d) => d.id === session.defaultDepotId(sim.id)) : depots.find((d) => d.id === query.data.depotId);
-    if (!depot) return unknownDepot(reply);
+    const depot = chosenDepot(sim, query.data.depotId);
+        if (!depot) return unknownDepot(reply);
     if (depot.kind === "ghost") return reply.code(400).send({ error: "Ein Geisterdepot handelt nicht: es gibt nichts zu versteuern." });
     return session.tax(sim.id, depot.id);
   });

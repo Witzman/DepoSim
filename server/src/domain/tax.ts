@@ -70,6 +70,11 @@ const adjusted = (e: TaxEvent) => e.amount * (1 - e.exempt);
 function taxOfYear(year: number, events: TaxEvent[], carry: { stock: number; other: number }, s: TaxSettings): YearTax {
   const stockNet = events.filter((e) => e.pot === "stock").reduce((a, e) => a + adjusted(e), 0);
   const otherNet = events.filter((e) => e.pot === "other").reduce((a, e) => a + adjusted(e), 0);
+  return taxOfSums(year, stockNet, otherNet, carry, s);
+}
+
+/** The same from the two net sums, so that a running year does not add its events up again for every one of them. */
+function taxOfSums(year: number, stockNet: number, otherNet: number, carry: { stock: number; other: number }, s: TaxSettings): YearTax {
   let a = stockNet + carry.stock;
   let o = otherNet + carry.other;
   // A loss of the general pot (funds, dividends) may be set against share gains; a share loss only against share gains.
@@ -112,8 +117,11 @@ export function taxTimeline(events: TaxEvent[], settings: TaxSettings): TaxTimel
   let paid = 0;
   for (const year of [...byYear.keys()].sort((a, b) => a - b)) {
     const list = byYear.get(year)!;
+    let stockSum = 0;
+    let otherSum = 0;
     for (let i = 0; i < list.length - 1; i++) {
-      steps.push({ t: list[i].t, cumTax: paid + taxOfYear(year, list.slice(0, i + 1), carry, settings).tax });
+      if (list[i].pot === "stock") stockSum += adjusted(list[i]); else otherSum += adjusted(list[i]);
+      steps.push({ t: list[i].t, cumTax: paid + taxOfSums(year, stockSum, otherSum, carry, settings).tax });
     }
     const full = taxOfYear(year, list, carry, settings);
     steps.push({ t: list[list.length - 1].t, cumTax: paid + full.tax });

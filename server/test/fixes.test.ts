@@ -10,7 +10,11 @@ import { DEFAULT_FEES } from "../src/domain/fees.js";
 import { MarketDataError } from "../src/data/marketdata.js";
 import { describeError, publicError } from "../src/errors.js";
 import { createStore } from "../src/store.js";
-import { type JobDef, createJobs } from "../src/jobs.js";
+import { type JobDef, createJobs, slotsAround } from "../src/jobs.js";
+import { createBackfill } from "../src/backfill.js";
+import { createYahoo } from "../src/data/yahoo.js";
+import { createHub } from "../src/ws.js";
+import { EventEmitter } from "node:events";
 import { AAPL, D0, D1, H, SAP, makeSource } from "./fakes.js";
 
 const NOW = D0 + 5 * 86400;
@@ -247,5 +251,112 @@ describe("the journal and a split", () => {
     expect(fixed.trades[0]).toMatchObject({ qty: 20, netPnl: 20_000 });
     expect(adjustForSplits([buy], [])).toEqual([buy]);
     expect(adjustForSplits([buy], [{ symbol: "Y", t: 2000, numerator: 2, denominator: 1 }])[0]).toBe(buy);
+  });
+});
+
+describe("calls to the source", () => {
+  it("carry a time limit, and a call that runs into it is a network error, not a hang", async () => {
+    let signal: AbortSignal | undefined;
+    const source = createYahoo(((_url: string, init?: RequestInit) => {
+      signal = init?.signal ?? undefined;
+      return Promise.reject(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+    }) as unknown as typeof fetch);
+    await expect(source.bars("SAP.DE", 0, 60)).rejects.toMatchObject({ name: "MarketDataError", kind: "network" });
+    expect(signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe("the backfill", () => {
+  it("can be started again after a plan that threw", () => {
+    let fail = true;
+    const backfill = createBackfill({
+      archive: { missingDays: () => { if (fail) { fail = false; throw new Error("db"); } return []; } } as never,
+      store: { liveIds: () => [] } as never,
+      session: { isRunning: () => false, dataChanged: () => undefined } as never,
+      instruments: { list: () => [SAP] } as never,
+      now: () => NOW,
+    });
+    expect(() => backfill.start(1)).toThrow("db");
+    expect(backfill.start(1)).toMatchObject({ ok: true });
+  });
+});
+
+describe("the schedule over a change of clocks", () => {
+  it("finds a night slot on the day the clocks go forward and the day they go back, a day apart (23 to 25 hours)", () => {
+    for (const noon of ["2026-03-29T12:00:00Z", "2026-10-25T12:00:00Z"]) {
+      const { last, next } = slotsAround("02:30", Date.parse(noon) / 1000);
+      expect(Number.isFinite(last) && Number.isFinite(next)).toBe(true);
+      expect((next - last) / 3600).toBeGreaterThanOrEqual(23);
+      expect((next - last) / 3600).toBeLessThanOrEqual(25);
+    }
+  });
+});
+
+describe("an upload", () => {
+  it("is refused when it is bigger than the limit", async () => {
+    const { app } = make();
+    const res = await app.inject({ method: "POST", url: "/api/backup/restore?confirm=ja", payload: Buffer.alloc(33 * 1024 * 1024), headers: { "content-type": "application/octet-stream" } });
+    expect(res.statusCode).toBe(413);
+  });
+});
+
+describe("an order sent twice", () => {
+  it("is placed once when it carries the same client id, and twice when it does not", async () => {
+    const { app } = make();
+    const id = (await post(app, "/api/simulations", { name: "Doppelt", startAt: START })).json().id as number;
+    const order = { symbol: "SAP.DE", side: "buy", kind: "limit", qty: 1, limitPrice: 1 };
+    const a = await post(app, `/api/simulations/${id}/orders`, { ...order, clientId: "attempt-1" });
+    const b = await post(app, `/api/simulations/${id}/orders`, { ...order, clientId: "attempt-1" });
+    expect([a.statusCode, b.statusCode]).toEqual([201, 201]);
+    expect(b.json().orderId).toBe(a.json().orderId);
+    expect(app.session.snapshot(id).depots[0].orders).toHaveLength(1);
+    await post(app, `/api/simulations/${id}/orders`, { ...order, clientId: "attempt-2" });
+    await post(app, `/api/simulations/${id}/orders`, order);
+    expect(app.session.snapshot(id).depots[0].orders).toHaveLength(3);
+  });
+});
+
+describe("the evaluation", () => {
+  it("is worked out once for the same minute and the same depots, and again when a depot changes", async () => {
+    const { app } = make();
+    const id = (await post(app, "/api/simulations", { name: "Cache", startAt: START })).json().id as number;
+    const first = app.session.evaluation(id);
+    expect(app.session.evaluation(id)).toBe(first);
+    await post(app, `/api/simulations/${id}/orders`, { symbol: "SAP.DE", side: "buy", kind: "market", qty: 1 });
+    expect(app.session.evaluation(id)).not.toBe(first);
+  });
+});
+
+describe("the sockets of a simulation", () => {
+  const fakeSocket = () => Object.assign(new EventEmitter(), { readyState: 1, OPEN: 1, sent: [] as string[], send(m: string) { this.sent.push(m); }, close() { this.readyState = 3; } });
+
+  it("keep the clients that came after a restore when an old socket closes late", () => {
+    const session = { snapshot: () => ({ simulation: {}, depots: [] }), run: () => undefined, pause: () => undefined } as never;
+    const store = { getSimulation: () => ({ id: 1, rules: {} }) } as never;
+    const hub = createHub(session, store, 1000, 60);
+    const old = fakeSocket();
+    hub.attach(old as never, 1);
+    hub.stopAll(); // a restore: the clients are forgotten and closed, but their close events come later
+    const fresh = fakeSocket();
+    hub.attach(fresh as never, 1);
+    fresh.sent.length = 0;
+    old.emit("close");
+    hub.broadcastSnapshot(1);
+    expect(fresh.sent).toHaveLength(1); // the new client is still registered
+    hub.stopAll();
+  });
+
+  it("do not answer a client that floods them", () => {
+    const session = { snapshot: () => ({ simulation: {}, depots: [] }), run: () => undefined, pause: () => undefined } as never;
+    const store = { getSimulation: () => ({ id: 1, rules: {} }) } as never;
+    const hub = createHub(session, store, 1000, 60);
+    const ws = fakeSocket();
+    hub.attach(ws as never, 1);
+    ws.sent.length = 0;
+    for (let i = 0; i < 200; i++) ws.emit("message", Buffer.from("not json"));
+    // 40 are looked at (each answered with an error), one more says "too many", the rest are ignored
+    expect(ws.sent.length).toBeLessThan(60);
+    expect(ws.sent.some((m) => /Zu viele/.test(m))).toBe(true);
+    hub.stopAll();
   });
 });
