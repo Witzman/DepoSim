@@ -185,7 +185,11 @@ export function createFx(deps: { db: Db; source: EcbSource; now: () => number; l
     update,
     async runDaily() {
       const at = fetchedAt();
-      if (latestDay() === null || at === null || at < lastPublication(now())) await update();
+      // Also when what is stored is old although a fetch was marked recent: a fetch that wrote only old days (the ECB's broken
+      // history file, 2026-10-25) must not keep the job from fetching again.
+      const latest = latestDay();
+      const today = new Date(now() * 1000).toISOString().slice(0, 10);
+      if (latest === null || at === null || at < lastPublication(now()) || latest < addDays(today, -6)) await update();
     },
     async runStartup() {
       const latest = latestDay();

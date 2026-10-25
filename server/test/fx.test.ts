@@ -64,6 +64,14 @@ describe("fx_daily", () => {
     expect(calls).toEqual(["full"]);
   });
 
+  it("runDaily fetches again when the fetch was recent but what is stored is old", async () => {
+    const { db, fx, calls } = make();
+    db.prepare("insert into fx_daily (ccy, day, rate, filled) values ('USD', '2010-02-14', 2, 0)").run();
+    db.prepare("insert into fx_fetched (source, fetched_at) values ('ecb', ?)").run(SAT);
+    await fx.runDaily();
+    expect(calls).toEqual(["full"]);
+  });
+
   it("fills the gap between what is stored and a newer answer", async () => {
     const { db, fx } = make({ data: rows.slice(0, 2) }); // 16th and 19th
     await fx.update();
