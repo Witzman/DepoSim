@@ -29,7 +29,7 @@ export function IndicatorMenu({ prefs, onChange }: Props) {
     onChange({ ...prefs, params: { ...prefs.params, [id]: { ...prefs.params[id], [key]: value } } as IndicatorParams });
   };
   return (
-    <details className="ind-menu">
+    <details className="ind-menu" data-guide="indicators">
       <summary className="btn small">Indikatoren</summary>
       <div className="ind-list">
         {ROWS.map((r) => (

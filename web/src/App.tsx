@@ -26,6 +26,8 @@ import { BackupDialog } from "./components/BackupDialog.js";
 import { backupLine } from "./backup.js";
 import { Palette } from "./components/Palette.js";
 import { Glossary } from "./components/Glossary.js";
+import { Guide } from "./components/Guide.js";
+import { initGuide, markSeen, restartGuide } from "./guide.js";
 import { FeedbackSettings } from "./components/FeedbackSettings.js";
 import { Hints } from "./components/Hints.js";
 import { applyMotion, feedback, feedbackPrefs } from "./feedback.js";
@@ -111,6 +113,7 @@ export function App() {
     listSimulations()
       .then((list) => {
         setSimulations(list);
+        initGuide(list.length);
         setSelectedId(pickInitial(list, storedSelection()));
       })
       .catch((e) => setLoadError(e.message));
@@ -315,6 +318,7 @@ export function App() {
   function runCommand(id: CommandId) {
     if (id === "backfill") return setBackfillOpen(true);
     if (id === "backup") return setBackupOpen(true);
+    if (id === "guide") return restartGuide();
     if (id === "glossary") return setGlossaryOpen(true);
     if (id === "ghost") return void newGhost();
     if (id === "longterm") return setView("longterm");
@@ -353,6 +357,7 @@ export function App() {
       const sim = await setBenchmark(selectedId, symbol);
       setSimulations((prev) => prev.map((x) => (x.id === sim.id ? sim : x)));
       setSnapshot((prev) => prev && { ...prev, simulation: sim });
+      if (symbol) markSeen("benchmark");
     } catch (e) {
       setNotice((e as Error).message);
     }
@@ -396,6 +401,7 @@ export function App() {
       else if (o.status === "rejected") feedback("rejected");
     }
   }, [depot?.orders]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (view === "evaluation") markSeen("evaluation"); }, [view]);
   const locked = live === null || live.endedAt !== null || snapshot === null;
 
   return (
@@ -489,7 +495,7 @@ export function App() {
               <div className="tabs" role="tablist" aria-label="Ansicht">
                 <button role="tab" className="btn" aria-selected={view === "trade"}
                   onClick={() => setView("trade")}>Handel</button>
-                <button role="tab" className="btn" aria-selected={view === "evaluation"}
+                <button role="tab" className="btn" data-guide="tab-evaluation" aria-selected={view === "evaluation"}
                   onClick={() => setView("evaluation")}>Auswertung</button>
                 <button role="tab" className="btn" aria-selected={view === "longterm"}
                   onClick={() => setView("longterm")}>Langzeitvergleich</button>
@@ -588,13 +594,15 @@ export function App() {
         }} />
       <BackfillDialog open={backfillOpen} onClose={() => setBackfillOpen(false)} />
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <Guide started={live !== null && live.simulationTime > live.startAt} simulations={simulations.length}
+        orders={(depot?.orders ?? []).map((o) => ({ side: o.side, kind: o.kind, status: o.status }))} />
       <FeedbackSettings open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
       <Glossary open={glossaryOpen} initialQuery={glossaryQuery} onClose={() => { setGlossaryOpen(false); setGlossaryQuery(""); }} />
       <Palette
         open={paletteOpen} instruments={watchlist} simulations={simulations} selectedId={selectedId}
         onClose={() => setPaletteOpen(false)} onPickInstrument={setSymbol} onPickSimulation={setSelectedId}
         onToggleTheme={toggle} onShowHelp={() => setHelpOpen(true)} onAdd={addTitle}
-        commands={selectedId === null ? ["backfill", "backup", "longterm", "data", "glossary"] : ["backfill", "backup", "ghost", "journal", "compare", "orderbook", "longterm", "data", "glossary"]} onCommand={runCommand}
+        commands={selectedId === null ? ["backfill", "backup", "longterm", "data", "glossary", "guide"] : ["backfill", "backup", "ghost", "journal", "compare", "orderbook", "longterm", "data", "glossary", "guide"]} onCommand={runCommand}
       />
     </div>
   );

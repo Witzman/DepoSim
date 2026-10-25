@@ -54,7 +54,7 @@ export function ClockBar({ simulationTime, tempo, running, disabled, live, phase
           ? <button className="btn primary" disabled={disabled} onClick={onPause}>Pause</button>
           : <span className="muted" data-testid="no-pause">Die Uhr läuft, es gibt keine Pause.</span>
       ) : (
-        <button className="btn primary" disabled={disabled} onClick={onRun}>Start</button>
+        <button className="btn primary" data-guide="start" disabled={disabled} onClick={onRun}>Start</button>
       )}
     </div>
   );

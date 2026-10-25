@@ -13,6 +13,7 @@ import { loadPrefs, savePrefs, toConfig, type IndicatorPrefs } from "../indicato
 import type { Series } from "../indicators.js";
 import { useIndicators } from "../useIndicators.js";
 import { signedPercent } from "../format.js";
+import { markSeen } from "../guide.js";
 import { DrawTools, type Tool } from "./DrawTools.js";
 import { IndicatorMenu } from "./IndicatorMenu.js";
 import type { Theme } from "../theme.js";
@@ -110,7 +111,7 @@ export function Chart({ bars: raw, prefs: view, onPrefs, fills, lead, theme, sim
   const onClick = useRef<(p: MouseEventParams<Time>) => void>(() => {});
 
   const cancelTool = () => { setTool(null); setTrendFirst(null); setMarkerAt(null); };
-  const changeDrawings = (next: Drawing[]) => { setDrawings(next); writeDrawings(key, next); };
+  const changeDrawings = (next: Drawing[]) => { setDrawings(next); writeDrawings(key, next); if (next.length > drawings.length) markSeen("drawing"); };
 
   useEffect(() => {
     cancelTool();
@@ -221,7 +222,7 @@ export function Chart({ bars: raw, prefs: view, onPrefs, fills, lead, theme, sim
     ].sort((a, b) => (a.time as number) - (b.time as number)));
   }, [drawings, trendFirst, theme, fills, bars]);
 
-  const changePrefs = (p: IndicatorPrefs) => { setPrefs(p); savePrefs(p); };
+  const changePrefs = (p: IndicatorPrefs) => { setPrefs(p); savePrefs(p); if (p.enabled.length > 0) markSeen("indicator"); };
 
   useEffect(() => {
     const c = colors();
@@ -392,10 +393,10 @@ export function Chart({ bars: raw, prefs: view, onPrefs, fills, lead, theme, sim
     <>
       <div className="chart-tools">
         {lead}
-        <div className="seg" role="group" aria-label="Zeitrahmen">
+        <div className="seg" role="group" aria-label="Zeitrahmen" data-guide="timeframe">
           {TIMEFRAMES.map((tf) => (
             <button key={tf} type="button" className="btn small" aria-pressed={view.timeframe === tf}
-              data-testid={`tf-${tf}`} onClick={() => onPrefs({ ...view, timeframe: tf })}>{TIMEFRAME_LABEL[tf]}</button>
+              data-testid={`tf-${tf}`} onClick={() => { markSeen("timeframe"); onPrefs({ ...view, timeframe: tf }); }}>{TIMEFRAME_LABEL[tf]}</button>
           ))}
         </div>
         <div className="seg" role="group" aria-label="Darstellung">

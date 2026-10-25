@@ -30,7 +30,7 @@ export function DrawTools({ tool, trendStarted, markerPending, count, onTool, on
 
   const active = TOOLS.find((t) => t.id === tool);
   return (
-    <div className="draw-tools">
+    <div className="draw-tools" data-guide="draw">
       <div role="group" aria-label="Zeichenwerkzeuge" className="draw-buttons">
         {TOOLS.map((t) => (
           <button key={t.id} type="button" className="btn small" aria-pressed={tool === t.id} title={t.hint}

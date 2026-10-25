@@ -170,7 +170,7 @@ export function Curves({ simulationId, depots, simulationTime, theme, instrument
       <div className="toolbar">
         <h2>Kurven seit Start (in Prozent)</h2>
         <label className="inline">Maßstab
-          <select aria-label="Maßstab" value={benchmark ?? ""} onChange={(e) => onBenchmark(e.target.value || null)}>
+          <select aria-label="Maßstab" data-guide="benchmark" value={benchmark ?? ""} onChange={(e) => onBenchmark(e.target.value || null)}>
             <option value="">keiner</option>
             {instruments.map((i) => <option key={i.symbol} value={i.symbol}>{i.symbol} · {i.name}</option>)}
           </select>

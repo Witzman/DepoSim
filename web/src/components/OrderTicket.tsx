@@ -98,11 +98,11 @@ export function OrderTicket({ simulationId, depotId, instrument, priceKey, disab
       <h2>Order {instrument ? `· ${instrument.symbol}` : ""}</h2>
       <div className="group" role="group" aria-label="Seite">
         <button type="button" className="btn" aria-pressed={side === "buy"} onClick={() => setSide("buy")}>Kauf</button>
-        <button type="button" className="btn" aria-pressed={side === "sell"} onClick={() => setSide("sell")}>Verkauf</button>
+        <button type="button" className="btn" aria-pressed={side === "sell"} data-guide="ticket-sell" onClick={() => setSide("sell")}>Verkauf</button>
       </div>
       <div className="fields">
         <label>Art
-          <select value={kind} onChange={(e) => setKind(e.target.value as "market" | "limit")}>
+          <select data-guide="ticket-kind" value={kind} onChange={(e) => setKind(e.target.value as "market" | "limit")}>
             <option value="market">Market</option>
             <option value="limit">Limit</option>
           </select>
@@ -132,7 +132,7 @@ export function OrderTicket({ simulationId, depotId, instrument, priceKey, disab
       {problem && <p className="error" role="status" data-testid="ticket-problem">{problem}</p>}
       {notes.map((n) => <p key={n} className="note-hint" role="status" data-testid="ticket-note">{n}</p>)}
 
-      <button type="submit" className="btn primary" disabled={!canSend}>{word}</button>
+      <button type="submit" className="btn primary" data-guide="ticket-submit" disabled={!canSend}>{word}</button>
     </form>
   );
 }

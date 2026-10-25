@@ -60,7 +60,7 @@ export function SimulationPicker({ simulations, selectedId, onSelect, onCreate, 
     <section className="card" aria-label="Simulationen">
       <div className="toolbar">
         <h2>Simulationen</h2>
-        <button className="btn small primary" onClick={() => { setError(null); setOpen(true); }}>Neue Simulation</button>
+        <button className="btn small primary" data-guide="new-sim" onClick={() => { setError(null); setOpen(true); }}>Neue Simulation</button>
       </div>
 
       {simulations.length === 0 ? (
