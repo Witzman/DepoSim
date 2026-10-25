@@ -20,10 +20,11 @@ interface Props {
   onHints: () => void;
   onFeedback: () => void;
   onPalette: () => void;
+  onHowto: () => void;
 }
 
 /** The bar at the top: name, state of the clock, the lights of data and backup, and the buttons that open the dialogs. */
-export function TopBar({ theme, onToggleTheme, live, running, narrow, dataState, backupState, hasDepot, hintCount, onData, onBackup, onHints, onFeedback, onPalette }: Props) {
+export function TopBar({ theme, onToggleTheme, live, running, narrow, dataState, backupState, hasDepot, hintCount, onData, onBackup, onHints, onFeedback, onPalette, onHowto }: Props) {
   return (
   <header className="topbar">
     <h1 className="brand">
@@ -62,6 +63,7 @@ export function TopBar({ theme, onToggleTheme, live, running, narrow, dataState,
       <button className="btn small" data-testid="hints-open" onClick={onHints}
         aria-label={`Hinweise: ${hintCount}`} title="Hinweise und Einstellungen">Hinweise{hintCount > 0 && <span className="badge warn" data-testid="hints-count">{hintCount}</span>}</button>
     )}
+    <button className="btn small" data-testid="howto-open" onClick={onHowto} aria-label="Anleitung: So wird gespielt" title="So wird gespielt">?</button>
     <button className="btn small" data-testid="feedback-open" onClick={onFeedback} aria-label="Rückmeldung einstellen" title="Ton, Vibration, Bewegung">Ton</button>
     <button className="btn small" data-testid="palette-open" onClick={onPalette}
       aria-label="Suche und Befehle öffnen (Strg+K)" title="Strg+K">Suche</button>

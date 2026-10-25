@@ -96,5 +96,5 @@ describe("flags while storing (#50)", () => {
     const t0 = performance.now();
     for (let s = 0; s < 19; s++) archive.recheck(`S${s}`, D, D + 30 * DAY);
     expect(performance.now() - t0).toBeLessThan(10_000);
-  });
+  }, 30_000); // filling 290,000 bars (and their indexes) is part of the test and slows under load; only the check is timed
 });

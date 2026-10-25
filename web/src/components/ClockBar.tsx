@@ -1,3 +1,4 @@
+import { MoreLink } from "./MoreLink.js";
 import { useEffect, useState } from "react";
 import { formatLag } from "../lag.js";
 import { formatSimTime } from "../time.js";
@@ -86,7 +87,7 @@ export function ClockBar({ simulationTime, tempo, running, disabled, live, phase
   return (
     <div className="clock">
       <div>
-        <h2>Simulationszeit<span className="badge rules" data-testid="rules-badge" title={describeRules(rules)}>{PRESET_LABEL[rules.preset]}</span></h2>
+        <h2>Simulationszeit<span className="badge rules" data-testid="rules-badge" title={describeRules(rules)}>{PRESET_LABEL[rules.preset]}</span> <MoreLink chapter="clock" /></h2>
         <div className="time num" data-testid="sim-time">{formatSimTime(simulationTime, daily !== undefined)}</div>
         {daily && <div className="status" data-testid="daily-note">Tageskurse, ein Schritt ist ein Handelstag{daily.skipped > 0 && ` · ${daily.skipped} Handelstage ohne Kurs übersprungen`}</div>}
         {status && <div className={`status ${phase === "catchup" ? "" : "up"}`} data-testid="clock-status">{status}</div>}

@@ -8,7 +8,8 @@ import { buildJobDefs } from "./jobdefs.js";
 import { type Jobs, createJobs } from "./jobs.js";
 import { createBackfill } from "./backfill.js";
 import { type BackupService, createBackupService } from "./backup.js";
-import { FX_SYMBOL, type Instrument, type JobSettings, WATCHLIST } from "./config.js";
+import { FX_SYMBOL, type Instrument, type JobSettings, VENUES, WATCHLIST } from "./config.js";
+import { sessionFor } from "./domain/venues.js";
 import { dailyTolerance } from "./domain/quality.js";
 import { createArchive } from "./data/archive.js";
 import { createDailyArchive } from "./data/dailyarchive.js";
@@ -86,6 +87,12 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   const archive = createArchive(db, instrumentMarketData(opts.marketData ?? createYahoo(), stats), {
     minGapMs: opts.minGapMs, now: opts.now,
     dailyTolerance: (symbol) => { const i = instruments.get(symbol); return dailyTolerance(i?.venue ?? "", i?.kind); },
+    isTradingDay: (symbol, dayStartT) => {
+      const day = new Date(dayStartT * 1000).toISOString().slice(0, 10);
+      if (symbol === FX_SYMBOL) return new Date(`${day}T00:00:00Z`).getUTCDay() !== 6; // the rate has bars from Sunday evening to Friday
+      const venue = VENUES.find((v) => v.id === instruments.get(symbol)?.venue);
+      return venue !== undefined && sessionFor(venue, day).trading;
+    },
   });
   // Tests that do not hand in a daily source book no events: they must not reach for Yahoo.
   const dailySource = instrumentDaily(opts.dailyData ?? createYahooDaily(), stats);

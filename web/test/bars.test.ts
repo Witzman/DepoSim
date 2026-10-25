@@ -71,3 +71,14 @@ describe("barChange", () => {
     expect(barChange(bars, 0)).toBeNull();
   });
 });
+
+describe("berlinDay", () => {
+  it("is the date the formatter gives, also around the change of clocks and midnight", async () => {
+    const { berlinDay } = await import("../src/bars.js");
+    const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" });
+    for (const from of ["2026-03-28T20:00:00Z", "2026-10-24T20:00:00Z", "2026-12-31T20:00:00Z"]) {
+      const t0 = Date.parse(from) / 1000;
+      for (let i = 0; i < 36 * 6; i++) expect(berlinDay(t0 + i * 600)).toBe(fmt.format((t0 + i * 600) * 1000));
+    }
+  });
+});

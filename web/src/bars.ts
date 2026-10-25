@@ -5,14 +5,27 @@ export const TIMEFRAMES: Timeframe[] = ["1m", "5m", "15m", "1h", "1d"];
 export const TIMEFRAME_LABEL: Record<Timeframe, string> = { "1m": "1 Min", "5m": "5 Min", "15m": "15 Min", "1h": "1 Std", "1d": "Tag" };
 
 const SECONDS: Record<Exclude<Timeframe, "1d">, number> = { "1m": 60, "5m": 300, "15m": 900, "1h": 3600 };
-const berlinDay = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" });
+const berlinDayFormat = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" });
+// The date is formatted once per UTC hour, not once per bar: the Berlin date cannot change within a UTC hour (the offset changes on
+// the hour), and formatting 20,000 bars one by one was the slow part of a change to the day timeframe.
+const dayOfHour = new Map<number, string>();
+export function berlinDay(t: number): string {
+  const hour = Math.floor(t / 3600);
+  let day = dayOfHour.get(hour);
+  if (day === undefined) {
+    if (dayOfHour.size >= 200_000) dayOfHour.clear();
+    day = berlinDayFormat.format(hour * 3600_000);
+    dayOfHour.set(hour, day);
+  }
+  return day;
+}
 
 /** How many one-minute bars to ask for so the chart still shows a useful stretch at this timeframe. */
 export const RAW_LIMIT: Record<Timeframe, number> = { "1m": 500, "5m": 2500, "15m": 6000, "1h": 12000, "1d": 20000 };
 
 /** The start of the candle a bar belongs to. Days are Berlin days; the other steps align to the UTC clock. */
 function bucketOf(t: number, tf: Timeframe): number | string {
-  return tf === "1d" ? berlinDay.format(t * 1000) : Math.floor(t / SECONDS[tf]) * SECONDS[tf];
+  return tf === "1d" ? berlinDay(t) : Math.floor(t / SECONDS[tf]) * SECONDS[tf];
 }
 
 /**

@@ -9,6 +9,7 @@ const KEYS: [string, string][] = [
   ["1 – 4", "Tempo 1x, 5x, 30x, 60x"],
   ["Strg + K", "Suche und Befehle (auf dem Mac Cmd + K)"],
   ["?", "Diese Liste"],
+  ["H", "So wird gespielt (Anleitung)"],
   ["Esc", "Dialog schließen"],
 ];
 

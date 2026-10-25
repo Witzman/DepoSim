@@ -14,8 +14,21 @@ export const MIN_RETURNS = 10;
 const FLAT = 1e-12;
 
 const berlinDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" });
+// Formatting a date is the dearest step of every figure that groups by day (it ran once per point, tens of thousands of times for
+// one evaluation). The Berlin date cannot change within a UTC hour, since the offset changes on the hour, so it is kept per hour.
+const dayOfHour = new Map<number, string>();
+function berlinDay(t: number): string {
+  const hour = Math.floor(t / 3600);
+  let day = dayOfHour.get(hour);
+  if (day === undefined) {
+    if (dayOfHour.size >= 200_000) dayOfHour.clear();
+    day = berlinDate.format(hour * 3600_000);
+    dayOfHour.set(hour, day);
+  }
+  return day;
+}
 const bucketOf = (t: number, basis: Basis): string | number =>
-  basis === "day" ? berlinDate.format(t * 1000) : Math.floor(t / (basis === "hour" ? 3600 : 300));
+  basis === "day" ? berlinDay(t) : Math.floor(t / (basis === "hour" ? 3600 : 300));
 
 export interface Bucketed extends Point {
   key: string | number;

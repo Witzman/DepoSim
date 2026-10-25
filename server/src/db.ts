@@ -33,6 +33,13 @@ create table if not exists fetched_days (
   complete integer not null,
   primary key (symbol, day_start)
 );
+create table if not exists fetch_retries (
+  symbol text not null,
+  day_start integer not null,
+  tries integer not null,
+  last_try integer not null,
+  primary key (symbol, day_start)
+);
 create table if not exists daily_bars (
   symbol text not null,
   day text not null,

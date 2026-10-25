@@ -48,7 +48,18 @@ export interface ArchiveOptions {
   now?: () => number;
   /** How far the last minute of a day may be from the daily close, as a share; 1 % where not given. */
   dailyTolerance?: (symbol: string) => number;
+  /**
+   * Whether the market of the symbol is open on that UTC day (weekend, holiday). Absent: no day is known to be a trading day, so
+   * an empty answer is final at once. With it, an empty answer for a trading day that is over is tried again a few times
+   * before it is believed (`EMPTY_TRIES`): Yahoo's "no data" is the same answer for a holiday and for a hiccup.
+   */
+  isTradingDay?: (symbol: string, dayStartT: number) => boolean;
 }
+
+/** How often an empty answer for a trading day is fetched before the day is stored as empty for good. */
+export const EMPTY_TRIES = 3;
+/** The pause before an implicit caller (`ensureDay`) asks again for a day that came back empty. The nightly repair and the button ask regardless. */
+export const EMPTY_RETRY_AFTER_S = 6 * 3600;
 
 /** Minutes before the checked range that give the spike check its picture of the recent noise. */
 const CONTEXT_BARS = 30;
@@ -76,6 +87,14 @@ export function createArchive(db: Db, source: MarketData, opts: ArchiveOptions =
   const spikeKinds = "('spike', 'daily')";
   const clearFlags = prep(db, `delete from bar_flags where symbol = ? and t >= ? and t < ? and kind in ${spikeKinds}`);
   const tolerance = opts.dailyTolerance ?? (() => 0.01);
+  const isTradingDay = opts.isTradingDay ?? (() => false);
+  const retryOf = prep(db, "select tries, last_try from fetch_retries where symbol = ? and day_start = ?");
+  const noteRetry = prep(
+    db,
+    "insert into fetch_retries (symbol, day_start, tries, last_try) values (?, ?, 1, ?) " +
+      "on conflict (symbol, day_start) do update set tries = tries + 1, last_try = excluded.last_try",
+  );
+  const forgetRetry = prep(db, "delete from fetch_retries where symbol = ? and day_start = ?");
 
   const recheck = db.transaction((symbol: string, fromT: number, toT: number): RecheckResult => {
     const inRange = rangeBars.all(symbol, fromT, toT) as Bar[];
@@ -141,7 +160,17 @@ export function createArchive(db: Db, source: MarketData, opts: ArchiveOptions =
       if (why) flags.push({ t: b.t, kind: "struct", detail: why });
       else sound.push(b);
     }
-    store(symbol, dayStartT, sound, now() >= dayEnd ? 1 : 0);
+    let complete = now() >= dayEnd ? 1 : 0;
+    if (sound.length > 0) {
+      forgetRetry.run(symbol, dayStartT);
+    } else if (complete === 1 && isTradingDay(symbol, dayStartT)) {
+      // Nothing on a day the market was open: believed only after a few empty answers, until then the day stays open for the
+      // nightly repair (`complete = 0`, shown as incomplete) and for the next simulation that needs it.
+      const tries = ((retryOf.get(symbol, dayStartT) as { tries: number } | undefined)?.tries ?? 0) + 1;
+      noteRetry.run(symbol, dayStartT, Math.floor(now()));
+      if (tries < EMPTY_TRIES) complete = 0;
+    }
+    store(symbol, dayStartT, sound, complete);
     for (const f of flags) insertFlag.run(symbol, f.t, f.kind, f.detail);
     // Spikes and the daily comparison need the neighbours; the day just stored is checked at once, the job checks again later.
     recheck(symbol, dayStartT, dayEnd);
@@ -162,6 +191,9 @@ export function createArchive(db: Db, source: MarketData, opts: ArchiveOptions =
     async ensureDay(symbol, dayStartT) {
       const row = selectDay.get(symbol, dayStartT) as { complete: number } | undefined;
       if (row?.complete === 1) return;
+      // A day that came back empty a short while ago is not fetched again by every simulation that happens to need it.
+      const retry = row && now() >= dayStartT + DAY ? (retryOf.get(symbol, dayStartT) as { last_try: number } | undefined) : undefined;
+      if (retry && now() - retry.last_try < EMPTY_RETRY_AFTER_S) return;
       await loadOnce(symbol, dayStartT);
     },
 

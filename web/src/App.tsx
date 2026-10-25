@@ -33,6 +33,8 @@ import { MobileBar } from "./components/MobileBar.js";
 import { BackupDialog } from "./components/BackupDialog.js";
 import { Palette } from "./components/Palette.js";
 import { Glossary } from "./components/Glossary.js";
+import { HowTo } from "./components/HowTo.js";
+import { HowtoContext } from "./components/MoreLink.js";
 import { Guide } from "./components/Guide.js";
 import { initGuide, markSeen, restartGuide } from "./guide.js";
 import { FeedbackSettings } from "./components/FeedbackSettings.js";
@@ -107,6 +109,9 @@ export function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [glossaryOpen, setGlossaryOpen] = useState(false);
   const [glossaryQuery, setGlossaryQuery] = useState("");
+  const [howtoOpen, setHowtoOpen] = useState(false);
+  const [howtoChapter, setHowtoChapter] = useState<string | undefined>(undefined);
+  const openHowto = (chapter?: string) => { setHowtoChapter(chapter); setHowtoOpen(true); };
   const [hintsOpen, setHintsOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [hintCount, setHintCount] = useState(0);
@@ -219,6 +224,9 @@ export function App() {
       } else if (e.key === "g") {
         e.preventDefault();
         setGlossaryOpen(true);
+      } else if (e.key === "h") {
+        e.preventDefault();
+        openHowto();
       } else if (e.key === "?") {
         e.preventDefault();
         setHelpOpen(true);
@@ -345,6 +353,7 @@ export function App() {
     if (id === "backup") return setBackupOpen(true);
     if (id === "guide") return restartGuide();
     if (id === "glossary") return setGlossaryOpen(true);
+    if (id === "howto") return openHowto();
     if (id === "ghost") return void newGhost();
     if (id === "longterm") return setView("longterm");
     if (id === "data") return setView("data");
@@ -446,12 +455,13 @@ export function App() {
   const runBookVersion = [...simulations.filter((s) => s.endedAt !== null).map((s) => s.id), live?.endedAt != null ? `live${live.id}` : ""].join(",");
 
   return (
+    <HowtoContext.Provider value={openHowto}>
     <div className={`app${narrow && live ? " with-bar" : ""}`}>
       <TopBar
         theme={theme} onToggleTheme={toggle} live={live} running={snapshot?.running ?? false} narrow={narrow} dataState={dataState}
         backupState={backupState} hasDepot={depot !== undefined} hintCount={hintCount}
         onData={() => setView("data")} onBackup={() => setBackupOpen(true)} onHints={() => setHintsOpen(true)}
-        onFeedback={() => setFeedbackOpen(true)} onPalette={() => setPaletteOpen(true)}
+        onFeedback={() => setFeedbackOpen(true)} onPalette={() => setPaletteOpen(true)} onHowto={() => openHowto()}
       />
 
       <div className="layout">
@@ -616,15 +626,18 @@ export function App() {
       <BackfillDialog open={backfillOpen} onClose={() => setBackfillOpen(false)} />
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
       <Guide started={live !== null && live.simulationTime > live.startAt} simulations={simulations.length}
-        orders={(depot?.orders ?? []).map((o) => ({ side: o.side, kind: o.kind, status: o.status }))} />
+        orders={(depot?.orders ?? []).map((o) => ({ side: o.side, kind: o.kind, status: o.status }))} onHowto={() => openHowto()} />
       <FeedbackSettings open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
+      <HowTo open={howtoOpen} chapter={howtoChapter} onClose={() => setHowtoOpen(false)}
+        onGlossary={(q) => { setGlossaryQuery(q); setGlossaryOpen(true); }} />
       <Glossary open={glossaryOpen} initialQuery={glossaryQuery} onClose={() => { setGlossaryOpen(false); setGlossaryQuery(""); }} />
       <Palette
         open={paletteOpen} instruments={watchlist} simulations={simulations} selectedId={selectedId}
         onClose={() => setPaletteOpen(false)} onPickInstrument={setSymbol} onPickSimulation={setSelectedId}
         onToggleTheme={toggle} onShowHelp={() => setHelpOpen(true)} onAdd={addTitle}
-        commands={selectedId === null ? ["backfill", "backup", "longterm", "data", "glossary", "guide"] : ["backfill", "backup", "ghost", "journal", "compare", "orderbook", "longterm", "data", "glossary", "guide", ...(live && !live.live && live.endedAt === null && live.resolution === "minute" && live.rules.pauseAllowed ? ["next-candle", "jump-hour", "jump-close", "jump-open", "jump-day"] as CommandId[] : [])]} onCommand={runCommand}
+        commands={selectedId === null ? ["backfill", "backup", "longterm", "data", "glossary", "howto", "guide"] : ["backfill", "backup", "ghost", "journal", "compare", "orderbook", "longterm", "data", "glossary", "howto", "guide", ...(live && !live.live && live.endedAt === null && live.resolution === "minute" && live.rules.pauseAllowed ? ["next-candle", "jump-hour", "jump-close", "jump-open", "jump-day"] as CommandId[] : [])]} onCommand={runCommand}
       />
     </div>
+    </HowtoContext.Provider>
   );
 }

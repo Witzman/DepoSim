@@ -1,3 +1,4 @@
+import { MoreLink } from "./MoreLink.js";
 import { useEffect, useRef, useState } from "react";
 import { placeOrder, previewOrder } from "../api.js";
 import { feedback } from "../feedback.js";
@@ -101,7 +102,7 @@ export function OrderTicket({ simulationId, depotId, instrument, priceKey, disab
 
   return (
     <form ref={formRef} className="card ticket" onSubmit={submit} aria-label="Orderticket">
-      <h2>Order {instrument ? `· ${instrument.symbol}` : ""}</h2>
+      <h2>Order {instrument ? `· ${instrument.symbol}` : ""} <MoreLink chapter="orders" /></h2>
       <div className="group" role="group" aria-label="Seite">
         <button type="button" className="btn" aria-pressed={side === "buy"} onClick={() => setSide("buy")}>Kauf</button>
         <button type="button" className="btn" aria-pressed={side === "sell"} data-guide="ticket-sell" onClick={() => setSide("sell")}>Verkauf</button>

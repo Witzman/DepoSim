@@ -1,3 +1,5 @@
+import { berlinDay } from "./bars.js";
+
 // Technical indicators as pure functions. Every result has the input's length;
 // entries are null until the indicator is defined. Never NaN.
 export type Series = (number | null)[];
@@ -145,7 +147,6 @@ export function obv(bars: Ohlcv[]): Series {
   return out;
 }
 
-const berlinDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" });
 
 /** Volume-weighted average price of the typical price (high+low+close)/3, restarting every Berlin day. */
 export function vwap(bars: Ohlcv[]): Series {
@@ -154,7 +155,7 @@ export function vwap(bars: Ohlcv[]): Series {
   let pv = 0;
   let vol = 0;
   for (let i = 0; i < bars.length; i++) {
-    const d = berlinDate.format(bars[i].t * 1000);
+    const d = berlinDay(bars[i].t);
     if (d !== day) { day = d; pv = 0; vol = 0; }
     pv += ((bars[i].h + bars[i].l + bars[i].c) / 3) * bars[i].v;
     vol += bars[i].v;

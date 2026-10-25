@@ -8,7 +8,7 @@ export type Entry =
   | { kind: "hit"; hit: SearchHit }
   | { kind: "command"; id: CommandId; label: string };
 
-export type CommandId = "backfill" | "ghost" | "journal" | "compare" | "orderbook" | "longterm" | "backup" | "data" | "glossary" | "guide" | "next-candle" | "jump-hour" | "jump-close" | "jump-open" | "jump-day";
+export type CommandId = "backfill" | "ghost" | "journal" | "compare" | "orderbook" | "longterm" | "backup" | "data" | "glossary" | "guide" | "howto" | "next-candle" | "jump-hour" | "jump-close" | "jump-open" | "jump-day";
 
 /** The commands of Paket E; the palette gets the ids that make sense right now. */
 export const COMMANDS: { id: CommandId; label: string; words: string[] }[] = [
@@ -20,6 +20,7 @@ export const COMMANDS: { id: CommandId; label: string; words: string[] }[] = [
   { id: "backup", label: "Sicherung, Export und Import öffnen", words: ["sicherung", "backup", "wiederherstellen", "export", "import", "csv", "herunterladen"] },
   { id: "data", label: "Datenzustand öffnen", words: ["daten", "datenzustand", "abdeckung", "lücken", "ampel", "quelle", "quellenstatus", "aufträge", "protokoll", "archiv", "größe"] },
   { id: "glossary", label: "Kennzahlen erklärt", words: ["kennzahlen", "glossar", "erklärt", "erklärung", "sharpe", "sortino", "calmar", "beta", "alpha", "volatilität", "drawdown", "rückgang", "value at risk", "trefferquote", "profitfaktor"] },
+  { id: "howto", label: "So wird gespielt (Anleitung)", words: ["anleitung", "spielanleitung", "how to play", "regeln", "beispiele", "hilfe", "handbuch", "spielen", "erklärung", "limit", "market", "gebühren"] },
   { id: "guide", label: "Lernpfad starten", words: ["lernpfad", "erste schritte", "einstieg", "anleitung", "tutorial", "hilfe", "geführt"] },
   { id: "next-candle", label: "Nächste Kerze", words: ["kerze", "schritt", "weiter", "zeit", "sprung"] },
   { id: "jump-hour", label: "Eine Stunde weiter", words: ["stunde", "weiter", "zeit", "sprung"] },

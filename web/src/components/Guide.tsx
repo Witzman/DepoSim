@@ -5,10 +5,11 @@ interface Props {
   started: boolean;
   orders: GuideFacts["orders"];
   simulations: number;
+  onHowto: () => void;
 }
 
 /** A small checklist at the edge; the control of the current step pulses. Nothing is forced. */
-export function Guide({ started, orders, simulations }: Props) {
+export function Guide({ started, orders, simulations, onHowto }: Props) {
   const stored = useSyncExternalStore(subscribeGuide, guideSnapshot);
   const seen = new Set(stored?.seen ?? []);
   const facts: GuideFacts = { started, orders, seen };
@@ -33,7 +34,7 @@ export function Guide({ started, orders, simulations }: Props) {
     <aside className="guide" aria-label="Erste Schritte" data-testid="guide">
       <div className="guide-head">
         <strong>Erste Schritte <span className="muted num" data-testid="guide-progress">{done.length}/{STEPS.length}</span></strong>
-        <button className="btn small" onClick={dismissGuide} data-testid="guide-hide">Ausblenden</button>
+        <span><button className="btn small" onClick={onHowto} data-testid="guide-howto">Anleitung</button> <button className="btn small" onClick={dismissGuide} data-testid="guide-hide">Ausblenden</button></span>
       </div>
       {current ? <p className="guide-now" data-testid="guide-now"><strong>{current.title}</strong></p> : null}
       {current ? <p className="guide-text" data-testid="guide-text">{current.text}</p> : (

@@ -1,3 +1,4 @@
+import { MoreLink } from "./MoreLink.js";
 import { useEffect, useState } from "react";
 import { getEvaluation } from "../api.js";
 import { basisLabel, formatEur, formatPercentPlain, formatRatio, signedPercent } from "../format.js";
@@ -143,7 +144,7 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark, ru
   return (
     <>
       <section className="card" aria-label="Kennzahlen">
-        <h2>Kennzahlen<span className="badge rules" data-testid="eval-rules" title={describeRules(rules)}>{PRESET_LABEL[rules.preset]}</span></h2>
+        <h2>Kennzahlen<span className="badge rules" data-testid="eval-rules" title={describeRules(rules)}>{PRESET_LABEL[rules.preset]}</span> <MoreLink chapter="evaluation" /></h2>
         <div className="scroll">
           <table className="positions num stacked" data-testid="metrics">
             <thead><tr><th>Depot</th><th>Seit</th><th>Rendite<Hint id="return" /></th><th>Basis<Hint id="basis" /></th><th>Volatilität p. a.<Hint id="volatility" /></th><th>Max. Rückgang<Hint id="maxDrawdown" /></th><th>Sharpe<Hint id="sharpe" /></th></tr></thead>

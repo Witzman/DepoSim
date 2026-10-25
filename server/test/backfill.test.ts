@@ -129,10 +129,17 @@ describe("POST /api/archive/backfill", () => {
     expect(sapD0).toEqual({ symbol: "SAP.DE", day: "2026-10-22", dayStart: D0, status: "loaded", label: "geladen", bars: 60 });
     const sapEmpty = report.items.find((i: any) => i.symbol === "SAP.DE" && i.dayStart === D0 - DAY);
     expect(sapEmpty).toMatchObject({ status: "empty", label: "leer", bars: 0 });
-    // asked again, nothing is missing any more
-    const again = (await backfill(app)).json();
-    expect(again.items).toEqual([]);
-    expect(calls).toHaveLength(17);
+    // The days that came back empty were trading days: they are believed only after three empty answers, so they are asked
+    // again twice, and then nothing is missing any more.
+    const emptyDays = report.items.filter((i: any) => i.status === "empty").length;
+    const second = (await backfill(app)).json();
+    expect(second.items.length).toBeGreaterThan(0);
+    expect(second.items.length).toBeLessThanOrEqual(emptyDays);
+    expect(second.items.every((i: any) => i.status === "empty")).toBe(true);
+    const third = (await backfill(app)).json();
+    expect(third.items).toHaveLength(second.items.length);
+    expect((await backfill(app)).json().items).toEqual([]);
+    expect(calls).toHaveLength(17 + 2 * second.items.length);
   });
 
   it("stops at the first 429 and reports the rest as skipped", async () => {

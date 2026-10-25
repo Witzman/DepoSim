@@ -12,6 +12,8 @@ import { describeError, publicError } from "../src/errors.js";
 import { createStore } from "../src/store.js";
 import { type JobDef, createJobs, slotsAround } from "../src/jobs.js";
 import { createBackfill } from "../src/backfill.js";
+import { EMPTY_RETRY_AFTER_S, EMPTY_TRIES, createArchive } from "../src/data/archive.js";
+import { bucketed } from "../src/domain/metrics.js";
 import { createYahoo } from "../src/data/yahoo.js";
 import { createHub } from "../src/ws.js";
 import { EventEmitter } from "node:events";
@@ -358,5 +360,73 @@ describe("the sockets of a simulation", () => {
     expect(ws.sent.length).toBeLessThan(60);
     expect(ws.sent.some((m) => /Zu viele/.test(m))).toBe(true);
     hub.stopAll();
+  });
+});
+
+describe("a trading day that comes back empty", () => {
+  const DAY = 86400;
+  const noData = (calls: { n: number }) => ({ async bars() { calls.n++; throw new MarketDataError("no_data", "nothing"); } });
+
+  it("is asked again before it is believed, and not by every simulation in between", async () => {
+    const calls = { n: 0 };
+    let t = 10 * DAY;
+    const db = openDb(":memory:");
+    const archive = createArchive(db, noData(calls), { now: () => t, minGapMs: 0, isTradingDay: () => true });
+    const complete = () => (db.prepare("select complete from fetched_days where symbol = 'A' and day_start = 0").get() as { complete: number }).complete;
+
+    await archive.ensureDay("A", 0);
+    expect(calls.n).toBe(1);
+    expect(complete()).toBe(0); // not final: the nightly repair lists it as incomplete
+    expect(archive.missingDays(["A"], 0, DAY)).toEqual([{ symbol: "A", dayStart: 0, state: "incomplete" }]);
+    await archive.ensureDay("A", 0); // a second simulation shortly after does not ask again
+    expect(calls.n).toBe(1);
+
+    t += EMPTY_RETRY_AFTER_S + 1;
+    await archive.ensureDay("A", 0);
+    expect(calls.n).toBe(2);
+    expect(complete()).toBe(0);
+    await archive.fetchDay("A", 0); // the nightly repair and the button ask regardless of the pause
+    expect(calls.n).toBe(3);
+    expect(EMPTY_TRIES).toBe(3);
+    expect(complete()).toBe(1); // the third empty answer is believed
+    await archive.ensureDay("A", 0);
+    expect(calls.n).toBe(3);
+    expect(archive.missingDays(["A"], 0, DAY)).toEqual([]);
+  });
+
+  it("is final at once on a day the market was shut, and forgets the tries when bars come", async () => {
+    const calls = { n: 0 };
+    const archive = createArchive(openDb(":memory:"), noData(calls), { now: () => 10 * DAY, minGapMs: 0, isTradingDay: () => false });
+    await archive.ensureDay("A", 0);
+    await archive.ensureDay("A", 0);
+    expect(calls.n).toBe(1);
+
+    const db = openDb(":memory:");
+    let empty = true;
+    const flaky = { async bars() { if (empty) throw new MarketDataError("no_data", "x"); return [{ t: 3600, o: 1, h: 1, l: 1, c: 1, v: 1 }]; } };
+    const a = createArchive(db, flaky, { now: () => 10 * DAY, minGapMs: 0, isTradingDay: () => true });
+    await a.fetchDay("A", 0);
+    expect(db.prepare("select tries from fetch_retries").get()).toEqual({ tries: 1 });
+    empty = false;
+    await a.fetchDay("A", 0);
+    expect(db.prepare("select count(*) as n from fetch_retries").get()).toEqual({ n: 0 });
+    expect(db.prepare("select complete from fetched_days").get()).toEqual({ complete: 1 });
+  });
+});
+
+describe("the Berlin day of a time", () => {
+  it("is the same as asking the formatter, also at the hours where the clocks change", () => {
+    const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" });
+    const points: { t: number; value: number }[] = [];
+    for (const from of ["2026-03-28T00:00:00Z", "2026-10-24T00:00:00Z", "2026-12-31T20:00:00Z"]) {
+      const t0 = Date.parse(from) / 1000;
+      for (let i = 0; i < 72 * 6; i++) points.push({ t: t0 + i * 600, value: 1 }); // three days in steps of ten minutes
+    }
+    points.sort((a, b) => a.t - b.t);
+    const keys = bucketed(points, "day");
+    const expected = new Map<string, number>();
+    for (const p of points) expected.set(fmt.format(p.t * 1000), p.t);
+    expect(new Set(keys.map((k) => k.key))).toEqual(new Set(expected.keys()));
+    for (const k of keys) expect(k.key).toBe(fmt.format(k.t * 1000));
   });
 });
