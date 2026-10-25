@@ -42,6 +42,17 @@ create table if not exists dividends (
   amount real not null,
   primary key (symbol, ex_day)
 );
+create table if not exists splits (
+  symbol text not null,
+  day text not null,
+  numerator real not null,
+  denominator real not null,
+  primary key (symbol, day)
+);
+create table if not exists events_fetched (
+  symbol text primary key,
+  fetched_at integer not null
+);
 create table if not exists daily_fetched (
   symbol text primary key,
   fetched_at integer not null,
@@ -129,6 +140,16 @@ create table if not exists positions (
   qty integer not null,
   cost integer not null,
   primary key (depot_id, symbol)
+);
+create table if not exists cash_events (
+  depot_id integer not null references depots (id) on delete cascade,
+  t integer not null,
+  kind text not null,
+  symbol text not null,
+  ref text not null,
+  amount integer not null,
+  text text not null,
+  primary key (depot_id, kind, symbol, ref)
 );
 create table if not exists orders (
   id integer primary key,

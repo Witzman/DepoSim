@@ -318,6 +318,8 @@ export interface Journal {
   hitRate: { n: number; wins: number; rate: number | null; basis: string };
   holding: { n: number; medianSeconds: number | null; meanSeconds: number | null; basis: string };
   open: { symbol: string; qty: number; cost: number; openedSim: number }[];
+  /** Distributions and splits booked to the depot, oldest first. */
+  bookings: { t: number; kind: "dividend" | "split"; symbol: string; ref: string; amount: number; text: string }[];
   sales: JournalSale[];
   tooEarly: { days: 1 | 5; n: number; open: number; count: number; rate: number | null; avgMovePct: number | null; basis: string }[];
   /** Under 5 trades: show "wenig Daten". */

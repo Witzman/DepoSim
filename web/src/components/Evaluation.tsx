@@ -104,6 +104,7 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
         </div>
         {[...new Set(rows.flatMap((r) => reliabilityOf(r.m) ?? []).map((r) => `${r.label}: ${r.reason}`))].map((t) => <p key={t} className="muted" data-testid="reliability-note">{t}</p>)}
         {rows.filter((r) => r.m.unavailable).slice(0, 1).map((r) => <p key={r.key} className="muted" data-testid="metrics-note">{r.m.unavailable}</p>)}
+        <p className="muted">Die Depotkurve enthält gebuchte Ausschüttungen (mit Ausschüttungen, ohne Steuer); der Maßstab ist ein reiner Kurs ohne Ausschüttungen.</p>
         {anyBasis && <p className="muted">Volatilität und Sharpe sind geschätzt aus den Werten der Spalte „Basis“, hochgerechnet auf ein Jahr. Sharpe ohne risikofreien Zins.</p>}
 
         <h3>Risiko</h3>

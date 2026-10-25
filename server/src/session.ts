@@ -15,7 +15,9 @@ import { type Orderbook, buildOrderbook } from "./domain/orderbook.js";
 import { type Journal, type JournalOrder, buildJournal } from "./domain/journal.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
 import type { Cent } from "./domain/money.js";
-import type { Depot, DepotKind, OrderRecord, Simulation, Store } from "./store.js";
+import { applySplit, dividendCredit, showsSplit, splitOrder } from "./domain/events.js";
+import type { Events } from "./events.js";
+import type { Booking, Depot, DepotKind, OrderRecord, Simulation, Store } from "./store.js";
 
 const DAY = 86400;
 /** Prices for the simulation skip bars marked as outliers (#50). */
@@ -37,6 +39,8 @@ export interface SessionDeps {
   delayS?: number;
   /** The tempo a live simulation catches up at. */
   catchUpTempo?: number;
+  /** Dividends and splits. Without it nothing is booked. */
+  events?: Events;
 }
 
 export interface TickResult {
@@ -154,6 +158,7 @@ export class SessionService {
   private readonly now: () => number;
   private readonly delayS: number;
   private readonly catchUpTempo: number;
+  private readonly events?: Events;
   private readonly running = new Set<number>();
   /** The part of a simulated second a short tick left over, per simulation. Lost on a restart, which costs under a second. */
   private readonly carry = new Map<number, number>();
@@ -166,6 +171,7 @@ export class SessionService {
     this.now = deps.now ?? (() => Date.now() / 1000);
     this.delayS = deps.delayS ?? DEFAULT_DELAY_S;
     this.catchUpTempo = deps.catchUpTempo ?? DEFAULT_CATCH_UP_TEMPO;
+    this.events = deps.events;
   }
 
   /** The tradable instruments right now. The list can grow while the service runs, so it is read on every use. */
@@ -314,11 +320,16 @@ export class SessionService {
     }
     flat.sort((a, b) => a.bar.t - b.bar.t || a.symbol.localeCompare(b.symbol));
 
+    const eventsOf = this.eventsFor(flat);
     this.store.transaction(() => {
       for (const depot of this.store.listDepots(id)) {
         const state = this.store.loadDepot(depot.id);
         let changed = false;
-        for (const { symbol, bar } of flat) changed = this.evaluate(state, sim, symbol, bar) || changed;
+        for (const { symbol, bar } of flat) {
+          // An ex-day is booked before the first bar of that day fills anything: whoever held the shares before it gets the credit.
+          changed = this.bookEvents(depot, state, symbol, bar, eventsOf) || changed;
+          changed = this.evaluate(state, sim, symbol, bar) || changed;
+        }
         if (changed) this.store.saveBalance(depot.id, state.cash, state.positions);
       }
       this.store.setSimulationTime(id, target);
@@ -473,7 +484,7 @@ export class SessionService {
   }
 
   /** Trades, hit rate, holding time and "too early" of one depot, computed now from its filled orders. */
-  journal(id: number, depotId: number): Journal & { depotId: number; simulationTime: number } {
+  journal(id: number, depotId: number): Journal & { bookings: Booking[]; depotId: number; simulationTime: number } {
     const sim = this.sim(id);
     const filled: JournalOrder[] = [];
     for (const o of this.store.loadDepot(depotId).orders) {
@@ -484,7 +495,7 @@ export class SessionService {
       });
     }
     const journal = buildJournal({ orders: filled, s: sim.simulationTime, bars: this.archive, notes: this.store.notes(id) });
-    return { ...journal, depotId, simulationTime: sim.simulationTime };
+    return { ...journal, bookings: this.store.bookings(depotId), depotId, simulationTime: sim.simulationTime };
   }
 
   /** True if the key names a trade of any normal depot of the simulation. */
@@ -717,6 +728,8 @@ export class SessionService {
     for (const symbol of [...this.instruments.map((i) => i.symbol), this.fx]) {
       await this.archive.ensureDay(symbol, dayStartT);
     }
+    // Events are needed before the clock passes an ex-day; a failure there never stops the simulation.
+    if (this.events) for (const inst of this.instruments) await this.events.ensure(inst.symbol);
   }
 
   /** The reference price of every instrument that has one at `s`. */
@@ -736,6 +749,92 @@ export class SessionService {
     if (inst.currency === "EUR") return { price: bar.c, currency: "EUR" };
     const eurUsd = this.archive.lastCompleteBar(this.fx, s, SOUND)?.c;
     return eurUsd === undefined ? undefined : { price: bar.c, currency: "USD", eurUsd };
+  }
+
+  /** The dividends and splits of the symbols and days that the bars of a tick touch. */
+  private eventsFor(flat: { symbol: string; bar: Bar }[]): Map<string, { dividends: { exDay: string; amount: number }[]; splits: { day: string; numerator: number; denominator: number }[] }> {
+    const out = new Map<string, { dividends: { exDay: string; amount: number }[]; splits: { day: string; numerator: number; denominator: number }[] }>();
+    if (!this.events || flat.length === 0) return out;
+    const range = new Map<string, { from: number; to: number }>();
+    for (const { symbol, bar } of flat) {
+      const r = range.get(symbol);
+      range.set(symbol, { from: Math.min(r?.from ?? bar.t, bar.t), to: Math.max(r?.to ?? bar.t, bar.t) });
+    }
+    const iso = (t: number) => new Date(t * 1000).toISOString().slice(0, 10);
+    for (const [symbol, r] of range) {
+      const dividends = this.events.dividends(symbol, iso(r.from), iso(r.to));
+      const splits = this.events.splits(symbol, iso(r.from), iso(r.to));
+      if (dividends.length > 0 || splits.length > 0) out.set(symbol, { dividends, splits });
+    }
+    return out;
+  }
+
+  /**
+   * Books the distribution and the split of a symbol on the first sound bar of its ex-day. Once per
+   * depot: the booking table refuses a second write for the same ex-day, so a restart or a repeated
+   * tick changes nothing. A ghost depot gets them like any depot that holds the shares.
+   */
+  private bookEvents(
+    depot: Depot, state: DepotState & { orders: OrderRecord[] }, symbol: string, bar: Bar,
+    eventsOf: ReturnType<SessionService["eventsFor"]>,
+  ): boolean {
+    const ev = eventsOf.get(symbol);
+    const pos = state.positions.get(symbol);
+    if (!ev || !pos) return false;
+    const day = new Date(bar.t * 1000).toISOString().slice(0, 10);
+    const dividends = ev.dividends.filter((d) => d.exDay === day);
+    const splits = ev.splits.filter((s) => s.day === day);
+    if (dividends.length === 0 && splits.length === 0) return false;
+    const dayStart = dayOf(bar.t);
+    const blocked = new Set(this.archive.flagsBetween(symbol, dayStart, bar.t + 1, BLOCKING_KINDS).map((f) => f.t));
+    const first = this.archive.barsBetween(symbol, dayStart, bar.t + 1).find((b) => !blocked.has(b.t));
+    if (!first || first.t !== bar.t) return false;
+
+    const inst = this.registry.get(symbol)!;
+    let rate = 1;
+    if (inst.currency === "USD") {
+      const eurUsd = this.archive.lastCompleteBar(this.fx, bar.t + 60, SOUND)?.c;
+      if (eurUsd === undefined) return false;
+      rate = eurUsd;
+    }
+    const eur = (c: Cent) => `${(c / 100).toFixed(2).replace(".", ",")} €`;
+    let changed = false;
+    for (const d of dividends) {
+      const qty = state.positions.get(symbol)?.qty ?? 0;
+      const amount = dividendCredit(qty, d.amount, rate);
+      if (amount <= 0) continue;
+      const booking: Booking = { t: bar.t, kind: "dividend", symbol, ref: d.exDay, amount, text: `Ausschüttung ${symbol} ${eur(amount)}` };
+      if (this.store.addBooking(depot.id, booking)) {
+        state.cash += amount;
+        changed = true;
+      }
+    }
+    for (const sp of splits) {
+      const before = this.archive.lastCompleteBar(symbol, bar.t, SOUND);
+      if (!before || !showsSplit(before.c, bar.o, sp.numerator, sp.denominator)) continue;
+      const held = state.positions.get(symbol);
+      if (!held) continue;
+      const probe = { ...state, positions: new Map(state.positions) };
+      const priceEur = inst.currency === "USD" ? bar.o / rate : bar.o;
+      const res = applySplit(probe, symbol, sp.numerator, sp.denominator, priceEur);
+      if (!res) continue;
+      const booking: Booking = {
+        t: bar.t, kind: "split", symbol, ref: sp.day, amount: res.cashOut,
+        text: `Aktiensplit ${symbol} ${sp.numerator}:${sp.denominator}, ${held.qty} → ${res.qty} Stück` + (res.cashOut > 0 ? `, Bruchteil ${eur(res.cashOut)}` : ""),
+      };
+      if (!this.store.addBooking(depot.id, booking)) continue;
+      applySplit(state, symbol, sp.numerator, sp.denominator, priceEur);
+      this.store.splitOpenOrders(depot.id, symbol, sp.numerator, sp.denominator);
+      for (const o of state.orders) {
+        if (o.status === "open" && o.symbol === symbol) {
+          const s = splitOrder(o.qty, o.limitPrice, sp.numerator, sp.denominator);
+          o.qty = s.qty;
+          o.limitPrice = s.limitPrice;
+        }
+      }
+      changed = true;
+    }
+    return changed;
   }
 
   /** Fills what this finished bar triggers. True if the depot changed. */

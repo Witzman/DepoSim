@@ -141,6 +141,14 @@ function JournalBody({ simulationId, data }: { simulationId: number; data: Data 
       )}
       <p className="muted">Netto: nach Provision und Auslandspauschale. Gekauft und verkauft wird nach FIFO zugeordnet.</p>
 
+      <h3>Ausschüttungen und Splits</h3>
+      {data.bookings.length === 0 ? <p className="muted">Noch keine Buchung. Ausschüttungen und Aktiensplits werden zum Ex-Tag gebucht, wenn das Depot die Aktie hält.</p> : (
+        <ul className="plain num" data-testid="journal-bookings">
+          {data.bookings.map((b) => <li key={`${b.kind}-${b.symbol}-${b.ref}`}>{formatSimTime(b.t)} · {b.text}</li>)}
+        </ul>
+      )}
+      <p className="muted">Zahltag = Ex-Tag (Annahme, Yahoo nennt nur den Ex-Tag). Ohne Steuer und Quellensteuer. Ein Aktiensplit wird gebucht, wenn die Kurse den Sprung zeigen; bereits bereinigte Kurse brauchen keine Buchung.</p>
+
       <h3>Offene Positionen</h3>
       {data.open.length === 0 ? <p className="muted">Keine offenen Positionen.</p> : (
         <ul className="plain num" data-testid="journal-open">

@@ -1,6 +1,7 @@
 import type { Db } from "./db.js";
 import type { Cent } from "./domain/money.js";
 import type { FeeConfig } from "./domain/fees.js";
+import { splitOrder } from "./domain/events.js";
 import type { Tempo } from "./domain/clock.js";
 import type { DepotState, NewOrder, Order, OrderStatus } from "./domain/broker.js";
 
@@ -57,7 +58,25 @@ export interface Fill {
   foreignFee: Cent;
 }
 
+/** A booking that is not an order: a distribution or a split. Unique per depot, kind, symbol and ref. */
+export interface Booking {
+  t: number;
+  kind: "dividend" | "split";
+  symbol: string;
+  /** The ex-day, "YYYY-MM-DD". */
+  ref: string;
+  /** Cent credited to the cash (0 for a split without a fraction). */
+  amount: Cent;
+  /** German line for the journal, e.g. "Ausschüttung SAP.DE 12,50 €". */
+  text: string;
+}
+
 export interface Store {
+  /** Writes a booking once: false, and nothing changed, if the depot already has that kind, symbol and ref. */
+  addBooking(depotId: number, b: Booking): boolean;
+  bookings(depotId: number): Booking[];
+  /** Scales the open orders of a symbol after a split numerator:denominator. */
+  splitOpenOrders(depotId: number, symbol: string, numerator: number, denominator: number): void;
   createSimulation(input: NewSimulation): Simulation;
   getSimulation(id: number): Simulation | undefined;
   listSimulations(): Simulation[];
@@ -284,6 +303,20 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
       }
       db.prepare("insert or replace into journal_notes (simulation_id, trade_key, text, updated_at) values (?, ?, ?, ?)")
         .run(simulationId, tradeKey, text, at);
+    },
+    addBooking: (depotId, b) =>
+      db.prepare("insert or ignore into cash_events (depot_id, t, kind, symbol, ref, amount, text) values (?, ?, ?, ?, ?, ?, ?)")
+        .run(depotId, b.t, b.kind, b.symbol, b.ref, b.amount, b.text).changes > 0,
+    bookings: (depotId) =>
+      db.prepare("select t, kind, symbol, ref, amount, text from cash_events where depot_id = ? order by t, symbol").all(depotId) as Booking[],
+    splitOpenOrders: (depotId, symbol, numerator, denominator) => {
+      const rows = db.prepare("select id, qty, limit_price from orders where depot_id = ? and symbol = ? and status = 'open'")
+        .all(depotId, symbol) as { id: number; qty: number; limit_price: number | null }[];
+      const update = db.prepare("update orders set qty = ?, limit_price = ? where id = ?");
+      for (const r of rows) {
+        const s = splitOrder(r.qty, r.limit_price ?? undefined, numerator, denominator);
+        update.run(s.qty, s.limitPrice ?? null, r.id);
+      }
     },
     deleteDepot: (depotId) => {
       db.prepare("delete from depots where id = ?").run(depotId);

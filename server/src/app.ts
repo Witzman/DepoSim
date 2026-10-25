@@ -20,6 +20,7 @@ import { openDb } from "./db.js";
 import { type Health, createHealth } from "./health.js";
 import { type Fx, createFx } from "./fx.js";
 import { InstrumentRegistry } from "./instruments.js";
+import { createEvents } from "./events.js";
 import { createLongterm } from "./longterm.js";
 import { SessionService } from "./session.js";
 import { createStore } from "./store.js";
@@ -85,15 +86,20 @@ export function buildApp(opts: AppOptions): FastifyInstance {
     minGapMs: opts.minGapMs, now: opts.now,
     dailyTolerance: (symbol) => { const i = instruments.get(symbol); return dailyTolerance(i?.venue ?? "", i?.kind); },
   });
+  // Tests that do not hand in a daily source book no events: they must not reach for Yahoo.
+  const dailySource = instrumentDaily(opts.dailyData ?? createYahooDaily(), stats);
+  const events = opts.dailyData || process.env.NODE_ENV !== "test"
+    ? createEvents({ db, source: dailySource, now: nowS, log: (text) => app.log.warn(text) })
+    : undefined;
   const session = new SessionService({
     store, archive, instruments, fxSymbol: FX_SYMBOL, now: opts.now,
-    delayS: opts.liveDelayS, catchUpTempo: opts.catchUpTempo,
+    delayS: opts.liveDelayS, catchUpTempo: opts.catchUpTempo, events,
   });
   const backfill = createBackfill({ archive, store, session, instruments, now: opts.now ?? (() => Date.now() / 1000) });
   const fxLog = (text: string, ok: boolean) => (ok ? app.log.info(text) : app.log.error(text));
   const fx = createFx({ db, source: instrumentEcb(opts.fxSource ?? createEcb(), stats), now: nowS, log: fxLog });
   const longterm = createLongterm({
-    db, source: instrumentDaily(opts.dailyData ?? createYahooDaily(), stats), now: nowS, minGapMs: opts.minGapMs, fx,
+    db, source: dailySource, now: nowS, minGapMs: opts.minGapMs, fx,
   });
   const hub = createHub(session, store, opts.tickMs ?? 250, opts.liveRefreshS ?? 60);
 

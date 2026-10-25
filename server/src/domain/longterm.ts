@@ -1,5 +1,6 @@
 import { type Cent, roundCent } from "./money.js";
 import { type FeeConfig, previewCost } from "./fees.js";
+import { dividendCredit } from "./events.js";
 
 /** One trading day. In EUR, or in the currency `fx` converts from. `day` is "YYYY-MM-DD" (UTC date of the bar). */
 export interface DailyBar {
@@ -123,7 +124,7 @@ export function simulateLongterm(input: LongtermInput): LongtermResult {
       while (nextEx < exDays.length && exDays[nextEx] <= bar.day) {
         const ex = exDays[nextEx++];
         if (out.firstBuyDay === null || ex <= out.firstBuyDay) continue; // before the first buy: no shares
-        const credit = roundCent(shares * dividends.get(ex)! * 100);
+        const credit = dividendCredit(shares, dividends.get(ex)!);
         cash += credit;
         out.dividendsReceived += credit;
         pending.push(ex);
