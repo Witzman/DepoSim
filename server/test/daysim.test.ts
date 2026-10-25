@@ -145,6 +145,26 @@ describe("a simulation by days", () => {
     expect(t.svc.marketEvents(t.id, [SAP.symbol]).map((x) => x.day)).toEqual([isoOf(d[2]), isoOf(d[9])]);
   });
 
+  it("works out the rolling chapter on the day curve and not past the clock", () => {
+    const t = setup();
+    t.store.setBenchmark(t.id, SAP.symbol);
+    t.store.saveBalance(t.depotId, 0, new Map([[SAP.symbol, { qty: 100, cost: 1 }], [AAPL.symbol, { qty: 50, cost: 1 }]]));
+    t.svc.stepDays(t.id, 6);
+    const r = t.svc.rolling(t.id, t.depotId);
+    expect(r.simulationTime).toBe(t.days[5] + DAY);
+    expect(r.depot.days).toBeLessThanOrEqual(7); // the start point and six days
+    expect(r.depot.rolling.map((x) => x.window)).toEqual([10, 30, 90, 250]);
+    expect(r.depot.rolling.every((x) => x.points.length === 0)).toBe(true); // six days carry no window of ten
+    expect(r.depot.months.length).toBeGreaterThan(0);
+    expect(r.benchmark?.symbol).toBe(SAP.symbol);
+    expect(r.benchmark!.days).toBeLessThanOrEqual(6);
+    expect(r.beta.points).toEqual([]);
+    t.store.setBenchmark(t.id, null);
+    expect(t.svc.rolling(t.id, t.depotId).benchmark).toBeNull();
+    const last = Math.max(...r.depot.months.map((m) => Date.parse(`${m.month}-01T00:00:00Z`) / 1000));
+    expect(last).toBeLessThanOrEqual(t.days[5]);
+  });
+
   it("says end of data when no bar is left, and the time stays", () => {
     const t = setup();
     const r = t.svc.stepDays(t.id, 20);

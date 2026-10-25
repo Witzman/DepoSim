@@ -145,6 +145,25 @@ export interface ScenarioResult {
   goals: GoalResult[];
 }
 
+export interface RollPoint { t: number; vol: number | null; sharpe: number | null; ret: number }
+export interface MonthReturn { month: string; ret: number }
+export interface Analysis {
+  rolling: { window: number; points: RollPoint[] }[];
+  months: MonthReturn[];
+  years: { year: string; ret: number; months: MonthReturn[] }[];
+  episodes: { peakT: number; troughT: number; endT: number | null; depth: number; days: number; ongoing: boolean }[];
+  ranges: { days: number; windows: number; positiveShare: number | null }[];
+  days: number;
+}
+
+/** GET /api/simulations/:id/rolling?depotId= */
+export interface RollingResult {
+  simulationTime: number;
+  depot: Analysis;
+  benchmark: (Analysis & { symbol: string; name: string }) | null;
+  beta: { window: number; points: { t: number; beta: number | null; corr: number | null }[] };
+}
+
 /** GET /api/simulations/:id/events?symbols= : dividends, splits and gaps, up to the simulation time. */
 export interface MarketEvent {
   key: string;

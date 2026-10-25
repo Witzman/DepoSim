@@ -19,6 +19,7 @@ import { GRADE_FORMULA, type Grade, gradeRun } from "./domain/grade.js";
 import { type Calendar, buildCalendar } from "./domain/dividendCalendar.js";
 import { type AutoPauseRule, type Signals, distanceToLimit, jumpOf, noSignals, pauseReason } from "./domain/autopause.js";
 import { type MarketEvent, marketEvents } from "./domain/marketEvents.js";
+import { type Analysis, type BetaPoint, BETA_WINDOW, analyze, rollingBeta } from "./domain/rolling.js";
 import { type Orderbook, buildOrderbook } from "./domain/orderbook.js";
 import { type Journal, type JournalOrder, buildJournal } from "./domain/journal.js";
 import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
@@ -71,6 +72,14 @@ export interface TickResult {
   liveEdge: boolean;
   /** What the tick did that an auto-pause rule may care about; absent for a tick that was not asked for them. */
   signals?: Signals;
+}
+
+export interface RollingResult {
+  simulationTime: number;
+  depot: Analysis;
+  /** Absent without a benchmark: then only the depot is shown. */
+  benchmark: (Analysis & { symbol: string; name: string }) | null;
+  beta: { window: number; points: BetaPoint[] };
 }
 
 export interface JumpResult {
@@ -915,6 +924,25 @@ export class SessionService {
       if (r.endOfData || r.waitingForData || !moved) { stopped = { rule: "data", reason: "Ende der Daten: für die Zeit danach gibt es noch keine Kurse." }; break; }
     }
     return { ok: true, simulationTime: time, newBars: merged, target, stopped };
+  }
+
+  /**
+   * Rolling figures, calendar months, falls and ranges of a depot's curve and of the benchmark's, on the daily curve and not
+   * past the simulation time. The benchmark is a price; the depot's curve holds its distributions.
+   */
+  rolling(id: number, depotId: number): RollingResult {
+    const sim = this.sim(id);
+    const points = this.store.valueCurve(depotId, EVALUATION_POINTS);
+    const bench = this.benchmarkSeries(sim, EVALUATION_POINTS);
+    const inst = sim.benchmark ? this.registry.get(sim.benchmark) : undefined;
+    const beta = bench ? rollingBeta(points, bench) : [];
+    const step = Math.max(1, Math.ceil(beta.length / 400));
+    return {
+      simulationTime: sim.simulationTime,
+      depot: analyze(points),
+      benchmark: bench && inst ? { symbol: inst.symbol, name: inst.name, ...analyze(bench) } : null,
+      beta: { window: BETA_WINDOW, points: beta.filter((_, i) => i % step === 0 || i === beta.length - 1) },
+    };
   }
 
   private runCache = new Map<number, RunSummary>();

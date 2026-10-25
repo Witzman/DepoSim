@@ -52,8 +52,8 @@ export function returnsOf(points: Point[]): number[] {
   return out;
 }
 
-const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
-const stdev = (xs: number[]) => {
+export const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+export const stdev = (xs: number[]) => {
   const m = mean(xs);
   return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / (xs.length - 1));
 };
@@ -135,7 +135,7 @@ export function computeMetrics(points: Point[]): Metrics {
   return { ...base, unavailable: `Für Volatilität und Sharpe-Ratio liegen zu wenige Werte vor (mindestens ${MIN_RETURNS} Renditen nötig).` };
 }
 
-function pearson(a: number[], b: number[]): number | null {
+export function pearson(a: number[], b: number[]): number | null {
   const ma = mean(a);
   const mb = mean(b);
   let ab = 0;

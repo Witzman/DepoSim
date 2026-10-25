@@ -1,6 +1,6 @@
 import type {
   AllocationLine, ArchiveInfo, AutoPause, FlagReport, BackfillJob, BackupStatus, Coverage, DataStatus, GapReport, HintsResult, JobsOverview, SourceSummary, Bar, ClientMessage, CompareResult, CostPreview, Curves, Depot, DividendCalendar, Evaluation, Instrument, Journal, JournalNoteResult, MarketEvent,
-  Longterm, LongtermJob, MissingList, OrderInput, Orderbook, RunSummary, Scenario, ScenarioResult, SearchHit, ServerMessage, Simulation, Rules, VenueInfo,
+  Longterm, LongtermJob, MissingList, OrderInput, Orderbook, RollingResult, RunSummary, Scenario, ScenarioResult, SearchHit, ServerMessage, Simulation, Rules, VenueInfo,
 } from "./types.js";
 
 /** An error with a message that can be shown to the person as it is. */
@@ -57,6 +57,8 @@ export const createSimulation = (body: {
 export const getScenarios = () => request<Scenario[]>("/api/scenarios");
 export const getMarketEvents = (id: number, symbols: string[]) =>
   request<MarketEvent[]>(`/api/simulations/${id}/events?symbols=${encodeURIComponent(symbols.join(","))}`);
+export const getRolling = (id: number, depotId: number) =>
+  request<RollingResult>(`/api/simulations/${id}/rolling?depotId=${depotId}`);
 export const getDividends = (id: number, depotId: number) =>
   request<DividendCalendar>(`/api/simulations/${id}/dividends?depotId=${depotId}`);
 export const getRuns = () => request<RunSummary[]>("/api/runs");

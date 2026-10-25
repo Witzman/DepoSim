@@ -585,3 +585,16 @@ table.plain { border-collapse: collapse; } table.plain th, table.plain td { padd
 .autopause summary { cursor: pointer; }
 .autopause-body { display: grid; gap: 6px; margin-top: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); max-width: 420px; }
 input.mini { width: 4.5em; }
+.rolling h3 { margin: 14px 0 4px; } .rolling h4 { margin: 8px 0 2px; font-weight: 600; }
+.rolling-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.rolling-fig { margin: 0; }
+.rolling-svg { width: 100%; height: auto; display: block; }
+.rolling-svg .axis { stroke: var(--border); stroke-width: 1; } .rolling-svg .axis.faint { stroke-dasharray: 2 4; } .rolling-svg .axis.zero { stroke: var(--muted); }
+.rolling-svg .tick { fill: var(--muted); font-size: 11px; }
+.rolling .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.9em; margin-top: 4px; }
+.rolling .swatch { display: inline-block; width: 22px; border-top-width: 3px; vertical-align: middle; }
+.heat { overflow-x: auto; }
+.heat table, table.episodes { border-collapse: collapse; width: 100%; font-size: 0.85em; }
+.heat th, .heat td, table.episodes th, table.episodes td { padding: 3px 5px; text-align: right; white-space: nowrap; }
+.heat th[scope="row"], table.episodes th, table.episodes td:not(.num) { text-align: left; }
+.heat td { border: 1px solid var(--surface); }

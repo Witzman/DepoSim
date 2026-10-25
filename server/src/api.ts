@@ -616,6 +616,17 @@ export function registerApi(app: FastifyInstance, { daily, store, session, archi
     return session.marketEvents(sim.id, symbols);
   });
 
+  app.get("/api/simulations/:id/rolling", async (req, reply) => {
+    const sim = simulationOf(req.params);
+    if (!sim) return notFound(reply);
+    const query = journalQuery.safeParse(req.query);
+    if (!query.success) return invalid(reply, query.error);
+    const depots = store.listDepots(sim.id);
+    const depot = query.data.depotId === undefined ? depots.find((d) => d.id === session.defaultDepotId(sim.id)) : depots.find((d) => d.id === query.data.depotId);
+    if (!depot) return unknownDepot(reply);
+    return session.rolling(sim.id, depot.id);
+  });
+
   app.get("/api/simulations/:id/dividends", async (req, reply) => {
     const sim = simulationOf(req.params);
     if (!sim) return notFound(reply);
