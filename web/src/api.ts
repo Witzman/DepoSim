@@ -50,15 +50,17 @@ export const removeInstrument = (symbol: string) =>
 export const listSimulations = () => request<Simulation[]>("/api/simulations");
 export const createSimulation = (body: {
   name: string; startAt?: number; live?: boolean; startCash?: number;
-  preset?: "relaxed" | "realistic" | "hardcore"; rules?: Partial<Omit<Rules, "preset">>;
+  resolution?: "minute" | "day"; preset?: "relaxed" | "realistic" | "hardcore"; rules?: Partial<Omit<Rules, "preset">>;
 }) =>
   request<Simulation>("/api/simulations", json("POST", body));
 export const deleteSimulation = (id: number) => request<void>(`/api/simulations/${id}`, { method: "DELETE" });
 export const endSimulation = (id: number) => request<Simulation>(`/api/simulations/${id}/end`, json("POST", {}));
 
-export async function getBars(id: number, symbol: string, limit: number): Promise<Bar[]> {
+/** `skipped` is only given for a daily simulation: trading days without a price in the range. */
+export async function getBars(id: number, symbol: string, limit: number): Promise<{ bars: Bar[]; skipped: number }> {
   const url = `/api/simulations/${id}/bars?symbol=${encodeURIComponent(symbol)}&limit=${limit}`;
-  return (await request<{ bars: Bar[] }>(url)).bars;
+  const r = await request<{ bars: Bar[]; skipped?: number }>(url);
+  return { bars: r.bars, skipped: r.skipped ?? 0 };
 }
 
 export const previewOrder = (id: number, o: OrderInput) =>

@@ -11,6 +11,7 @@ import { type BackupService, createBackupService } from "./backup.js";
 import { FX_SYMBOL, type Instrument, type JobSettings, WATCHLIST } from "./config.js";
 import { dailyTolerance } from "./domain/quality.js";
 import { createArchive } from "./data/archive.js";
+import { createDailyArchive } from "./data/dailyarchive.js";
 import { createSourceStats, instrumentDaily, instrumentEcb, instrumentMarketData, instrumentSearch } from "./data/instrumented.js";
 import { type EcbSource, createEcb } from "./data/ecb.js";
 import type { DailyData, MarketData } from "./data/marketdata.js";
@@ -89,15 +90,16 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   // Tests that do not hand in a daily source book no events: they must not reach for Yahoo.
   const dailySource = instrumentDaily(opts.dailyData ?? createYahooDaily(), stats);
   const events = opts.dailyData || process.env.NODE_ENV !== "test"
-    ? createEvents({ db, source: dailySource, now: nowS, log: (text) => app.log.warn(text) })
+    ? createEvents({ db, source: dailySource, now: nowS, minGapMs: opts.minGapMs ?? 500, log: (text) => app.log.warn(text) })
     : undefined;
+  const fxLog = (text: string, ok: boolean) => (ok ? app.log.info(text) : app.log.error(text));
+  const fx = createFx({ db, source: instrumentEcb(opts.fxSource ?? createEcb(), stats), now: nowS, log: fxLog });
   const session = new SessionService({
     store, archive, instruments, fxSymbol: FX_SYMBOL, now: opts.now,
     delayS: opts.liveDelayS, catchUpTempo: opts.catchUpTempo, events,
+    daily: createDailyArchive(db), fxRate: (ccy, day) => fx.rateOn(ccy, day, { minute: false })?.rate,
   });
   const backfill = createBackfill({ archive, store, session, instruments, now: opts.now ?? (() => Date.now() / 1000) });
-  const fxLog = (text: string, ok: boolean) => (ok ? app.log.info(text) : app.log.error(text));
-  const fx = createFx({ db, source: instrumentEcb(opts.fxSource ?? createEcb(), stats), now: nowS, log: fxLog });
   const longterm = createLongterm({
     db, source: dailySource, now: nowS, minGapMs: opts.minGapMs, fx,
   });
@@ -142,7 +144,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   });
 
   app.get("/healthz", async (_req, reply) => reply.type("text/plain").send("ok"));
-  registerApi(app, { store, session, archive, instruments, search: instrumentSearch(opts.search ?? createYahooSearch(), stats), hub, backfill, longterm, fx, db, backup, jobs, health, now: nowS });
+  registerApi(app, { daily: createDailyArchive(db), store, session, archive, instruments, search: instrumentSearch(opts.search ?? createYahooSearch(), stats), hub, backfill, longterm, fx, db, backup, jobs, health, now: nowS });
 
   if (existsSync(WEB_DIST)) {
     app.register(fastifyStatic, { root: WEB_DIST });

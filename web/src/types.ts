@@ -86,6 +86,8 @@ export interface Simulation {
   /** The symbol the curves are measured against, if one was chosen. */
   benchmark: string | null;
   rules: Rules;
+  /** `day`: one step is a trading day (daily prices); tempo is days per second. */
+  resolution: "minute" | "day";
 }
 
 export type RulePreset = "relaxed" | "realistic" | "hardcore" | "custom";
@@ -340,7 +342,7 @@ export type ServerMessage =
   | { type: "notice"; text: string }
   | { type: "error"; text: string };
 
-export type ClientMessage = { type: "run" } | { type: "pause" } | { type: "tempo"; tempo: Tempo };
+export type ClientMessage = { type: "run" } | { type: "pause" } | { type: "step" } | { type: "tempo"; tempo: Tempo };
 
 /** GET /api/simulations/:id/journal?depotId= (default: the first normal depot; 400 for a ghost, 404 unknown). */
 export interface JournalTrade {

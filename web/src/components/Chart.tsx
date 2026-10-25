@@ -5,7 +5,7 @@ import {
 } from "lightweight-charts";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  CHART_TYPES, SCALE_MODES, TIMEFRAMES, TIMEFRAME_LABEL, aggregate, barChange, heikinAshi, type ChartPrefs,
+  CHART_TYPES, SCALE_MODES, TIMEFRAMES, TIMEFRAME_LABEL, aggregate, barChange, heikinAshi, type ChartPrefs, type Timeframe,
 } from "../bars.js";
 import { tickMarkFormatter, timeFormatter } from "../chartTime.js";
 import { addDrawing, hitTest, newId, parse, removeDrawing, serialize, storageKey, type Drawing } from "../drawings.js";
@@ -51,6 +51,8 @@ interface Props {
   /** Drawings are kept per simulation and symbol. */
   simulationId: number | null;
   symbol: string;
+  /** The timeframes offered; all of them by default. */
+  timeframes?: Timeframe[];
 }
 
 const HIT_PX = 8;
@@ -81,7 +83,7 @@ const points = (bars: Bar[], values: Series) => {
  * Candles with volume, optional indicators. New bars at the end are added one at a time; anything else
  * (another symbol, another simulation) replaces the data.
  */
-export function Chart({ bars: raw, prefs: view, onPrefs, fills, lead, theme, simulationId, symbol }: Props) {
+export function Chart({ bars: raw, prefs: view, onPrefs, fills, lead, theme, simulationId, symbol, timeframes = TIMEFRAMES }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
   const candles = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -394,7 +396,7 @@ export function Chart({ bars: raw, prefs: view, onPrefs, fills, lead, theme, sim
       <div className="chart-tools">
         {lead}
         <div className="seg" role="group" aria-label="Zeitrahmen" data-guide="timeframe">
-          {TIMEFRAMES.map((tf) => (
+          {timeframes.map((tf) => (
             <button key={tf} type="button" className="btn small" aria-pressed={view.timeframe === tf}
               data-testid={`tf-${tf}`} onClick={() => { markSeen("timeframe"); onPrefs({ ...view, timeframe: tf }); }}>{TIMEFRAME_LABEL[tf]}</button>
           ))}

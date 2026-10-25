@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Db } from "./db.js";
+import { RELAXED } from "./domain/rules.js";
 
 export const FORMAT = "deposim-simulation";
 export const VERSION = 1;
@@ -43,6 +44,9 @@ const fileShape = z.object({
     endedAt: int.nullable(),
     live: z.boolean(),
     benchmark: z.string().nullable(),
+    // Added after version 1 shipped (#27, #54): files without them are minute simulations with the relaxed rules.
+    resolution: z.enum(["minute", "day"]).optional(),
+    rules: z.record(z.string(), z.unknown()).optional(),
   }),
   depots: z.array(z.object({
     name: z.string().min(1).max(40),
@@ -50,6 +54,7 @@ const fileShape = z.object({
     kind: z.enum(["normal", "ghost"]),
     positions: z.array(z.object({ symbol: z.string().min(1), qty: int, cost: int })),
     orders: z.array(orderShape),
+    bookings: z.array(z.object({ t: int, kind: z.enum(["dividend", "split"]), symbol: z.string().min(1), ref: z.string(), amount: int, text: z.string() })).optional(),
     values: z.array(z.object({ t: int, value: int })),
   })).min(1).max(20),
   notes: z.array(z.object({ tradeKey: z.string().regex(/^\d{1,12}:\d{1,12}$/), text: z.string().max(500), updatedAt: int })),
@@ -59,7 +64,7 @@ export type SimulationFile = z.infer<typeof fileShape>;
 
 interface SimRow {
   id: number; name: string; start_at: number; simulation_time: number; tempo: number; start_cash: number;
-  fees_json: string; created_at: number; ended_at: number | null; live: number; benchmark: string | null;
+  fees_json: string; created_at: number; ended_at: number | null; live: number; benchmark: string | null; rules_json: string; resolution: string;
 }
 interface OrderRow {
   id: number; symbol: string; side: string; kind: string; qty: number; limit_price: number | null; status: string;
@@ -81,7 +86,8 @@ export function exportSimulation(db: Db, id: number, now: number): SimulationFil
     simulation: {
       name: sim.name, startAt: sim.start_at, simulationTime: sim.simulation_time, tempo: sim.tempo, startCash: sim.start_cash,
       fees: JSON.parse(sim.fees_json) as Record<string, unknown>, createdAt: sim.created_at, endedAt: sim.ended_at,
-      live: sim.live === 1, benchmark: sim.benchmark,
+      live: sim.live === 1, benchmark: sim.benchmark, resolution: sim.resolution === "day" ? "day" : "minute",
+      rules: JSON.parse(sim.rules_json) as Record<string, unknown>,
     },
     depots: depots.map((d) => ({
       name: d.name, cash: d.cash, kind: d.kind,
@@ -93,6 +99,9 @@ export function exportSimulation(db: Db, id: number, now: number): SimulationFil
         status: o.status as "open", createdSim: o.created_sim, filledSim: o.filled_sim, fillPrice: o.fill_price, gross: o.gross,
         commission: o.commission, foreignFee: o.foreign_fee,
       })),
+      bookings: db.prepare("select t, kind, symbol, ref, amount, text from cash_events where depot_id = ? order by t, symbol").all(d.id) as {
+        t: number; kind: "dividend" | "split"; symbol: string; ref: string; amount: number; text: string;
+      }[],
       values: db.prepare("select t, value from depot_values where depot_id = ? order by t").all(d.id) as { t: number; value: number }[],
     })),
     notes: (db.prepare("select trade_key, text, updated_at from journal_notes where simulation_id = ?").all(id) as {
@@ -146,9 +155,10 @@ export function importSimulation(db: Db, raw: unknown, known: (symbol: string) =
     const name = freeName(db, s.name);
     const id = Number(
       db.prepare(
-        "insert into simulations (name, start_at, simulation_time, tempo, start_cash, fees_json, created_at, ended_at, live, benchmark) " +
-          "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      ).run(name, s.startAt, s.simulationTime, s.tempo, s.startCash, JSON.stringify(s.fees), Math.floor(now), s.endedAt, s.live ? 1 : 0, s.benchmark)
+        "insert into simulations (name, start_at, simulation_time, tempo, start_cash, fees_json, created_at, ended_at, live, benchmark, rules_json, resolution) " +
+          "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(name, s.startAt, s.simulationTime, s.tempo, s.startCash, JSON.stringify(s.fees), Math.floor(now), s.endedAt, s.live ? 1 : 0, s.benchmark,
+        JSON.stringify(s.rules ?? RELAXED), s.resolution ?? "minute")
         .lastInsertRowid,
     );
     const orderIds = new Map<number, number>();
@@ -157,6 +167,9 @@ export function importSimulation(db: Db, raw: unknown, known: (symbol: string) =
         db.prepare("insert into depots (simulation_id, name, cash, kind) values (?, ?, ?, ?)").run(id, d.name, d.cash, d.kind).lastInsertRowid,
       );
       for (const p of d.positions) db.prepare("insert into positions (depot_id, symbol, qty, cost) values (?, ?, ?, ?)").run(depotId, p.symbol, p.qty, p.cost);
+      for (const b of d.bookings ?? []) {
+        db.prepare("insert or ignore into cash_events (depot_id, t, kind, symbol, ref, amount, text) values (?, ?, ?, ?, ?, ?, ?)").run(depotId, b.t, b.kind, b.symbol, b.ref, b.amount, b.text);
+      }
       for (const v of d.values) db.prepare("insert or replace into depot_values (depot_id, t, value) values (?, ?, ?)").run(depotId, v.t, v.value);
       for (const o of d.orders) {
         const newId = Number(

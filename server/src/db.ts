@@ -108,7 +108,8 @@ create table if not exists simulations (
   ended_at integer,
   live integer not null default 0,
   benchmark text,
-  rules_json text not null default '${RULES_DEFAULT_JSON}'
+  rules_json text not null default '${RULES_DEFAULT_JSON}',
+  resolution text not null default 'minute'
 );
 create table if not exists instruments (
   symbol text primary key,
@@ -194,6 +195,8 @@ export function openDb(path: string): Db {
     db.exec("alter table simulations add column live integer not null default 0");
   }
   if (!columns.some((c) => c.name === "benchmark")) db.exec("alter table simulations add column benchmark text");
+  // Resolution (#54): an older simulation plays minute bars.
+  if (!columns.some((c) => c.name === "resolution")) db.exec("alter table simulations add column resolution text not null default 'minute'");
   // Rules (#27): an older simulation is a relaxed one, as it always played.
   if (!columns.some((c) => c.name === "rules_json")) {
     db.exec(`alter table simulations add column rules_json text not null default '${RULES_DEFAULT_JSON}'`);

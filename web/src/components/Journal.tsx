@@ -13,10 +13,12 @@ interface Props {
   simulationId: number;
   depot: DepotView;
   running: boolean;
+  /** A daily simulation: times are dates. */
+  daily?: boolean;
 }
 
 /** The note of one trade: written freely, saved when the field is left. */
-function NoteField({ simulationId, trade }: { simulationId: number; trade: JournalTrade }) {
+function NoteField({ simulationId, trade, daily }: { simulationId: number; trade: JournalTrade; daily: boolean }) {
   const [text, setText] = useState(trade.note ?? "");
   const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
@@ -46,7 +48,7 @@ function NoteField({ simulationId, trade }: { simulationId: number; trade: Journ
 
   return (
     <div className="note">
-      <input aria-label={`Notiz zu ${trade.symbol}, verkauft ${formatSimTime(trade.closedSim)}`} data-testid={`note-${trade.key}`}
+      <input aria-label={`Notiz zu ${trade.symbol}, verkauft ${formatSimTime(trade.closedSim, daily)}`} data-testid={`note-${trade.key}`}
         value={text} maxLength={NOTE_MAX} placeholder="Notiz …"
         onChange={(e) => { dirty.current = true; setText(e.target.value); setState("idle"); }}
         onBlur={() => void save()} />
@@ -58,7 +60,7 @@ function NoteField({ simulationId, trade }: { simulationId: number; trade: Journ
   );
 }
 
-export function Journal({ simulationId, depot, running }: Props) {
+export function Journal({ simulationId, depot, running, daily = false }: Props) {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
   const ghost = depot.kind === "ghost";
@@ -83,12 +85,12 @@ export function Journal({ simulationId, depot, running }: Props) {
       {ghost && <p className="muted">Ein Geisterdepot hat kein Journal: Es handelt nicht.</p>}
       {!ghost && error && <p className="error" role="alert">{error}</p>}
       {!ghost && !data && !error && <p className="muted">Lädt …</p>}
-      {!ghost && data && <JournalBody simulationId={simulationId} data={data} />}
+      {!ghost && data && <JournalBody simulationId={simulationId} data={data} daily={daily} />}
     </section>
   );
 }
 
-function JournalBody({ simulationId, data }: { simulationId: number; data: Data }) {
+function JournalBody({ simulationId, data, daily }: { simulationId: number; data: Data; daily: boolean }) {
   const stats = tradeStats(data.trades);
   return (
     <>
@@ -128,11 +130,11 @@ function JournalBody({ simulationId, data }: { simulationId: number; data: Data 
             <tbody>
               {data.trades.map((t) => (
                 <tr key={t.key} data-testid={`trade-${t.key}`}>
-                  <td>{t.symbol}</td><td data-label="Stück">{t.qty}</td><td data-label="Verkauft">{formatSimTime(t.closedSim)}</td><td data-label="Gehalten">{formatDuration(t.holdSeconds)}</td>
+                  <td>{t.symbol}</td><td data-label="Stück">{t.qty}</td><td data-label="Verkauft">{formatSimTime(t.closedSim, daily)}</td><td data-label="Gehalten">{formatDuration(t.holdSeconds)}</td>
                   <td data-label="Netto G/V" className={t.netPnl > 0 ? "up" : t.netPnl < 0 ? "down" : "muted"}>
                     {signedEurArrow(t.netPnl)}{t.netPct !== null && <span> ({arrowOf(t.netPct)} {signedPercent(t.netPct / 100)})</span>}
                   </td>
-                  <td data-label="Notiz"><NoteField simulationId={simulationId} trade={t} /></td>
+                  <td data-label="Notiz"><NoteField simulationId={simulationId} trade={t} daily={daily} /></td>
                 </tr>
               ))}
             </tbody>
@@ -144,7 +146,7 @@ function JournalBody({ simulationId, data }: { simulationId: number; data: Data 
       <h3>Ausschüttungen und Splits</h3>
       {data.bookings.length === 0 ? <p className="muted">Noch keine Buchung. Ausschüttungen und Aktiensplits werden zum Ex-Tag gebucht, wenn das Depot die Aktie hält.</p> : (
         <ul className="plain num" data-testid="journal-bookings">
-          {data.bookings.map((b) => <li key={`${b.kind}-${b.symbol}-${b.ref}`}>{formatSimTime(b.t)} · {b.text}</li>)}
+          {data.bookings.map((b) => <li key={`${b.kind}-${b.symbol}-${b.ref}`}>{formatSimTime(b.t, daily)} · {b.text}</li>)}
         </ul>
       )}
       <p className="muted">Zahltag = Ex-Tag (Annahme, Yahoo nennt nur den Ex-Tag). Ohne Steuer und Quellensteuer. Ein Aktiensplit wird gebucht, wenn die Kurse den Sprung zeigen; bereits bereinigte Kurse brauchen keine Buchung.</p>
@@ -153,7 +155,7 @@ function JournalBody({ simulationId, data }: { simulationId: number; data: Data 
       {data.open.length === 0 ? <p className="muted">Keine offenen Positionen.</p> : (
         <ul className="plain num" data-testid="journal-open">
           {data.open.map((p) => (
-            <li key={`${p.symbol}-${p.openedSim}`}>{p.symbol} · {p.qty} Stück · Kosten {formatEur(p.cost)} · seit {formatSimTime(p.openedSim)}</li>
+            <li key={`${p.symbol}-${p.openedSim}`}>{p.symbol} · {p.qty} Stück · Kosten {formatEur(p.cost)} · seit {formatSimTime(p.openedSim, daily)}</li>
           ))}
         </ul>
       )}

@@ -8,6 +8,7 @@ import type { Store } from "./store.js";
 const message = z.discriminatedUnion("type", [
   z.object({ type: z.literal("run") }),
   z.object({ type: z.literal("pause") }),
+  z.object({ type: z.literal("step") }),
   z.object({ type: z.literal("tempo"), tempo: z.union([z.literal(1), z.literal(5), z.literal(30), z.literal(60)]) }),
 ]);
 
@@ -144,6 +145,21 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
             return;
           }
           session.setTempo(id, parsed.tempo);
+        } else if (parsed.type === "step") {
+          const sim = store.getSimulation(id);
+          if (sim?.resolution !== "day") {
+            send(ws, { type: "notice", text: "Ein Tag weiter gibt es nur in Tageskurs-Simulationen." });
+            return;
+          }
+          if (sim.endedAt !== null) {
+            send(ws, { type: "notice", text: "Die Simulation ist beendet." });
+            return;
+          }
+          stopLoop(id);
+          const result = session.stepDays(id, 1);
+          const { simulation: _s, ...rest } = session.snapshot(id);
+          broadcast(id, { type: "tick", simulationTime: result.simulationTime, newBars: result.newBars, ...rest });
+          if (result.endOfData) broadcast(id, { type: "notice", text: "Ende der Daten: für die Zeit danach gibt es noch keine Kurse." });
         } else if (parsed.type === "run") {
           if (store.getSimulation(id)?.endedAt != null) {
             send(ws, { type: "notice", text: "Die Simulation ist beendet." });

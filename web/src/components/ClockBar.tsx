@@ -17,12 +17,14 @@ interface Props {
   lagS: number;
   delayS: number;
   rules: Rules;
+  /** A daily simulation: the tempo is days per second, "Tag weiter" plays one day, and `skipped` days had no price. */
+  daily?: { skipped: number; onStep: () => void };
   onTempo: (t: Tempo) => void;
   onRun: () => void;
   onPause: () => void;
 }
 
-export function ClockBar({ simulationTime, tempo, running, disabled, live, phase, lagS, delayS, rules, onTempo, onRun, onPause }: Props) {
+export function ClockBar({ simulationTime, tempo, running, disabled, live, phase, lagS, delayS, rules, daily, onTempo, onRun, onPause }: Props) {
   const status = live
     ? phase === "catchup"
       ? `Aufholen · noch ${formatLag(lagS)}`
@@ -34,7 +36,8 @@ export function ClockBar({ simulationTime, tempo, running, disabled, live, phase
     <div className="clock">
       <div>
         <h2>Simulationszeit<span className="badge rules" data-testid="rules-badge" title={describeRules(rules)}>{PRESET_LABEL[rules.preset]}</span></h2>
-        <div className="time num" data-testid="sim-time">{formatSimTime(simulationTime)}</div>
+        <div className="time num" data-testid="sim-time">{formatSimTime(simulationTime, daily !== undefined)}</div>
+        {daily && <div className="status" data-testid="daily-note">Tageskurse, ein Schritt ist ein Handelstag{daily.skipped > 0 && ` · ${daily.skipped} Handelstage ohne Kurs übersprungen`}</div>}
         {status && <div className={`status ${phase === "catchup" ? "" : "up"}`} data-testid="clock-status">{status}</div>}
       </div>
       {rules.tempoLocked ? <span className="muted" data-testid="tempo-locked">Tempo fest: {tempo}x</span> : (
@@ -44,11 +47,12 @@ export function ClockBar({ simulationTime, tempo, running, disabled, live, phase
             key={t} className="btn" aria-pressed={t === tempo} disabled={disabled || live} onClick={() => onTempo(t)}
             title={live ? "Im Livebetrieb bestimmt die Uhr das Tempo" : `Taste ${n + 1}`}
           >
-            {t}x
+            {daily ? `${t} T/s` : `${t}x`}
           </button>
         ))}
       </div>
       )}
+      {daily && !running && <button className="btn" disabled={disabled} onClick={daily.onStep} data-testid="day-step">Tag weiter</button>}
       {running ? (
         rules.pauseAllowed
           ? <button className="btn primary" disabled={disabled} onClick={onPause}>Pause</button>

@@ -54,7 +54,14 @@ describe("getBars", () => {
 
   it("returns the bars", async () => {
     stubFetch(200, { symbol: "SAP.DE", bars: [{ t: 1, o: 1, h: 1, l: 1, c: 1, v: 1 }] });
-    expect(await getBars(1, "SAP.DE", 5)).toHaveLength(1);
+    const r = await getBars(1, "SAP.DE", 5);
+    expect(r.bars).toHaveLength(1);
+    expect(r.skipped).toBe(0);
+  });
+
+  it("passes on the number of skipped days of a daily simulation", async () => {
+    stubFetch(200, { symbol: "SAP.DE", bars: [], skipped: 3 });
+    expect((await getBars(1, "SAP.DE", 5)).skipped).toBe(3);
   });
 });
 

@@ -26,7 +26,7 @@ function setup(opts: { dividends?: Div[]; splits?: Split[]; afterSplit?: number 
   const store = createStore(db);
   const archive = createArchive(db, source, { now: () => D1 + DAY_PLUS, minGapMs: 0 });
   const events: Events = {
-    ensure: async () => {},
+    ensure: async () => {}, ensureStrict: async () => {},
     dividends: (symbol, from, to) => (symbol === SAP.symbol ? (opts.dividends ?? []).filter((d) => d.exDay >= from && d.exDay <= to) : []),
     splits: (symbol, from, to) => (symbol === SAP.symbol ? (opts.splits ?? []).filter((s) => s.day >= from && s.day <= to) : []),
   };

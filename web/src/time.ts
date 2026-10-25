@@ -39,9 +39,12 @@ export function berlinToUtcSeconds(date: string, time: string): number {
   return (naive - 3600_000) / 1000;
 }
 
-/** "23.10.2026, 10:00:00", Berlin time. */
-export function formatSimTime(utcSeconds: number): string {
-  return display.format(utcSeconds * 1000);
+const dayDisplay = new Intl.DateTimeFormat("de-DE", { timeZone: "UTC", day: "2-digit", month: "2-digit", year: "numeric" });
+
+/** "23.10.2026, 10:00:00", Berlin time; for a daily simulation "23.10.2026", the day that is played next. */
+export function formatSimTime(utcSeconds: number, daily = false): string {
+  // A daily simulation has no time of day: the clock stands at the midnight between two trading days.
+  return daily ? dayDisplay.format(utcSeconds * 1000) : display.format(utcSeconds * 1000);
 }
 
 /** The last weekday before today in Berlin, as "YYYY-MM-DD". Holidays are not known here. */

@@ -8,7 +8,7 @@ interface Props {
   selectedId: number | null;
   onSelect: (id: number) => void;
   /** Resolves when the simulation exists; rejects with a message that is shown in the dialog. */
-  onCreate: (input: { name: string; startAt?: number; live?: boolean; preset?: "relaxed" | "realistic" | "hardcore"; rules?: Partial<Omit<Rules, "preset">> }) => Promise<void>;
+  onCreate: (input: { name: string; startAt?: number; live?: boolean; resolution?: "minute" | "day"; preset?: "relaxed" | "realistic" | "hardcore"; rules?: Partial<Omit<Rules, "preset">> }) => Promise<void>;
   onEnd: (id: number) => void;
   onDelete: (id: number) => void;
 }
@@ -20,6 +20,7 @@ export function SimulationPicker({ simulations, selectedId, onSelect, onCreate, 
   const [date, setDate] = useState(() => lastTradingDay(new Date()));
   const [time, setTime] = useState("10:00");
   const [live, setLive] = useState(false);
+  const [byDay, setByDay] = useState(false);
   const [preset, setPreset] = useState<"relaxed" | "realistic" | "hardcore">("relaxed");
   const [maxPositions, setMaxPositions] = useState("");
   const [busy, setBusy] = useState(false);
@@ -38,7 +39,7 @@ export function SimulationPicker({ simulations, selectedId, onSelect, onCreate, 
     let startAt: number | undefined;
     if (!live) {
       try {
-        startAt = berlinToUtcSeconds(date, time);
+        startAt = berlinToUtcSeconds(date, byDay ? "12:00" : time);
       } catch (err) {
         setError((err as Error).message);
         return;
@@ -46,7 +47,7 @@ export function SimulationPicker({ simulations, selectedId, onSelect, onCreate, 
     }
     setBusy(true);
     try {
-      await onCreate({ name: name.trim() || `Simulation ${simulations.length + 1}`, ...(live ? { live: true } : { startAt }), preset, ...(maxPositions.trim() !== "" ? { rules: { maxPositions: Number(maxPositions) } } : {}) });
+      await onCreate({ name: name.trim() || `Simulation ${simulations.length + 1}`, ...(live ? { live: true } : { startAt }), ...(byDay ? { resolution: "day" as const } : {}), preset, ...(maxPositions.trim() !== "" ? { rules: { maxPositions: Number(maxPositions) } } : {}) });
       setOpen(false);
       setName("");
     } catch (err) {
@@ -70,7 +71,7 @@ export function SimulationPicker({ simulations, selectedId, onSelect, onCreate, 
           {simulations.map((s) => (
             <li key={s.id} className="sim-item" aria-current={s.id === selectedId} onClick={() => onSelect(s.id)}>
               <div className="row"><strong>{s.name}{s.live && <span className="badge">Live</span>}</strong>{s.endedAt !== null && <span className="muted">beendet</span>}</div>
-              <div className="muted num">{formatSimTime(s.simulationTime)} · {PRESET_LABEL[s.rules.preset]}</div>
+              <div className="muted num">{formatSimTime(s.simulationTime, s.resolution === "day")} · {s.resolution === "day" ? "Tageskurse · " : ""}{PRESET_LABEL[s.rules.preset]}</div>
               <div className="row">
                 {s.endedAt === null ? (
                   <button className="btn small" onClick={(e) => { e.stopPropagation(); if (confirm(`„${s.name}“ beenden?`)) onEnd(s.id); }}>Beenden</button>
@@ -87,7 +88,13 @@ export function SimulationPicker({ simulations, selectedId, onSelect, onCreate, 
           <h1>Neue Simulation</h1>
           <label>Name<input value={name} onChange={(e) => setName(e.target.value)} placeholder={`Simulation ${simulations.length + 1}`} /></label>
           <label className="check">
-            <input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} />
+            <input type="checkbox" checked={byDay} disabled={live} data-testid="by-day"
+              onChange={(e) => { setByDay(e.target.checked); if (e.target.checked) setDate("2020-02-03"); }} />
+            <span>Tageskurse: ein Schritt ist ein Handelstag, ab November 2019 möglich</span>
+          </label>
+          {byDay && <p className="muted">Orders werden zum Eröffnungskurs des nächsten Handelstags ausgeführt; Limit-Orders nur, wenn der Tag das Limit klar überschreitet. Das ist eine grobe Näherung ohne Minutenverlauf.</p>}
+          <label className="check">
+            <input type="checkbox" checked={live} disabled={byDay} onChange={(e) => setLive(e.target.checked)} />
             <span>Live (folgt der Echtzeit mit Zeitversatz)</span>
           </label>
           {live ? (
@@ -107,7 +114,7 @@ export function SimulationPicker({ simulations, selectedId, onSelect, onCreate, 
             </label>
           </fieldset>
           <label>Datum<input type="date" required={!live} disabled={live} value={date} onChange={(e) => setDate(e.target.value)} /></label>
-          <label>Uhrzeit (Berliner Zeit)<input type="time" required={!live} disabled={live} value={time} onChange={(e) => setTime(e.target.value)} /></label>
+          <label>Uhrzeit (Berliner Zeit)<input type="time" required={!live && !byDay} disabled={live || byDay} value={time} onChange={(e) => setTime(e.target.value)} /></label>
           <p className="muted">Die Kurse dieses Handelstags werden geladen. Das kann ein paar Sekunden dauern.</p>
           {error && <p className="error" role="alert">{error}</p>}
           <div className="actions">

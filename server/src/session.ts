@@ -20,6 +20,7 @@ import { type CostPreview, type Ref, previewCost } from "./domain/fees.js";
 import type { Cent } from "./domain/money.js";
 import { applySplit, dividendCredit, showsSplit, splitOrder } from "./domain/events.js";
 import type { Events } from "./events.js";
+import type { DailyArchive } from "./data/dailyarchive.js";
 import type { Booking, Depot, DepotKind, OrderRecord, Simulation, Store } from "./store.js";
 
 const DAY = 86400;
@@ -29,6 +30,9 @@ const LOOKAHEAD_DAYS = 7;
 const DEFAULT_DELAY_S = 900;
 const DEFAULT_CATCH_UP_TEMPO = 300;
 const dayOf = (t: number) => Math.floor(t / DAY) * DAY;
+const isoDay = (t: number) => new Date(t * 1000).toISOString().slice(0, 10);
+/** Daily bars stepped through at once by one tick; more than this in a tick is held back so a pause answers quickly. */
+const MAX_DAY_STEPS = 40;
 
 export interface SessionDeps {
   store: Store;
@@ -44,6 +48,10 @@ export interface SessionDeps {
   catchUpTempo?: number;
   /** Dividends and splits. Without it nothing is booked. */
   events?: Events;
+  /** Daily prices, for simulations that play one day per step. Without it a daily simulation cannot start. */
+  daily?: DailyArchive;
+  /** Units of a currency per EUR on a UTC day ("USD"), for daily simulations. */
+  fxRate?: (ccy: string, day: string) => number | undefined;
 }
 
 export interface TickResult {
@@ -171,6 +179,8 @@ export class SessionService {
   private readonly delayS: number;
   private readonly catchUpTempo: number;
   private readonly events?: Events;
+  private readonly daily?: DailyArchive;
+  private readonly fxRate?: (ccy: string, day: string) => number | undefined;
   private readonly running = new Set<number>();
   /** The part of a simulated second a short tick left over, per simulation. Lost on a restart, which costs under a second. */
   private readonly carry = new Map<number, number>();
@@ -184,6 +194,8 @@ export class SessionService {
     this.delayS = deps.delayS ?? DEFAULT_DELAY_S;
     this.catchUpTempo = deps.catchUpTempo ?? DEFAULT_CATCH_UP_TEMPO;
     this.events = deps.events;
+    this.daily = deps.daily;
+    this.fxRate = deps.fxRate;
   }
 
   /** The tradable instruments right now. The list can grow while the service runs, so it is read on every use. */
@@ -193,10 +205,21 @@ export class SessionService {
 
   /** Loads the start day of every instrument. Throws, and starts nothing, if there are no prices. */
   async start(id: number): Promise<void> {
+    if (this.sim(id).resolution === "day") return this.startDay(id);
     const day = dayOf(this.sim(id).simulationTime);
     await this.loadDay(day);
     const traded = this.instruments.some((i) => this.archive.barsBetween(i.symbol, day, day + DAY).length > 0);
     if (!traded) throw new MarketDataError("no_data", "Für diesen Tag liegen keine Kurse vor.");
+  }
+
+  /** Loads the daily prices (and events) of every instrument. A rate limit or a network failure is thrown; nothing to trade is no_data. */
+  private async startDay(id: number): Promise<void> {
+    if (!this.events || !this.daily) throw new MarketDataError("no_data", "Tageskurse sind nicht eingerichtet.");
+    const from = this.sim(id).simulationTime;
+    for (const inst of this.instruments) await this.events.ensureStrict(inst.symbol);
+    if (!this.instruments.some((i) => this.daily!.nextAfter(i.symbol, from - 1))) {
+      throw new MarketDataError("no_data", "Für diesen Zeitraum liegen keine Tageskurse vor.");
+    }
   }
 
   /**
@@ -206,8 +229,9 @@ export class SessionService {
    */
   async prepareInstrument(inst: Instrument): Promise<void> {
     const days = new Set<number>();
+    if (this.events && this.store.listSimulations().some((s) => s.endedAt === null && s.resolution === "day")) await this.events.ensure(inst.symbol);
     for (const sim of this.store.listSimulations()) {
-      if (sim.endedAt !== null) continue;
+      if (sim.endedAt !== null || sim.resolution === "day") continue;
       for (let k = 0; k <= 3; k++) days.add(dayOf(sim.simulationTime) - k * DAY);
     }
     for (const day of [...days].sort((a, b) => b - a)) await this.archive.ensureDay(inst.symbol, day);
@@ -245,6 +269,7 @@ export class SessionService {
    * the first new minute when the clock stands exactly at the end of the last bar.
    */
   async loadMore(id: number): Promise<boolean> {
+    if (this.sim(id).resolution === "day") return false; // the daily prices were loaded at the start
     const s = this.sim(id).simulationTime;
     for (let d = 0; d <= LOOKAHEAD_DAYS; d++) {
       const day = dayOf(s) + d * DAY;
@@ -288,6 +313,8 @@ export class SessionService {
     if (sim.endedAt !== null) {
       return { simulationTime: sim.simulationTime, newBars: {}, endOfData: true, waitingForData: false, liveEdge: false };
     }
+
+    if (sim.resolution === "day") return this.tickDay(id, realMs);
 
     const sOld = sim.simulationTime;
     const symbols = this.instruments.map((i) => i.symbol);
@@ -377,11 +404,12 @@ export class SessionService {
     if (!sim.rules.pauseAllowed && !this.isRunning(id)) return { ok: false, reason: CLOCK_STOPPED_REFUSED };
 
     const s = sim.simulationTime;
-    const ref = this.refAt(inst, s);
+    const ref = this.refAt(inst, s, sim.resolution === "day");
     // No price now and no bar to come in the archive (an instrument added later, or one the source
     // does not know): the order would wait for good, and an open order blocks removing the
     // instrument. An order before the first bar of the day is different: that bar is known.
-    if (!ref && !this.archive.nextBarAfter(o.symbol, s - 60)) {
+    const day = sim.resolution === "day";
+    if (!ref && !(day ? this.daily?.nextAfter(o.symbol, s - 1) : this.archive.nextBarAfter(o.symbol, s - 60))) {
       return { ok: false, reason: `Für ${o.symbol} gibt es noch keinen Kurs.` };
     }
     return this.store.transaction((): PlaceResult => {
@@ -395,7 +423,7 @@ export class SessionService {
 
       const orderId = this.store.insertOrder(depotId, o, s);
       // A market order fills now if the market is open. Otherwise it waits for the first bar.
-      if (o.kind === "market" && ref && this.venueOpen(inst.venue, s)) {
+      if (!day && o.kind === "market" && ref && this.venueOpen(inst.venue, s)) {
         const order = { ...o, id: orderId, status: "open" as const };
         const exec = previewCost(o.side, o.qty, ref, "market", undefined, sim.fees);
         fillOrder(state, order, exec);
@@ -413,7 +441,7 @@ export class SessionService {
     const sim = this.sim(id);
     const inst = this.registry.get(o.symbol);
     if (!inst) return { ok: false, reason: `Unbekanntes Wertpapier ${o.symbol}.` };
-    const ref = this.refAt(inst, sim.simulationTime);
+    const ref = this.refAt(inst, sim.simulationTime, sim.resolution === "day");
     if (!ref) return { ok: false, reason: `Für ${o.symbol} gibt es noch keinen Kurs.` };
 
     const depot = this.store.listDepots(id).find((d) => d.id === depotId) ?? this.firstNormal(id);
@@ -430,7 +458,7 @@ export class SessionService {
 
   /** What the order would do to the weight of its position, and a flat fee that is large next to it. */
   private orderRemarks(sim: Simulation, state: DepotState, o: NewOrder, ref: Ref, cost: CostPreview): string[] {
-    const refs = this.refsAt(sim.simulationTime);
+    const refs = this.refsAt(sim.simulationTime, sim.resolution === "day");
     const held = state.positions.get(o.symbol);
     const afterValue = (held ? positionValue(held, refs.get(o.symbol)) : 0) + (o.side === "buy" ? cost.gross : 0);
     return orderNotes({
@@ -457,7 +485,7 @@ export class SessionService {
     const depot = this.store.listDepots(id).find((d) => d.id === depotId);
     if (!depot) return undefined;
     const state = this.store.loadDepot(depotId);
-    const refs = this.refsAt(sim.simulationTime);
+    const refs = this.refsAt(sim.simulationTime, sim.resolution === "day");
     const known = new Map(this.instruments.map((i) => [i.symbol, i]));
     const curve = this.store.valueCurve(depotId, EVALUATION_POINTS);
     const { config, hidden } = this.hintConfig(id);
@@ -540,7 +568,7 @@ export class SessionService {
       return { ok: false, reason: "Ein Geisterdepot braucht mindestens eine Position." };
     }
     if (existing.length >= MAX_DEPOTS) return { ok: false, reason: `Mehr als ${MAX_DEPOTS} Depots gibt es nicht.` };
-    const value = depotValue(state, this.refsAt(sim.simulationTime));
+    const value = depotValue(state, this.refsAt(sim.simulationTime, sim.resolution === "day"));
     return {
       ok: true,
       depot: this.store.createGhostDepot(id, `Geist von ${source.name}`, state.cash, state.positions, sim.simulationTime, value),
@@ -551,7 +579,9 @@ export class SessionService {
   orderbook(id: number, symbol: string): Orderbook | undefined {
     const inst = this.registry.get(symbol);
     if (!inst) return undefined;
-    const s = this.sim(id).simulationTime;
+    const sim = this.sim(id);
+    const s = sim.simulationTime;
+    if (sim.resolution === "day") return buildOrderbook({ symbol: inst.symbol, currency: inst.currency, bar: undefined, venueOpen: false });
     return buildOrderbook({
       symbol: inst.symbol, currency: inst.currency, bar: this.archive.lastCompleteBar(inst.symbol, s, SOUND), venueOpen: this.venueOpen(inst.venue, s),
     });
@@ -590,7 +620,7 @@ export class SessionService {
         gross: o.gross ?? 0, commission: o.commission ?? 0, foreignFee: o.foreignFee ?? 0,
       });
     }
-    const journal = buildJournal({ orders: filled, s: sim.simulationTime, bars: this.archive, notes: this.store.notes(id) });
+    const journal = buildJournal({ orders: filled, s: sim.simulationTime, bars: sim.resolution === "day" ? this.dailyBars() : this.archive, notes: this.store.notes(id) });
     return { ...journal, bookings: this.store.bookings(depotId), depotId, simulationTime: sim.simulationTime };
   }
 
@@ -645,7 +675,7 @@ export class SessionService {
         this.store.loadDepot(depotId).cash,
         [...merged].map(([symbol, percent]) => {
           const inst = this.registry.get(symbol);
-          return { symbol, percent, ref: inst && this.refAt(inst, sim.simulationTime) };
+          return { symbol, percent, ref: inst && this.refAt(inst, sim.simulationTime, sim.resolution === "day") };
         }),
         sim.fees,
       );
@@ -672,7 +702,7 @@ export class SessionService {
     if (!inst) return { depots, benchmark: null };
     const points: Point[] = [];
     for (const p of (depots.find((d) => d.kind === "normal") ?? depots[0])?.points ?? []) {
-      const bar = this.archive.lastCompleteBar(inst.symbol, p.t, SOUND);
+      const bar = sim.resolution === "day" ? this.daily?.lastComplete(inst.symbol, p.t) : this.archive.lastCompleteBar(inst.symbol, p.t, SOUND);
       if (bar) points.push({ t: p.t, value: bar.c });
     }
     return { depots, benchmark: { symbol: inst.symbol, name: inst.name, currency: inst.currency, points } };
@@ -681,14 +711,16 @@ export class SessionService {
   /** Figures per depot, how the depots move together, and the benchmark measured the same way. */
   evaluation(id: number): Evaluation {
     const sim = this.sim(id);
-    const refs = this.refsAt(sim.simulationTime);
+    const refs = this.refsAt(sim.simulationTime, sim.resolution === "day");
     const curves = this.store.listDepots(id).map((d) => ({ depot: d, points: this.store.valueCurve(d.id, EVALUATION_POINTS) }));
     const inst = sim.benchmark ? this.registry.get(sim.benchmark) : undefined;
     const benchSeries: Point[] | null = inst
       ? thin(
-        this.archive
-          .barsBetween(inst.symbol, sim.startAt - 59, sim.simulationTime - 59)
-          .map((b) => ({ t: b.t + 60, value: b.c })),
+        sim.resolution === "day"
+          ? (this.daily?.between(inst.symbol, sim.startAt, sim.simulationTime) ?? []).map((b) => ({ t: b.t + DAY, value: b.c }))
+          : this.archive
+            .barsBetween(inst.symbol, sim.startAt - 59, sim.simulationTime - 59)
+            .map((b) => ({ t: b.t + 60, value: b.c })),
         EVALUATION_POINTS,
       )
       : null;
@@ -771,12 +803,13 @@ export class SessionService {
     const simulation = this.sim(id);
     const s = simulation.simulationTime;
 
+    const day = simulation.resolution === "day";
     const prices: Snapshot["prices"] = {};
     for (const inst of this.instruments) {
-      const bar = this.archive.lastCompleteBar(inst.symbol, s, SOUND);
+      const bar = day ? this.daily?.lastComplete(inst.symbol, s) : this.archive.lastCompleteBar(inst.symbol, s, SOUND);
       if (bar) prices[inst.symbol] = { price: bar.c, barT: bar.t };
     }
-    const refs = this.refsAt(s);
+    const refs = this.refsAt(s, simulation.resolution === "day");
     const depots = this.store.listDepots(id).map((depot): DepotSnapshot => {
       const state = this.store.loadDepot(depot.id);
       return {
@@ -806,9 +839,10 @@ export class SessionService {
       running: this.isRunning(id),
       depots,
       prices,
-      fx: this.archive.lastCompleteBar(this.fx, s, SOUND)?.c ?? null,
-      venues: { XETRA: this.venueOpen("XETRA", s), US: this.venueOpen("US", s) },
-      venueClosed: this.holidays(s),
+      fx: day ? (this.fxRate?.("USD", isoDay(s - DAY)) ?? null) : (this.archive.lastCompleteBar(this.fx, s, SOUND)?.c ?? null),
+      // A daily simulation has no opening hours: every step is a whole day.
+      venues: day ? { XETRA: true, US: true } : { XETRA: this.venueOpen("XETRA", s), US: this.venueOpen("US", s) },
+      venueClosed: day ? {} : this.holidays(s),
       liveLimit: limitL,
       delayS: this.delayS,
       phase,
@@ -830,17 +864,18 @@ export class SessionService {
   }
 
   /** The reference price of every instrument that has one at `s`. */
-  private refsAt(s: number): Map<string, Ref> {
+  private refsAt(s: number, day = false): Map<string, Ref> {
     const refs = new Map<string, Ref>();
     for (const inst of this.instruments) {
-      const ref = this.refAt(inst, s);
+      const ref = this.refAt(inst, s, day);
       if (ref) refs.set(inst.symbol, ref);
     }
     return refs;
   }
 
   /** The last known price of an instrument, with the exchange rate for USD. */
-  private refAt(inst: Instrument, s: number): Ref | undefined {
+  private refAt(inst: Instrument, s: number, day = false): Ref | undefined {
+    if (day) return this.dayRef(inst, s);
     const bar = this.archive.lastCompleteBar(inst.symbol, s, SOUND);
     if (!bar) return undefined;
     if (inst.currency === "EUR") return { price: bar.c, currency: "EUR" };
@@ -861,6 +896,15 @@ export class SessionService {
       if (!positions.has(h.symbol)) continue;
       const inst = this.registry.get(h.symbol);
       if (!inst) continue;
+      if (sim.resolution === "day") {
+        const points: Point[] = [];
+        for (const b of this.daily?.between(h.symbol, sim.startAt, sim.simulationTime) ?? []) {
+          const rate = inst.currency === "USD" ? this.fxRate?.("USD", isoDay(b.t)) : 1;
+          if (rate !== undefined) points.push({ t: b.t + DAY, value: b.c / rate });
+        }
+        out.push({ symbol: h.symbol, value: h.value, points });
+        continue;
+      }
       const blocked = new Set(this.archive.flagsBetween(h.symbol, from, to, BLOCKING_KINDS).map((f) => f.t));
       const bars = this.archive.barsBetween(h.symbol, from, to).filter((b) => !blocked.has(b.t));
       let points: Point[];
@@ -878,6 +922,125 @@ export class SessionService {
       out.push({ symbol: h.symbol, value: h.value, points });
     }
     return out;
+  }
+
+  /** The daily bars as the journal wants to read them: a bar is finished a day after it begins. */
+  private dailyBars() {
+    const d = this.daily;
+    return {
+      lastCompleteBar: (symbol: string, s: number) => d?.lastComplete(symbol, s),
+      nextBarAfter: (symbol: string, t: number) => d?.nextAfter(symbol, t),
+    };
+  }
+
+  /** The close of the last finished day, with the ECB rate of that day for USD. */
+  private dayRef(inst: Instrument, s: number): Ref | undefined {
+    const bar = this.daily?.lastComplete(inst.symbol, s);
+    if (!bar) return undefined;
+    if (inst.currency === "EUR") return { price: bar.c, currency: "EUR" };
+    const eurUsd = this.fxRate?.("USD", isoDay(bar.t));
+    return eurUsd === undefined ? undefined : { price: bar.c, currency: "USD", eurUsd };
+  }
+
+  /** Moves the clock by the days that `realMs` is worth at the tempo (days per second). */
+  private tickDay(id: number, realMs: number): TickResult {
+    const sim = this.sim(id);
+    const wanted = (this.carry.get(id) ?? 0) + (realMs / 1000) * sim.tempo;
+    const whole = Math.min(Math.floor(wanted), MAX_DAY_STEPS);
+    this.carry.set(id, wanted - Math.floor(wanted));
+    return this.stepDays(id, whole);
+  }
+
+  /**
+   * Plays `n` trading days. A day is the next one on which any instrument has a daily bar. Orders see
+   * that bar and nothing later: a market order fills at its open, a limit order only if the day goes past
+   * the limit (strictly: a low equal to the limit may not have filled), at the limit price. Dividends of
+   * the day are booked first, for what was held before it. The time ends on the midnight after the day.
+   */
+  stepDays(id: number, n: number): TickResult {
+    let sim = this.sim(id);
+    const newBars: Record<string, Bar[]> = {};
+    let endOfData = false;
+    for (let k = 0; k < n; k++) {
+      const s = sim.simulationTime;
+      const next = this.instruments.flatMap((i) => {
+        const b = this.daily?.nextAfter(i.symbol, s - 1);
+        return b ? [{ symbol: i.symbol, bar: b }] : [];
+      });
+      if (next.length === 0) { endOfData = true; break; }
+      const dayT = Math.min(...next.map((x) => x.bar.t));
+      const today = next.filter((x) => x.bar.t === dayT).sort((a, b) => a.symbol.localeCompare(b.symbol));
+      const end = dayT + DAY;
+      const eventsOf = this.eventsFor(today);
+      const fresh = sim;
+      this.store.transaction(() => {
+        for (const depot of this.store.listDepots(id)) {
+          const state = this.store.loadDepot(depot.id);
+          let changed = false;
+          for (const { symbol, bar } of today) {
+            changed = this.bookDayDividends(depot, state, symbol, bar, eventsOf) || changed;
+            changed = this.evaluateDay(state, fresh, symbol, bar) || changed;
+          }
+          if (changed) this.store.saveBalance(depot.id, state.cash, state.positions);
+        }
+        this.store.setSimulationTime(id, end);
+        for (const depot of this.store.listDepots(id)) {
+          this.store.recordValue(depot.id, end, depotValue(this.store.loadDepot(depot.id), this.refsAt(end, true)));
+        }
+      });
+      for (const { symbol, bar } of today) (newBars[symbol] ??= []).push(bar);
+      sim = this.sim(id);
+    }
+    return { simulationTime: sim.simulationTime, newBars, endOfData, waitingForData: false, liveEdge: false };
+  }
+
+  /** The dividends of one day, booked once per depot for the shares held before the day. */
+  private bookDayDividends(
+    depot: Depot, state: DepotState & { orders: OrderRecord[] }, symbol: string, bar: Bar, eventsOf: ReturnType<SessionService["eventsFor"]>,
+  ): boolean {
+    const ev = eventsOf.get(symbol);
+    if (!ev || !state.positions.has(symbol)) return false;
+    const day = isoDay(bar.t);
+    const dividends = ev.dividends.filter((d) => d.exDay === day);
+    if (dividends.length === 0) return false;
+    const inst = this.registry.get(symbol)!;
+    const rate = inst.currency === "USD" ? this.fxRate?.("USD", day) : 1;
+    if (rate === undefined) return false;
+    return this.creditDividends(depot, state, symbol, bar.t, dividends, rate);
+  }
+
+  /** Fills what the bar of a day triggers. True if the depot changed. */
+  private evaluateDay(state: DepotState & { orders: OrderRecord[] }, sim: Simulation, symbol: string, bar: Bar): boolean {
+    const inst = this.registry.get(symbol)!;
+    let changed = false;
+    for (const o of state.orders) {
+      if (o.status !== "open" || o.symbol !== symbol) continue;
+      if (o.kind === "limit" && o.limitPrice !== undefined) {
+        const reached = o.side === "buy" ? bar.l < o.limitPrice : bar.h > o.limitPrice;
+        if (!reached) continue;
+      }
+      let ref: Ref;
+      if (inst.currency === "EUR") {
+        ref = { price: bar.o, currency: "EUR" };
+      } else {
+        const eurUsd = this.fxRate?.("USD", isoDay(bar.t));
+        if (eurUsd === undefined) continue;
+        ref = { price: bar.o, currency: "USD", eurUsd };
+      }
+      const exec = previewCost(o.side, o.qty, ref, o.kind, o.limitPrice, sim.fees);
+      const affordable = o.side === "buy"
+        ? exec.total <= state.cash
+        : (state.positions.get(symbol)?.qty ?? 0) >= o.qty && state.cash + exec.total >= 0;
+      if (!affordable) {
+        o.status = "rejected";
+        this.store.setOrderStatus(o.id, "rejected");
+        continue;
+      }
+      fillOrder(state, o, exec);
+      this.store.markFilled(o.id, { filledSim: bar.t, fillPrice: exec.execPrice, gross: exec.gross, commission: exec.commission, foreignFee: exec.foreign });
+      changed = true;
+    }
+    return changed;
   }
 
   /** The dividends and splits of the symbols and days that the bars of a tick touch. */
@@ -927,17 +1090,7 @@ export class SessionService {
       rate = eurUsd;
     }
     const eur = (c: Cent) => `${(c / 100).toFixed(2).replace(".", ",")} €`;
-    let changed = false;
-    for (const d of dividends) {
-      const qty = state.positions.get(symbol)?.qty ?? 0;
-      const amount = dividendCredit(qty, d.amount, rate);
-      if (amount <= 0) continue;
-      const booking: Booking = { t: bar.t, kind: "dividend", symbol, ref: d.exDay, amount, text: `Ausschüttung ${symbol} ${eur(amount)}` };
-      if (this.store.addBooking(depot.id, booking)) {
-        state.cash += amount;
-        changed = true;
-      }
-    }
+    let changed = this.creditDividends(depot, state, symbol, bar.t, dividends, rate);
     for (const sp of splits) {
       const before = this.archive.lastCompleteBar(symbol, bar.t, SOUND);
       if (!before || !showsSplit(before.c, bar.o, sp.numerator, sp.denominator)) continue;
@@ -962,6 +1115,24 @@ export class SessionService {
         }
       }
       changed = true;
+    }
+    return changed;
+  }
+
+  /** Credits distributions once per depot (the booking table refuses a second write for the same ex-day). */
+  private creditDividends(
+    depot: Depot, state: DepotState, symbol: string, t: number, dividends: { exDay: string; amount: number }[], rate: number,
+  ): boolean {
+    let changed = false;
+    for (const d of dividends) {
+      const qty = state.positions.get(symbol)?.qty ?? 0;
+      const amount = dividendCredit(qty, d.amount, rate);
+      if (amount <= 0) continue;
+      const text = `Ausschüttung ${symbol} ${(amount / 100).toFixed(2).replace(".", ",")} €`;
+      if (this.store.addBooking(depot.id, { t, kind: "dividend", symbol, ref: d.exDay, amount, text })) {
+        state.cash += amount;
+        changed = true;
+      }
     }
     return changed;
   }

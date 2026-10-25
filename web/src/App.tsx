@@ -79,7 +79,11 @@ export function App() {
   const [symbol, setSymbol] = useState("SAP.DE");
   const [bars, setBars] = useState<Bar[]>([]);
   const [chartPrefs, setChartPrefs] = useState<ChartPrefs>(storedChartPrefs);
-  const rawLimit = RAW_LIMIT[chartPrefs.timeframe];
+  const dayMode = simulations.find((s) => s.id === selectedId)?.resolution === "day";
+  // A daily simulation has one bar per day: only the day candle makes sense.
+  const shownPrefs: ChartPrefs = dayMode ? { ...chartPrefs, timeframe: "1d" } : chartPrefs;
+  const [skipped, setSkipped] = useState(0);
+  const rawLimit = RAW_LIMIT[shownPrefs.timeframe];
   const barsKey = useRef("");
   const rawLimitRef = useRef(rawLimit);
   rawLimitRef.current = rawLimit;
@@ -235,7 +239,7 @@ export function App() {
     if (selectedId === null) return;
     let current = true;
     getBars(selectedId, symbol, rawLimit)
-      .then((b) => current && setBars(b))
+      .then((r) => { if (current) { setBars(r.bars); setSkipped(r.skipped); } })
       .catch((e) => current && setNotice(e.message));
     return () => { current = false; };
   }, [selectedId, symbol, rawLimit]);
@@ -487,6 +491,7 @@ export function App() {
                   lagS={snapshot ? Math.max(snapshot.liveLimit - live.simulationTime, 0) : 0}
                   delayS={snapshot?.delayS ?? 900}
                   rules={live.rules}
+                  daily={live.resolution === "day" ? { skipped, onStep: () => socket.current?.send({ type: "step" }) } : undefined}
                   onTempo={(t) => socket.current?.send({ type: "tempo", tempo: t })}
                   onRun={() => { setNotice(null); socket.current?.send({ type: "run" }); }}
                   onPause={() => socket.current?.send({ type: "pause" })}
@@ -519,7 +524,7 @@ export function App() {
               ) : view === "trade" ? (
                 <>
               <section className="card">
-<Chart bars={bars} prefs={chartPrefs} onPrefs={changeChartPrefs} fills={fills} theme={theme}
+<Chart bars={bars} prefs={shownPrefs} timeframes={dayMode ? ["1d"] : undefined} onPrefs={changeChartPrefs} fills={fills} theme={theme}
                   simulationId={live.id} symbol={symbol}
                   lead={(
                     <div className="lead">
@@ -561,7 +566,7 @@ export function App() {
                       onBenchmark={chooseBenchmark} />
                     <Evaluation simulationId={live.id} activeDepotId={depot.id} running={snapshot.running}
                       benchmark={live.benchmark} rules={live.rules} />
-                    <Journal simulationId={live.id} depot={depot} running={snapshot.running} />
+                    <Journal simulationId={live.id} depot={depot} running={snapshot.running} daily={live.resolution === "day"} />
                     <Compare simulations={simulations} initial={[live.id]} theme={theme} />
                   </>
                 )

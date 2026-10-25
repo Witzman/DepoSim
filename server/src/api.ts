@@ -6,6 +6,8 @@ import type { Db } from "./db.js";
 import { DEFAULT_DAYS, MAX_DAYS, type Backfill } from "./backfill.js";
 import { FX_SYMBOL, type Instrument, SOURCELESS_SUFFIXES, VENUES } from "./config.js";
 import type { Archive } from "./data/archive.js";
+import type { DailyArchive } from "./data/dailyarchive.js";
+import { sessionFor } from "./domain/venues.js";
 import { BLOCKING_KINDS } from "./domain/quality.js";
 import { MarketDataError } from "./data/marketdata.js";
 import type { InstrumentSearch } from "./data/search.js";
@@ -29,6 +31,8 @@ const createBody = z
     startAt: z.number().int().positive().optional(),
     live: z.boolean().optional(),
     startCash: z.number().int().positive().optional(),
+    /** `day`: one step is a trading day, from daily prices (any start since 2019-11); `minute` is the default. */
+    resolution: z.enum(["minute", "day"]).optional(),
     preset: z.enum(["relaxed", "realistic", "hardcore"]).optional(),
     /** Single switches on top of the preset. */
     rules: z.object({
@@ -76,6 +80,22 @@ const journalQuery = z.object({ depotId: z.coerce.number().int().optional() });
 const noteBody = z.object({ text: z.string().max(500, "Die Notiz darf höchstens 500 Zeichen haben.") });
 const TRADE_KEY = /^\d{1,12}:\d{1,12}$/;
 
+/** The first day with daily prices (Yahoo, measured). */
+const DAILY_FROM_T = Date.parse("2019-11-01T00:00:00Z") / 1000;
+
+/** Trading days of the venue's calendar between the first and the last bar that have no bar. */
+function skippedDays(venueId: string, bars: { t: number }[]): number {
+  const venue = VENUES.find((v) => v.id === venueId);
+  if (!venue || bars.length < 2) return 0;
+  const have = new Set(bars.map((b) => new Date(b.t * 1000).toISOString().slice(0, 10)));
+  let missing = 0;
+  for (let t = bars[0].t; t <= bars[bars.length - 1].t; t += 86400) {
+    const day = new Date(t * 1000).toISOString().slice(0, 10);
+    if (!have.has(day) && sessionFor(venue, day).trading) missing++;
+  }
+  return missing;
+}
+
 const barsQuery = z.object({
   symbol: z.string().min(1),
   limit: z.coerce.number().int().min(1).max(20000).default(500),
@@ -87,6 +107,7 @@ const daysQuery = z.object({ days: z.coerce.number().int().min(1).max(MAX_DAYS).
 const addBody = z.object({ symbol: z.string() });
 
 interface Deps {
+  daily: DailyArchive;
   store: Store;
   session: SessionService;
   archive: Archive;
@@ -119,7 +140,7 @@ const invalid = (reply: FastifyReply, err: z.ZodError) => {
   return reply.code(400).send({ error: `Ungültige Eingabe (${where}): ${issue.message}` });
 };
 
-export function registerApi(app: FastifyInstance, { store, session, archive, instruments, search, hub, backfill, longterm, fx, db, backup, jobs, health, now }: Deps) {
+export function registerApi(app: FastifyInstance, { daily, store, session, archive, instruments, search, hub, backfill, longterm, fx, db, backup, jobs, health, now }: Deps) {
   const simulationOf = (params: unknown) => {
     const id = Number((params as { id?: string }).id);
     return Number.isInteger(id) ? store.getSimulation(id) : undefined;
@@ -365,7 +386,16 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     const body = createBody.safeParse(req.body);
     if (!body.success) return invalid(reply, body.error);
     let startAt = body.data.startAt;
-    if (startAt !== undefined && startAt > session.currentLiveLimit()) {
+    const daily = body.data.resolution === "day";
+    if (daily && body.data.live) return reply.code(400).send({ error: "Eine Tageskurs-Simulation kennt keinen Livebetrieb." });
+    if (daily && startAt !== undefined) {
+      startAt = Math.floor(startAt / 86400) * 86400; // a day starts at midnight UTC
+      if (startAt < DAILY_FROM_T) return reply.code(400).send({ error: "Tageskurse gibt es ab dem 1. November 2019." });
+      if (startAt >= Math.floor(session.currentLiveLimit() / 86400) * 86400) {
+        return reply.code(400).send({ error: "Der Starttag muss vor dem letzten abgeschlossenen Handelstag liegen." });
+      }
+    }
+    if (!daily && startAt !== undefined && startAt > session.currentLiveLimit()) {
       return reply.code(400).send({ error: "Der Startzeitpunkt liegt nach der Live-Grenze (jetzt minus Zeitversatz)." });
     }
     if (startAt === undefined) {
@@ -383,6 +413,7 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
       fees: applyRules(DEFAULT_FEES, rules),
       live: body.data.live === true,
       rules,
+      resolution: daily ? "day" : "minute",
     });
     try {
       await session.start(sim.id);
@@ -447,6 +478,13 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
     if (!query.success) return invalid(reply, query.error);
     if (!instruments.get(query.data.symbol)) {
       return reply.code(400).send({ error: `Unbekanntes Wertpapier ${query.data.symbol}.` });
+    }
+    if (sim.resolution === "day") {
+      // Only days that are over at the simulation time: nothing of the future. Days the venue was open but
+      // the source has no price for are counted, not invented.
+      const all = daily.between(query.data.symbol, 0, sim.simulationTime);
+      const bars = all.slice(-query.data.limit);
+      return { symbol: query.data.symbol, bars, skipped: skippedDays(instruments.get(query.data.symbol)!.venue, bars) };
     }
     // Bars marked as outliers (#50) go out with `flagged`, so the chart can draw them hollow.
     const bars = archive.barsBefore(query.data.symbol, sim.simulationTime, query.data.limit);

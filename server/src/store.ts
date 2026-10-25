@@ -21,6 +21,8 @@ export interface Simulation {
   /** The symbol its curves are measured against, if the person chose one. */
   benchmark: string | null;
   rules: Rules;
+  /** `minute`: one step is a bar of one minute. `day`: one step is a trading day, from daily prices. */
+  resolution: "minute" | "day";
 }
 
 /** A ghost is a frozen copy of a depot that never trades; it is only valued at market. */
@@ -42,6 +44,7 @@ export interface NewSimulation {
   live?: boolean;
   /** Absent: relaxed. */
   rules?: Rules;
+  resolution?: "minute" | "day";
 }
 
 /** An order as stored: the order itself plus when it was placed and how it filled. */
@@ -177,6 +180,7 @@ interface SimulationRow {
   live: number;
   benchmark: string | null;
   rules_json: string;
+  resolution: "minute" | "day";
 }
 
 const toSimulation = (r: SimulationRow): Simulation => ({
@@ -192,14 +196,15 @@ const toSimulation = (r: SimulationRow): Simulation => ({
   live: r.live === 1,
   benchmark: r.benchmark,
   rules: { ...RELAXED, ...(JSON.parse(r.rules_json) as Partial<Rules>) },
+  resolution: r.resolution === "day" ? "day" : "minute",
 });
 
 export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
   const now = opts.now ?? (() => Math.floor(Date.now() / 1000));
 
   const insertSimulation = db.prepare(
-    "insert into simulations (name, start_at, simulation_time, tempo, start_cash, fees_json, created_at, live, rules_json) " +
-      "values (?, ?, ?, 1, ?, ?, ?, ?, ?)",
+    "insert into simulations (name, start_at, simulation_time, tempo, start_cash, fees_json, created_at, live, rules_json, resolution) " +
+      "values (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
   );
   const insertDepot = db.prepare("insert into depots (simulation_id, name, cash) values (?, 'Depot 1', ?)");
   const recordPoint = db.prepare("insert or replace into depot_values (depot_id, t, value) values (?, ?, ?)");
@@ -208,7 +213,7 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
     const id = Number(
       insertSimulation.run(
         input.name, input.startAt, input.startAt, input.startCash, JSON.stringify(input.fees), now(), input.live ? 1 : 0,
-        JSON.stringify(input.rules ?? RELAXED),
+        JSON.stringify(input.rules ?? RELAXED), input.resolution ?? "minute",
       ).lastInsertRowid,
     );
     const depotId = Number(insertDepot.run(id, input.startCash).lastInsertRowid);
