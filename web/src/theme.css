@@ -490,3 +490,8 @@ dialog.glossary input { width: 100%; box-sizing: border-box; }
 .glossary-list { overflow-y: auto; display: grid; gap: 14px; }
 .glossary-list h3 { margin: 0; font-size: 0.95rem; }
 .glossary-list p { margin: 4px 0 0; font-size: 0.88rem; }
+
+/* Rules of a simulation (#27). */
+.badge.rules { border-color: var(--accent); color: var(--accent); margin-left: 8px; text-transform: none; letter-spacing: 0; }
+fieldset.rules { border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 6px; }
+fieldset.rules legend { color: var(--muted); font-size: 0.85rem; padding: 0 4px; }

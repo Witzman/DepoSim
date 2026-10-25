@@ -85,6 +85,20 @@ export interface Simulation {
   live: boolean;
   /** The symbol the curves are measured against, if one was chosen. */
   benchmark: string | null;
+  rules: Rules;
+}
+
+export type RulePreset = "relaxed" | "realistic" | "hardcore" | "custom";
+
+/** Chosen when the simulation is made and never changed. */
+export interface Rules {
+  preset: RulePreset;
+  spreadFactor: number;
+  feeFactor: number;
+  pauseAllowed: boolean;
+  tempoLocked: boolean;
+  allowFork: boolean;
+  maxPositions: number | null;
 }
 
 export interface OrderRecord {

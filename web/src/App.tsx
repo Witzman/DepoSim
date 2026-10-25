@@ -237,7 +237,7 @@ export function App() {
     } catch { /* the choice then lasts only until the page is closed */ }
   }
 
-  async function create(input: { name: string; startAt?: number; live?: boolean }) {
+  async function create(input: Parameters<typeof createSimulation>[0]) {
     const sim = await createSimulation(input);
     setSimulations((prev) => [...prev, sim]);
     setSelectedId(sim.id);
@@ -449,6 +449,7 @@ export function App() {
                   phase={snapshot?.phase ?? "replay"}
                   lagS={snapshot ? Math.max(snapshot.liveLimit - live.simulationTime, 0) : 0}
                   delayS={snapshot?.delayS ?? 900}
+                  rules={live.rules}
                   onTempo={(t) => socket.current?.send({ type: "tempo", tempo: t })}
                   onRun={() => { setNotice(null); socket.current?.send({ type: "run" }); }}
                   onPause={() => socket.current?.send({ type: "pause" })}
@@ -517,7 +518,7 @@ export function App() {
                       benchmarkPrice={live.benchmark ? snapshot.prices[live.benchmark]?.price : undefined}
                       onBenchmark={chooseBenchmark} />
                     <Evaluation simulationId={live.id} activeDepotId={depot.id} running={snapshot.running}
-                      benchmark={live.benchmark} />
+                      benchmark={live.benchmark} rules={live.rules} />
                     <Journal simulationId={live.id} depot={depot} running={snapshot.running} />
                     <Compare simulations={simulations} initial={[live.id]} theme={theme} />
                   </>

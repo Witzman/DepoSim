@@ -10,6 +10,7 @@ import { type AllocationLine, planAllocation } from "./domain/allocation.js";
 import { type Breakdown, type FeeLedger, breakdown, feeLedger } from "./domain/breakdown.js";
 import { type Correlation, type Metrics, type Point, type Relative, computeMetrics, correlationMatrix, relativeTo, thin } from "./domain/metrics.js";
 import { BLOCKING_KINDS } from "./domain/quality.js";
+import { CLOCK_STOPPED_REFUSED } from "./domain/rules.js";
 import { closedDayReason } from "./domain/venues.js";
 import { type Orderbook, buildOrderbook } from "./domain/orderbook.js";
 import { type Journal, type JournalOrder, buildJournal } from "./domain/journal.js";
@@ -362,6 +363,7 @@ export class SessionService {
     if (target.kind === "ghost") return { ok: false, reason: GHOST_NO_TRADE };
     const inst = this.registry.get(o.symbol);
     if (!inst) return { ok: false, reason: `Unbekanntes Wertpapier ${o.symbol}.` };
+    if (!sim.rules.pauseAllowed && !this.isRunning(id)) return { ok: false, reason: CLOCK_STOPPED_REFUSED };
 
     const s = sim.simulationTime;
     const ref = this.refAt(inst, s);
@@ -375,6 +377,10 @@ export class SessionService {
       const state = this.store.loadDepot(depotId);
       const checked = validateOrder(state, o, ref, sim.fees);
       if (!checked.ok) return checked;
+      const max = sim.rules.maxPositions;
+      if (max !== null && o.side === "buy" && !state.positions.has(o.symbol) && state.positions.size >= max) {
+        return { ok: false, reason: `In dieser Simulation sind höchstens ${max} verschiedene Positionen erlaubt.` };
+      }
 
       const orderId = this.store.insertOrder(depotId, o, s);
       // A market order fills now if the market is open. Otherwise it waits for the first bar.

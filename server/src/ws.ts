@@ -1,6 +1,7 @@
 import type { WebSocket } from "ws";
 import { z } from "zod";
 import { describeError } from "./errors.js";
+import { PAUSE_REFUSED, TEMPO_REFUSED } from "./domain/rules.js";
 import type { SessionService, TickResult } from "./session.js";
 import type { Store } from "./store.js";
 
@@ -137,6 +138,11 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
             send(ws, { type: "notice", text: "Im Livebetrieb bestimmt die Uhr das Tempo: erst Aufholen, dann echte Zeit." });
             return;
           }
+          const sim = store.getSimulation(id);
+          if (sim?.rules.tempoLocked) {
+            send(ws, { type: "notice", text: TEMPO_REFUSED });
+            return;
+          }
           session.setTempo(id, parsed.tempo);
         } else if (parsed.type === "run") {
           if (store.getSimulation(id)?.endedAt != null) {
@@ -145,6 +151,10 @@ export function createHub(session: SessionService, store: Store, tickMs: number,
           }
           startLoop(id);
         } else {
+          if (store.getSimulation(id)?.rules.pauseAllowed === false) {
+            send(ws, { type: "notice", text: PAUSE_REFUSED });
+            return;
+          }
           stopLoop(id);
         }
         broadcast(id, snapshotMessage(id));

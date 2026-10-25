@@ -4,6 +4,7 @@ import { compareSimulations } from "../api.js";
 import { MAX_COMPARE, elapsedSeries, toggleChoice } from "../compare.js";
 import { arrowOf, formatDuration, formatEur, signedPercent } from "../format.js";
 import type { Theme } from "../theme.js";
+import { PRESET_LABEL, describeRules } from "../rules.js";
 import type { CompareResult, Simulation } from "../types.js";
 
 const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -44,6 +45,7 @@ export function Compare({ simulations, initial, theme }: Props) {
     return () => { current = false; };
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const rulesOf = (id: number) => simulations.find((s) => s.id === id)?.rules;
   const rows = result?.simulations.flatMap((s) => s.depots.map((d) => ({ sim: s, depot: d }))) ?? [];
 
   useEffect(() => {
@@ -82,7 +84,7 @@ export function Compare({ simulations, initial, theme }: Props) {
               <label key={s.id} className="check">
                 <input type="checkbox" checked={on} disabled={!on && present.length >= MAX_COMPARE}
                   onChange={() => setChosen(toggleChoice(present, s.id))} />
-                <span>{s.name}</span>
+                <span>{s.name}<span className="badge rules" title={describeRules(s.rules)}>{PRESET_LABEL[s.rules.preset]}</span></span>
               </label>
             );
           })}
@@ -110,7 +112,7 @@ export function Compare({ simulations, initial, theme }: Props) {
               <tbody>
                 {rows.map(({ sim, depot }) => (
                   <tr key={`${sim.id}-${depot.id}`} data-testid={`compare-row-${depot.id}`}>
-                    <td>{sim.name}</td>
+                    <td>{sim.name}{rulesOf(sim.id) && <span className="badge rules" data-testid="compare-rules">{PRESET_LABEL[rulesOf(sim.id)!.preset]}</span>}</td>
                     <td data-label="Depot">{depot.name}{depot.kind === "ghost" && <span className="badge ghost">Geist</span>}</td>
                     <td data-label="Rendite"><Pct value={depot.figures.returnPct} /></td>
                     <td data-label="Größter Rückgang">{depot.figures.maxDrawdownPct === null ? "—" : <Pct value={depot.figures.maxDrawdownPct} />}</td>

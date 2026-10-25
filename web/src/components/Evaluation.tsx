@@ -4,7 +4,8 @@ import { basisLabel, formatEur, formatPercentPlain, formatRatio, signedPercent }
 import { reliabilityOf } from "../glossary.js";
 import { formatSimTime } from "../time.js";
 import { Hint } from "./Hint.js";
-import type { Evaluation as Data, Metrics, Slice } from "../types.js";
+import { PRESET_LABEL, describeRules } from "../rules.js";
+import type { Evaluation as Data, Metrics, Rules, Slice } from "../types.js";
 
 const REFRESH_MS = 5000;
 const seriesColor = (i: number) => `var(--series-${(i % 8) + 1})`;
@@ -16,6 +17,8 @@ interface Props {
   running: boolean;
   /** Changes when the benchmark does, so the figures are fetched again. */
   benchmark: string | null;
+  /** The rules of the simulation; results are only comparable with the same rules. */
+  rules: Rules;
 }
 
 function Change({ ratio }: { ratio: number | null }) {
@@ -56,7 +59,7 @@ function Bar({ title, slices }: { title: string; slices: Slice[] }) {
   );
 }
 
-export function Evaluation({ simulationId, activeDepotId, running, benchmark }: Props) {
+export function Evaluation({ simulationId, activeDepotId, running, benchmark, rules }: Props) {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,7 +87,7 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
   return (
     <>
       <section className="card" aria-label="Kennzahlen">
-        <h2>Kennzahlen</h2>
+        <h2>Kennzahlen<span className="badge rules" data-testid="eval-rules" title={describeRules(rules)}>{PRESET_LABEL[rules.preset]}</span></h2>
         <div className="scroll">
           <table className="positions num stacked" data-testid="metrics">
             <thead><tr><th>Depot</th><th>Seit</th><th>Rendite<Hint id="return" /></th><th>Basis<Hint id="basis" /></th><th>Volatilität p. a.<Hint id="volatility" /></th><th>Max. Rückgang<Hint id="maxDrawdown" /></th><th>Sharpe<Hint id="sharpe" /></th></tr></thead>

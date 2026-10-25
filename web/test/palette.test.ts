@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildEntries } from "../src/palette.js";
+import { RELAXED } from "../src/rules.js";
 import type { Instrument, SearchHit, Simulation } from "../src/types.js";
 
 const inst = (symbol: string, name: string): Instrument => ({ symbol, name, currency: "EUR", venue: "XETRA" });
@@ -7,7 +8,7 @@ const SAP = inst("SAP.DE", "SAP");
 const ISAP = inst("ISAP.DE", "Irgendwas");
 const SIE = inst("SIE.DE", "Siemens");
 const sim = (id: number, name: string): Simulation =>
-  ({ id, name, startAt: 0, simulationTime: 0, tempo: 1, startCash: 1, createdAt: 0, endedAt: null, live: false, benchmark: null });
+  ({ id, name, startAt: 0, simulationTime: 0, tempo: 1, startCash: 1, createdAt: 0, endedAt: null, live: false, benchmark: null, rules: RELAXED });
 const hit = (symbol: string, name: string, known: boolean): SearchHit => ({ ...inst(symbol, name), known });
 
 const kinds = (es: ReturnType<typeof buildEntries>) => es.map((e) => e.kind);

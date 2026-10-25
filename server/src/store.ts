@@ -2,6 +2,7 @@ import type { Db } from "./db.js";
 import type { Cent } from "./domain/money.js";
 import type { FeeConfig } from "./domain/fees.js";
 import { splitOrder } from "./domain/events.js";
+import { type Rules, RELAXED } from "./domain/rules.js";
 import type { Tempo } from "./domain/clock.js";
 import type { DepotState, NewOrder, Order, OrderStatus } from "./domain/broker.js";
 
@@ -19,6 +20,7 @@ export interface Simulation {
   live: boolean;
   /** The symbol its curves are measured against, if the person chose one. */
   benchmark: string | null;
+  rules: Rules;
 }
 
 /** A ghost is a frozen copy of a depot that never trades; it is only valued at market. */
@@ -38,6 +40,8 @@ export interface NewSimulation {
   startCash: Cent;
   fees: FeeConfig;
   live?: boolean;
+  /** Absent: relaxed. */
+  rules?: Rules;
 }
 
 /** An order as stored: the order itself plus when it was placed and how it filled. */
@@ -163,6 +167,7 @@ interface SimulationRow {
   ended_at: number | null;
   live: number;
   benchmark: string | null;
+  rules_json: string;
 }
 
 const toSimulation = (r: SimulationRow): Simulation => ({
@@ -177,14 +182,15 @@ const toSimulation = (r: SimulationRow): Simulation => ({
   endedAt: r.ended_at,
   live: r.live === 1,
   benchmark: r.benchmark,
+  rules: { ...RELAXED, ...(JSON.parse(r.rules_json) as Partial<Rules>) },
 });
 
 export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
   const now = opts.now ?? (() => Math.floor(Date.now() / 1000));
 
   const insertSimulation = db.prepare(
-    "insert into simulations (name, start_at, simulation_time, tempo, start_cash, fees_json, created_at, live) " +
-      "values (?, ?, ?, 1, ?, ?, ?, ?)",
+    "insert into simulations (name, start_at, simulation_time, tempo, start_cash, fees_json, created_at, live, rules_json) " +
+      "values (?, ?, ?, 1, ?, ?, ?, ?, ?)",
   );
   const insertDepot = db.prepare("insert into depots (simulation_id, name, cash) values (?, 'Depot 1', ?)");
   const recordPoint = db.prepare("insert or replace into depot_values (depot_id, t, value) values (?, ?, ?)");
@@ -193,6 +199,7 @@ export function createStore(db: Db, opts: { now?: () => number } = {}): Store {
     const id = Number(
       insertSimulation.run(
         input.name, input.startAt, input.startAt, input.startCash, JSON.stringify(input.fees), now(), input.live ? 1 : 0,
+        JSON.stringify(input.rules ?? RELAXED),
       ).lastInsertRowid,
     );
     const depotId = Number(insertDepot.run(id, input.startCash).lastInsertRowid);

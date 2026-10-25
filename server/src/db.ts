@@ -1,6 +1,10 @@
 import Database from "better-sqlite3";
 
+import { RELAXED } from "./domain/rules.js";
+
 export type Db = Database.Database;
+
+const RULES_DEFAULT_JSON = JSON.stringify(RELAXED);
 
 const SCHEMA = `
 create table if not exists bars (
@@ -103,7 +107,8 @@ create table if not exists simulations (
   created_at integer not null,
   ended_at integer,
   live integer not null default 0,
-  benchmark text
+  benchmark text,
+  rules_json text not null default '${RULES_DEFAULT_JSON}'
 );
 create table if not exists instruments (
   symbol text primary key,
@@ -181,6 +186,10 @@ export function openDb(path: string): Db {
     db.exec("alter table simulations add column live integer not null default 0");
   }
   if (!columns.some((c) => c.name === "benchmark")) db.exec("alter table simulations add column benchmark text");
+  // Rules (#27): an older simulation is a relaxed one, as it always played.
+  if (!columns.some((c) => c.name === "rules_json")) {
+    db.exec(`alter table simulations add column rules_json text not null default '${RULES_DEFAULT_JSON}'`);
+  }
   // The same for the instruments table: sector and kind came later.
   const instrumentColumns = db.prepare("pragma table_info(instruments)").all() as { name: string }[];
   for (const column of ["sector", "kind"]) {

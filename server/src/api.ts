@@ -10,6 +10,7 @@ import { BLOCKING_KINDS } from "./domain/quality.js";
 import { MarketDataError } from "./data/marketdata.js";
 import type { InstrumentSearch } from "./data/search.js";
 import { DEFAULT_FEES } from "./domain/fees.js";
+import { applyRules, resolveRules } from "./domain/rules.js";
 import { describeError } from "./errors.js";
 import type { Fx } from "./fx.js";
 import type { Health } from "./health.js";
@@ -28,6 +29,16 @@ const createBody = z
     startAt: z.number().int().positive().optional(),
     live: z.boolean().optional(),
     startCash: z.number().int().positive().optional(),
+    preset: z.enum(["relaxed", "realistic", "hardcore"]).optional(),
+    /** Single switches on top of the preset. */
+    rules: z.object({
+      spreadFactor: z.number().min(0.5).max(5).optional(),
+      feeFactor: z.number().min(0.5).max(5).optional(),
+      pauseAllowed: z.boolean().optional(),
+      tempoLocked: z.boolean().optional(),
+      allowFork: z.boolean().optional(),
+      maxPositions: z.number().int().min(1).max(50).nullable().optional(),
+    }).strict().optional(),
   })
   .refine((b) => b.live === true || b.startAt !== undefined, {
     message: "Ohne Livebetrieb braucht die Simulation einen Startzeitpunkt.",
@@ -358,12 +369,14 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
         return reply.code(502).send({ error: describeError(err) });
       }
     }
+    const rules = resolveRules(body.data.preset, body.data.rules);
     const sim = store.createSimulation({
       name: body.data.name,
       startAt,
       startCash: body.data.startCash ?? DEFAULT_START_CASH,
-      fees: DEFAULT_FEES,
+      fees: applyRules(DEFAULT_FEES, rules),
       live: body.data.live === true,
+      rules,
     });
     try {
       await session.start(sim.id);

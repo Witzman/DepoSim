@@ -1,6 +1,6 @@
 import type {
   AllocationLine, ArchiveInfo, FlagReport, BackfillJob, BackupStatus, Coverage, DataStatus, GapReport, JobsOverview, SourceSummary, Bar, ClientMessage, CompareResult, CostPreview, Curves, Depot, Evaluation, Instrument, Journal, JournalNoteResult,
-  Longterm, LongtermJob, MissingList, OrderInput, Orderbook, SearchHit, ServerMessage, Simulation, VenueInfo,
+  Longterm, LongtermJob, MissingList, OrderInput, Orderbook, SearchHit, ServerMessage, Simulation, Rules, VenueInfo,
 } from "./types.js";
 
 /** An error with a message that can be shown to the person as it is. */
@@ -48,7 +48,10 @@ export const addInstrument = (symbol: string) => request<Instrument>("/api/watch
 export const removeInstrument = (symbol: string) =>
   request<void>(`/api/watchlist/${encodeURIComponent(symbol)}`, { method: "DELETE" });
 export const listSimulations = () => request<Simulation[]>("/api/simulations");
-export const createSimulation = (body: { name: string; startAt?: number; live?: boolean; startCash?: number }) =>
+export const createSimulation = (body: {
+  name: string; startAt?: number; live?: boolean; startCash?: number;
+  preset?: "relaxed" | "realistic" | "hardcore"; rules?: Partial<Omit<Rules, "preset">>;
+}) =>
   request<Simulation>("/api/simulations", json("POST", body));
 export const deleteSimulation = (id: number) => request<void>(`/api/simulations/${id}`, { method: "DELETE" });
 export const endSimulation = (id: number) => request<Simulation>(`/api/simulations/${id}/end`, json("POST", {}));
