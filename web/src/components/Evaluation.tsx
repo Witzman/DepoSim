@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { getEvaluation } from "../api.js";
 import { basisLabel, formatEur, formatPercentPlain, formatRatio, signedPercent } from "../format.js";
+import { reliabilityOf } from "../glossary.js";
 import { formatSimTime } from "../time.js";
+import { Hint } from "./Hint.js";
 import type { Evaluation as Data, Metrics, Slice } from "../types.js";
 
 const REFRESH_MS = 5000;
@@ -20,6 +22,13 @@ function Change({ ratio }: { ratio: number | null }) {
   if (ratio === null) return <>—</>;
   const cls = ratio > 0 ? "up" : ratio < 0 ? "down" : "muted";
   return <span className={cls}>{ratio > 0 ? "▲" : ratio < 0 ? "▼" : "•"} {signedPercent(ratio)}</span>;
+}
+
+/** "Zu früh zu sagen" or "Aussagekraft gering" with the reason, when the basis of a row says little. */
+function Reliability({ m }: { m: Metrics }) {
+  const r = reliabilityOf(m);
+  if (!r) return null;
+  return <span className="badge warn" title={r.reason} data-testid="reliability">{r.label}</span>;
 }
 
 function Bar({ title, slices }: { title: string; slices: Slice[] }) {
@@ -78,13 +87,13 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
         <h2>Kennzahlen</h2>
         <div className="scroll">
           <table className="positions num stacked" data-testid="metrics">
-            <thead><tr><th>Depot</th><th>Seit</th><th>Rendite</th><th>Basis</th><th>Volatilität p. a.</th><th>Max. Rückgang</th><th>Sharpe</th></tr></thead>
+            <thead><tr><th>Depot</th><th>Seit</th><th>Rendite<Hint id="return" /></th><th>Basis<Hint id="basis" /></th><th>Volatilität p. a.<Hint id="volatility" /></th><th>Max. Rückgang<Hint id="maxDrawdown" /></th><th>Sharpe<Hint id="sharpe" /></th></tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.key} data-testid={`metrics-${r.key}`}>
                   <td>{r.name}{r.ghost && <span className="badge ghost">Geist</span>}</td><td data-label="Seit">{r.since ?? "—"}</td>
                   <td data-label="Rendite"><Change ratio={r.m.totalReturn} /></td>
-                  <td data-label="Basis">{basisLabel(r.m.basis)}</td>
+                  <td data-label="Basis">{basisLabel(r.m.basis)}<Reliability m={r.m} /></td>
                   <td data-label="Volatilität p. a.">{formatPercentPlain(r.m.volatility)}</td>
                   <td data-label="Max. Rückgang">{formatPercentPlain(r.m.maxDrawdown)}</td>
                   <td data-label="Sharpe">{formatRatio(r.m.sharpe)}</td>
@@ -93,13 +102,14 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
             </tbody>
           </table>
         </div>
+        {[...new Set(rows.flatMap((r) => reliabilityOf(r.m) ?? []).map((r) => `${r.label}: ${r.reason}`))].map((t) => <p key={t} className="muted" data-testid="reliability-note">{t}</p>)}
         {rows.filter((r) => r.m.unavailable).slice(0, 1).map((r) => <p key={r.key} className="muted" data-testid="metrics-note">{r.m.unavailable}</p>)}
         {anyBasis && <p className="muted">Volatilität und Sharpe sind geschätzt aus den Werten der Spalte „Basis“, hochgerechnet auf ein Jahr. Sharpe ohne risikofreien Zins.</p>}
 
         <h3>Risiko</h3>
         <div className="scroll">
           <table className="positions num stacked" data-testid="risk">
-            <thead><tr><th>Depot</th><th>Sortino</th><th>Calmar</th><th title="Verlust, den jeder zwanzigste Schritt erreicht oder übersteigt">Value at Risk 95 %</th><th>Bester Schritt</th><th>Schlechtester Schritt</th><th>Gewinnschritte</th></tr></thead>
+            <thead><tr><th>Depot</th><th>Sortino<Hint id="sortino" /></th><th>Calmar<Hint id="calmar" /></th><th>Value at Risk 95 %<Hint id="var95" /></th><th>Bester Schritt<Hint id="bestStep" /></th><th>Schlechtester Schritt<Hint id="worstStep" /></th><th>Gewinnschritte<Hint id="upShare" /></th></tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.key} data-testid={`risk-${r.key}`}>
@@ -122,7 +132,7 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
             <h3>Gegen den Maßstab {data.benchmark.symbol}</h3>
             <div className="scroll">
               <table className="positions num stacked" data-testid="relative">
-                <thead><tr><th>Depot</th><th>Beta</th><th>Alpha p. a.</th><th>Tracking Error</th><th>Information Ratio</th><th>Besser als Maßstab</th></tr></thead>
+                <thead><tr><th>Depot</th><th>Beta<Hint id="beta" /></th><th>Alpha p. a.<Hint id="alpha" /></th><th>Tracking Error<Hint id="trackingError" /></th><th>Information Ratio<Hint id="informationRatio" /></th><th>Besser als Maßstab<Hint id="hitShare" /></th></tr></thead>
                 <tbody>
                   {data.depots.map((d) => (
                     <tr key={d.id} data-testid={`relative-${d.id}`}>
@@ -144,7 +154,7 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
 
         {data.depots.length > 1 && (
           <>
-            <h3>Korrelation der Depots</h3>
+            <h3>Korrelation der Depots<Hint id="correlation" /></h3>
             <div className="scroll">
               <table className="positions num stacked" data-testid="correlation">
                 <thead><tr><th />{data.depots.map((d) => <th key={d.id}>{d.name}{d.kind === "ghost" && <span className="badge ghost">Geist</span>}</th>)}</tr></thead>
@@ -166,7 +176,7 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
       </section>
 
       <section className="card" aria-label="Verteilung">
-        <h2>Verteilung · {active.name}</h2>
+        <h2>Verteilung · {active.name}<Hint id="distribution" /></h2>
         <Bar title="Sektor" slices={active.breakdown.sector} />
         <Bar title="Handelsland" slices={active.breakdown.country} />
         <Bar title="Währung" slices={active.breakdown.currency} />
@@ -174,7 +184,7 @@ export function Evaluation({ simulationId, activeDepotId, running, benchmark }: 
       </section>
 
       <section className="card" aria-label="Gebühren">
-        <h2>Gebührenbilanz</h2>
+        <h2>Gebührenbilanz<Hint id="fees" /></h2>
         <div className="scroll">
           <table className="positions num stacked" data-testid="fees">
             <thead><tr><th>Depot</th><th>Orders</th><th>Provision</th><th>Auslandspauschale</th><th>Summe</th><th>vom Start</th></tr></thead>

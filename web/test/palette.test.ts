@@ -55,4 +55,12 @@ describe("buildEntries", () => {
   it("returns an empty list when nothing matches", () => {
     expect(buildEntries("zzzz", [SAP], [sim(1, "Alt")], [])).toEqual([]);
   });
+
+  it("finds the glossary command by 'calmar' and 'glossar' when it is offered", () => {
+    for (const q of ["calmar", "glossar", "kennzahlen"]) {
+      const es = buildEntries(q, [], [], [], ["glossary"]);
+      expect(es, q).toEqual([{ kind: "command", id: "glossary", label: "Kennzahlen erklärt" }]);
+    }
+    expect(buildEntries("calmar", [], [], [])).toEqual([]);
+  });
 });

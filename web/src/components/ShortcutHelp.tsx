@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 const KEYS: [string, string][] = [
   ["B", "Kaufen: Menge im Orderticket"],
   ["S", "Verkaufen: Menge im Orderticket"],
+  ["G", "Kennzahlen erklärt (Glossar)"],
   ["Leertaste", "Start oder Pause"],
   ["1 – 4", "Tempo 1x, 5x, 30x, 60x"],
   ["Strg + K", "Suche und Befehle (auf dem Mac Cmd + K)"],

@@ -469,3 +469,24 @@ td.warn { color: var(--warn); font-weight: 600; }
   .cov-name { font-size: 0.7rem; }
   .data-view table { font-size: 0.82rem; }
 }
+
+/* Info buttons and their text (#45). */
+.hint { position: relative; display: inline-block; margin-left: 4px; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.hint-btn {
+  width: 1.3rem; height: 1.3rem; padding: 0; border-radius: 50%; border: 1px solid var(--border); background: transparent;
+  color: var(--muted); font: inherit; font-size: 0.7rem; font-style: italic; line-height: 1; cursor: pointer;
+}
+.hint-btn:hover, .hint-btn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.hint-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hint-pop {
+  position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; width: min(80vw, 340px); padding: 10px 12px; text-align: left;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.25); font-size: 0.85rem; line-height: 1.4; white-space: normal;
+}
+.hint-pop p { margin: 6px 0 0; }
+dialog.glossary { width: min(94vw, 640px); max-height: 85vh; }
+dialog.glossary[open] { display: flex; flex-direction: column; gap: 8px; }
+dialog.glossary input { width: 100%; box-sizing: border-box; }
+.glossary-list { overflow-y: auto; display: grid; gap: 14px; }
+.glossary-list h3 { margin: 0; font-size: 0.95rem; }
+.glossary-list p { margin: 4px 0 0; font-size: 0.88rem; }

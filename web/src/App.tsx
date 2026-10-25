@@ -25,6 +25,7 @@ import { MobileBar } from "./components/MobileBar.js";
 import { BackupDialog } from "./components/BackupDialog.js";
 import { backupLine } from "./backup.js";
 import { Palette } from "./components/Palette.js";
+import { Glossary } from "./components/Glossary.js";
 import { ShortcutHelp } from "./components/ShortcutHelp.js";
 import { SimulationPicker } from "./components/SimulationPicker.js";
 import { Watchlist } from "./components/Watchlist.js";
@@ -85,6 +86,7 @@ export function App() {
   const [activeDepotId, setActiveDepotId] = useState<number | null>(null);
   const [allocationOpen, setAllocationOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [glossaryOpen, setGlossaryOpen] = useState(false);
   const [backfillOpen, setBackfillOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
   const [backupState, setBackupState] = useState<BackupStatus | null>(null);
@@ -185,6 +187,9 @@ export function App() {
       if (e.key === "b" || e.key === "s") {
         e.preventDefault();
         setTicketCommand((c) => ({ side: e.key === "b" ? "buy" : "sell", n: c.n + 1 }));
+      } else if (e.key === "g") {
+        e.preventDefault();
+        setGlossaryOpen(true);
       } else if (e.key === "?") {
         e.preventDefault();
         setHelpOpen(true);
@@ -303,6 +308,7 @@ export function App() {
   function runCommand(id: CommandId) {
     if (id === "backfill") return setBackfillOpen(true);
     if (id === "backup") return setBackupOpen(true);
+    if (id === "glossary") return setGlossaryOpen(true);
     if (id === "ghost") return void newGhost();
     if (id === "longterm") return setView("longterm");
     if (id === "data") return setView("data");
@@ -545,11 +551,12 @@ export function App() {
         }} />
       <BackfillDialog open={backfillOpen} onClose={() => setBackfillOpen(false)} />
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <Glossary open={glossaryOpen} onClose={() => setGlossaryOpen(false)} />
       <Palette
         open={paletteOpen} instruments={watchlist} simulations={simulations} selectedId={selectedId}
         onClose={() => setPaletteOpen(false)} onPickInstrument={setSymbol} onPickSimulation={setSelectedId}
         onToggleTheme={toggle} onShowHelp={() => setHelpOpen(true)} onAdd={addTitle}
-        commands={selectedId === null ? ["backfill", "backup", "longterm", "data"] : ["backfill", "backup", "ghost", "journal", "compare", "orderbook", "longterm", "data"]} onCommand={runCommand}
+        commands={selectedId === null ? ["backfill", "backup", "longterm", "data", "glossary"] : ["backfill", "backup", "ghost", "journal", "compare", "orderbook", "longterm", "data", "glossary"]} onCommand={runCommand}
       />
     </div>
   );

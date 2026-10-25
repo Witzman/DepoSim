@@ -3,6 +3,7 @@ import { getJournal, saveJournalNote } from "../api.js";
 import { arrowOf, formatDuration, formatEur, formatPercentPlain, formatRatio, signedEurArrow, signedPercent } from "../format.js";
 import { formatSimTime } from "../time.js";
 import { tradeStats } from "../risk.js";
+import { Hint } from "./Hint.js";
 import type { DepotView, Journal as Data, JournalTrade } from "../types.js";
 
 const REFRESH_MS = 5000;
@@ -93,25 +94,25 @@ function JournalBody({ simulationId, data }: { simulationId: number; data: Data 
     <>
       {data.fewData && <p><span className="badge warn" data-testid="few-data">wenig Daten</span> <span className="muted">Unter 5 abgeschlossene Trades: die Zahlen sagen wenig.</span></p>}
       <dl className="totals num journal-figures">
-        <dt>Trefferquote</dt>
+        <dt>Trefferquote<Hint id="hitRate" /></dt>
         <dd data-testid="hit-rate">
           {data.hitRate.rate === null ? "—" : formatPercentPlain(data.hitRate.rate)} <span className="muted">(n = {data.hitRate.n})</span>
         </dd>
-        <dt>Haltedauer, Median</dt><dd data-testid="hold-median">{formatDuration(data.holding.medianSeconds)} <span className="muted">(n = {data.holding.n})</span></dd>
+        <dt>Haltedauer, Median<Hint id="holding" /></dt><dd data-testid="hold-median">{formatDuration(data.holding.medianSeconds)} <span className="muted">(n = {data.holding.n})</span></dd>
         <dt>Haltedauer, Mittel</dt><dd data-testid="hold-mean">{formatDuration(data.holding.meanSeconds)}</dd>
       </dl>
       {stats.n > 0 && (
         <>
           <h3>Handelsstatistik</h3>
           <dl className="totals num journal-figures" data-testid="trade-stats">
-            <dt>Erwartungswert je Trade</dt><dd>{stats.expectancy === null ? "—" : signedEurArrow(stats.expectancy)}</dd>
-            <dt>Ø Gewinn / Ø Verlust</dt>
+            <dt>Erwartungswert je Trade<Hint id="expectancy" /></dt><dd>{stats.expectancy === null ? "—" : signedEurArrow(stats.expectancy)}</dd>
+            <dt>Ø Gewinn / Ø Verlust<Hint id="avgWinLoss" /></dt>
             <dd>{stats.avgWin === null ? "—" : formatEur(stats.avgWin)} / {stats.avgLoss === null ? "—" : formatEur(stats.avgLoss)}</dd>
-            <dt>Gewinn-Verlust-Verhältnis</dt><dd>{formatRatio(stats.payoff)}</dd>
-            <dt>Profitfaktor</dt><dd>{formatRatio(stats.profitFactor)}</dd>
-            <dt>Bester / schlechtester Trade</dt>
+            <dt>Gewinn-Verlust-Verhältnis<Hint id="payoff" /></dt><dd>{formatRatio(stats.payoff)}</dd>
+            <dt>Profitfaktor<Hint id="profitFactor" /></dt><dd>{formatRatio(stats.profitFactor)}</dd>
+            <dt>Bester / schlechtester Trade<Hint id="bestWorstTrade" /></dt>
             <dd>{stats.best === null ? "—" : signedEurArrow(stats.best)} / {stats.worst === null ? "—" : signedEurArrow(stats.worst)}</dd>
-            <dt>Längste Verlustserie</dt><dd>{stats.longestLosingStreak}</dd>
+            <dt>Längste Verlustserie<Hint id="losingStreak" /></dt><dd>{stats.longestLosingStreak}</dd>
           </dl>
           <p className="muted">Profitfaktor: Summe der Gewinne durch Summe der Verluste; ohne Verlust-Trade gibt es keinen. Alles netto, nach Gebühren.</p>
         </>
@@ -149,7 +150,7 @@ function JournalBody({ simulationId, data }: { simulationId: number; data: Data 
         </ul>
       )}
 
-      <h3>Zu früh verkauft?</h3>
+      <h3>Zu früh verkauft?<Hint id="tooEarly" /></h3>
       <p><strong data-testid="journal-note">{data.note}</strong></p>
       <div className="scroll">
         <table className="positions num stacked" data-testid="too-early">
