@@ -10,6 +10,7 @@ import { MarketDataError } from "./data/marketdata.js";
 import type { InstrumentSearch } from "./data/search.js";
 import { DEFAULT_FEES } from "./domain/fees.js";
 import { describeError } from "./errors.js";
+import type { Fx } from "./fx.js";
 import type { Longterm } from "./longterm.js";
 import { type InstrumentRegistry, RegistryError } from "./instruments.js";
 import type { SessionService } from "./session.js";
@@ -74,6 +75,7 @@ interface Deps {
   hub: Hub;
   backfill: Backfill;
   longterm: Longterm;
+  fx: Fx;
   db: Db;
   backup: BackupService;
   now: () => number;
@@ -95,7 +97,7 @@ const invalid = (reply: FastifyReply, err: z.ZodError) => {
   return reply.code(400).send({ error: `Ungültige Eingabe (${where}): ${issue.message}` });
 };
 
-export function registerApi(app: FastifyInstance, { store, session, archive, instruments, search, hub, backfill, longterm, db, backup, now }: Deps) {
+export function registerApi(app: FastifyInstance, { store, session, archive, instruments, search, hub, backfill, longterm, fx, db, backup, now }: Deps) {
   const simulationOf = (params: unknown) => {
     const id = Number((params as { id?: string }).id);
     return Number.isInteger(id) ? store.getSimulation(id) : undefined;
@@ -123,6 +125,23 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
   });
 
   app.get("/api/archive/backfill", async () => backfill.status());
+
+  // Wechselkurse (#51): the ECB reference rates, one per day. Without `from` the last 90 days.
+  app.get("/api/fx", async (req, reply) => {
+    const q = req.query as { ccy?: string; from?: string; to?: string };
+    const ccy = (q.ccy ?? "USD").toUpperCase();
+    const isDay = (v: string | undefined) => v === undefined || /^\d{4}-\d{2}-\d{2}$/.test(v);
+    if (!/^[A-Z]{3}$/.test(ccy) || !isDay(q.from) || !isDay(q.to)) return reply.code(400).send({ error: "ccy muss ein Währungscode sein, from und to ein Tag (JJJJ-MM-TT)." });
+    const status = fx.status();
+    if (!status.currencies.includes(ccy)) return reply.code(404).send({ error: `Für ${ccy} sind keine Wechselkurse gespeichert.`, latestDay: status.latestDay, currencies: status.currencies });
+    const latest = fx.latest(ccy)!;
+    const from = q.from ?? new Date(Date.parse(`${latest.day}T00:00:00Z`) - 90 * 86400_000).toISOString().slice(0, 10);
+    return {
+      ccy, from, to: q.to ?? latest.day, rows: fx.rows(ccy, from, q.to),
+      latest, latestDay: status.latestDay, fetchedAt: status.fetchedAt, fetchError: status.error, currencies: status.currencies,
+      source: "Europäische Zentralbank, Euro-Referenzkurse (keine Handelskurse), je Tag um etwa 16:00 Frankfurt",
+    };
+  });
 
   // Langzeitvergleich (#19): computed from stored daily data on every request, nothing kept in memory.
   app.get("/api/longterm", async () => longterm.compute());

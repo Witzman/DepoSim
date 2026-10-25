@@ -405,6 +405,9 @@ export interface LongtermDepot {
   totals: LongtermTotals;
   curve: [string, number][];
   dividendEvents: number;
+  /** Only for an ETF quoted in a foreign currency: where the conversion rate comes from. */
+  currency?: string;
+  fx?: { currency: string; source: "ecb"; label: string; lastRateDay: string; stale: boolean };
 }
 
 export type Longterm =

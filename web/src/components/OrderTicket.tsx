@@ -115,7 +115,7 @@ export function OrderTicket({ simulationId, depotId, instrument, priceKey, disab
       {cost && (
         <dl className="cost num">
           <dt>Ausführungskurs{kind === "market" ? " (mit Spread)" : ""}</dt><dd>{formatPrice(cost.execPrice, cur)}</dd>
-          {cost.fxRateEff !== undefined && (<><dt>Wechselkurs (mit Aufschlag)</dt><dd>1 € = {cost.fxRateEff.toFixed(4)} $</dd></>)}
+          {cost.fxRateEff !== undefined && (<><dt>Wechselkurs (mit Aufschlag)</dt><dd>1 € = {cost.fxRateEff.toFixed(4)} $</dd><dt>Kursquelle Wechselkurs</dt><dd data-testid="fx-source">Yahoo, Minute</dd></>)}
           <dt>{side === "buy" ? "Kaufwert" : "Verkaufswert"}</dt><dd>{formatEur(cost.gross)}</dd>
           <dt>Provision</dt><dd data-testid="cost-commission">{formatEur(cost.commission)}</dd>
           {cost.foreign > 0 && (<><dt>Auslandspauschale</dt><dd>{formatEur(cost.foreign)}</dd></>)}

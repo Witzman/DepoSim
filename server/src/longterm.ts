@@ -1,6 +1,7 @@
 import { type DailyData, MarketDataError } from "./data/marketdata.js";
 import type { Db } from "./db.js";
 import { DEFAULT_FEES, type FeeConfig } from "./domain/fees.js";
+import type { Fx } from "./fx.js";
 import { type DailyBar, type LongtermResult, simulateLongterm } from "./domain/longterm.js";
 import { describeError } from "./errors.js";
 
@@ -17,6 +18,8 @@ export interface LongtermDepot {
   index: string;
   symbol: string;
   etf: string;
+  /** The currency of the ETF's quote; absent: EUR. Converted at the ECB rate of each day. */
+  currency?: string;
 }
 
 /**
@@ -35,6 +38,8 @@ export interface LongtermDepotResult extends LongtermDepot {
   /** [day, value in cent] per trading day, for the chart. */
   curve: [string, number][];
   dividendEvents: number;
+  /** Absent for EUR. Where the conversion rate comes from, and how far it reaches. */
+  fx?: { currency: string; source: "ecb"; label: string; lastRateDay: string; stale: boolean };
 }
 
 export interface LongtermReady {
@@ -91,8 +96,13 @@ export function createLongterm(deps: {
   now: () => number;
   minGapMs?: number;
   fees?: FeeConfig;
+  /** Rates for the depots quoted in a foreign currency; without it such a depot is not ready. */
+  fx?: Fx;
+  /** Defaults to `LONGTERM_DEPOTS`. */
+  depots?: LongtermDepot[];
 }): Longterm {
   const { db, source, now } = deps;
+  const depotList = deps.depots ?? LONGTERM_DEPOTS;
   const minGapMs = deps.minGapMs ?? 500;
   const fees = deps.fees ?? DEFAULT_FEES;
 
@@ -164,7 +174,7 @@ export function createLongterm(deps: {
     start() {
       if (running) return { ok: false, reason: "Es läuft bereits ein Laden der Langzeitdaten." };
       running = true;
-      const symbols = LONGTERM_DEPOTS.map((d) => d.symbol);
+      const symbols = depotList.map((d) => d.symbol);
       job = { running: true, startedAt: Math.floor(now()), finishedAt: null, done: 0, total: symbols.length, items: [], stoppedByRateLimit: false };
       const mine = job;
       current = work(mine, symbols);
@@ -176,7 +186,7 @@ export function createLongterm(deps: {
     compute() {
       const missing: LongtermNotReady["missing"] = [];
       const depots: LongtermDepotResult[] = [];
-      for (const d of LONGTERM_DEPOTS) {
+      for (const d of depotList) {
         const row = fetched.get(d.symbol) as { splits: number } | undefined;
         if (!row) {
           missing.push({ symbol: d.symbol, reason: "noch nicht geladen" });
@@ -186,11 +196,29 @@ export function createLongterm(deps: {
           missing.push({ symbol: d.symbol, reason: "enthält einen Aktiensplit, den die Rechnung nicht abbildet" });
           continue;
         }
+        const currency = d.currency ?? "EUR";
+        if (currency !== "EUR" && !deps.fx?.latest(currency)) {
+          missing.push({ symbol: d.symbol, reason: `Wechselkurse EUR/${currency} fehlen noch` });
+          continue;
+        }
         const bars = selectBars.all(d.symbol) as DailyBar[];
         const dividends = selectDivs.all(d.symbol) as { exDay: string; amount: number }[];
-        const result = simulateLongterm({ bars, dividends, startDay: LONGTERM_START_DAY, startCash: LONGTERM_START_CASH, fees });
+        // The Yahoo minute series reaches back 30 days only; one source for the whole series keeps it consistent.
+        const fx = currency === "EUR" ? undefined : (day: string) => deps.fx!.rateOn(currency, day, { minute: false })?.rate;
+        const result = simulateLongterm({ bars, dividends, startDay: LONGTERM_START_DAY, startCash: LONGTERM_START_CASH, fees, fx });
         const { points, ...totals } = result;
-        depots.push({ ...d, totals, curve: points.map((p) => [p.day, p.value]), dividendEvents: dividends.length });
+        const out: LongtermDepotResult = { ...d, totals, curve: points.map((p) => [p.day, p.value]), dividendEvents: dividends.length };
+        if (currency !== "EUR") {
+          // The last rate we have; "Kurs vom <Datum>" when it is older than the last price.
+          const last = deps.fx!.rateOn(currency, totals.lastDay ?? LONGTERM_START_DAY, { minute: false });
+          const latest = deps.fx!.latest(currency)!;
+          const stale = last?.stale ?? true;
+          out.fx = {
+            currency, source: "ecb", lastRateDay: latest.day, stale,
+            label: stale ? `EZB-Referenzkurs, Kurs vom ${latest.day.split("-").reverse().join(".")}` : "EZB-Referenzkurs, je Handelstag",
+          };
+        }
+        depots.push(out);
       }
       if (missing.length > 0) return { ready: false, missing };
       return { ready: true, startDay: LONGTERM_START_DAY, startCash: LONGTERM_START_CASH, fees, depots };

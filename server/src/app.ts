@@ -8,10 +8,12 @@ import { createBackfill } from "./backfill.js";
 import { type BackupService, createBackupService } from "./backup.js";
 import { FX_SYMBOL, type Instrument, WATCHLIST } from "./config.js";
 import { createArchive } from "./data/archive.js";
+import { type EcbSource, createEcb } from "./data/ecb.js";
 import type { DailyData, MarketData } from "./data/marketdata.js";
 import { type InstrumentSearch, createYahooSearch } from "./data/search.js";
 import { createYahoo, createYahooDaily } from "./data/yahoo.js";
 import { openDb } from "./db.js";
+import { type Fx, createFx } from "./fx.js";
 import { InstrumentRegistry } from "./instruments.js";
 import { createLongterm } from "./longterm.js";
 import { SessionService } from "./session.js";
@@ -45,12 +47,20 @@ export interface AppOptions {
   backupKeep?: number;
   /** How often the daily backup is looked at, in ms; 0: never (tests call it themselves). */
   backupCheckMs?: number;
+  /** The ECB reference rates. Defaults to the ECB. */
+  fxSource?: EcbSource;
+  /**
+   * How often the daily rate fetch is looked at, in ms; 0: never (tests call `app.fx` themselves).
+   * A stand-in until the scheduler (#48) calls `fx.runDaily()` at 16:30 Berlin.
+   */
+  fxCheckMs?: number;
 }
 
 declare module "fastify" {
   interface FastifyInstance {
     session: SessionService;
     backup: BackupService;
+    fx: Fx;
   }
 }
 
@@ -68,8 +78,11 @@ export function buildApp(opts: AppOptions): FastifyInstance {
     delayS: opts.liveDelayS, catchUpTempo: opts.catchUpTempo,
   });
   const backfill = createBackfill({ archive, store, session, instruments, now: opts.now ?? (() => Date.now() / 1000) });
+  const nowS = opts.now ?? (() => Date.now() / 1000);
+  const fxLog = (text: string, ok: boolean) => (ok ? app.log.info(text) : app.log.error(text));
+  const fx = createFx({ db, source: opts.fxSource ?? createEcb(), now: nowS, log: fxLog });
   const longterm = createLongterm({
-    db, source: opts.dailyData ?? createYahooDaily(), now: opts.now ?? (() => Date.now() / 1000), minGapMs: opts.minGapMs,
+    db, source: opts.dailyData ?? createYahooDaily(), now: nowS, minGapMs: opts.minGapMs, fx,
   });
   const hub = createHub(session, store, opts.tickMs ?? 250, opts.liveRefreshS ?? 60);
 
@@ -80,6 +93,15 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   });
   app.decorate("session", session);
   app.decorate("backup", backup);
+  app.decorate("fx", fx);
+  // Once at start (only if the rates are missing or old), then a look every hour: the fetch itself happens once a day.
+  const fxMs = opts.fxCheckMs ?? 0;
+  let fxTimer: NodeJS.Timeout | undefined;
+  if (fxMs > 0) {
+    setTimeout(() => void fx.runStartup(), 3_000).unref();
+    fxTimer = setInterval(() => void fx.runDaily(), fxMs);
+    fxTimer.unref();
+  }
   // The first look is at once (a missed night is made up), then every hour; a failure is in the job log, never thrown.
   const checkMs = opts.backupCheckMs ?? 3_600_000;
   let backupTimer: NodeJS.Timeout | undefined;
@@ -90,6 +112,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   }
   app.addHook("onClose", async () => {
     if (backupTimer) clearInterval(backupTimer);
+    if (fxTimer) clearInterval(fxTimer);
     hub.stopAll();
     db.close();
   });
@@ -102,7 +125,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   });
 
   app.get("/healthz", async (_req, reply) => reply.type("text/plain").send("ok"));
-  registerApi(app, { store, session, archive, instruments, search: opts.search ?? createYahooSearch(), hub, backfill, longterm, db, backup, now: opts.now ?? (() => Date.now() / 1000) });
+  registerApi(app, { store, session, archive, instruments, search: opts.search ?? createYahooSearch(), hub, backfill, longterm, fx, db, backup, now: opts.now ?? (() => Date.now() / 1000) });
 
   if (existsSync(WEB_DIST)) {
     app.register(fastifyStatic, { root: WEB_DIST });

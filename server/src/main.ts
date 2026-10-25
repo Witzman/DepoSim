@@ -7,6 +7,7 @@ const app = buildApp({
   // Without BACKUP_DIR the backups sit beside the database, in the same volume: better than none, but the
   // volume is not in the server's backup (notes/reference/deploy.md), so production sets it.
   backupDir: BACKUP_DIR ?? join(dirname(DB_PATH), "backups"), backupKeep: BACKUP_KEEP, liveDelayS: SETTINGS.liveDelayS, catchUpTempo: SETTINGS.catchUpTempo, liveRefreshS: SETTINGS.liveRefreshS,
+  fxCheckMs: 3_600_000,
 });
 app.listen({ port: PORT, host: "0.0.0.0" }).catch((err) => {
   app.log.error(err);

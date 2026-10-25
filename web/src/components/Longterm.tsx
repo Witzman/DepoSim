@@ -20,6 +20,7 @@ const ASSUMPTIONS = [
   "Gebühren wie im Rest der App (Provision mit Mindestbetrag, Spread); ganze Stücke, der Rest bleibt als Guthaben und wird bei der nächsten Wiederanlage mitgenommen. Eine Ausschüttung, die nach Gebühren kein ganzes Stück ergibt, bleibt Guthaben.",
   "Keine Steuern (Quellensteuer, Abgeltungsteuer, Vorabpauschale): die Ausschüttungen werden brutto angelegt.",
   "Ausschüttende ETFs an der Xetra in Euro; die Kurse sind die Rohkurse von Yahoo ohne Dividendenbereinigung. Tage, an denen Yahoo keinen Kurs liefert, fehlen auch hier.",
+  "Ein ETF in Fremdwährung wird zum Euro-Referenzkurs der Europäischen Zentralbank (EZB) des jeweiligen Tages umgerechnet: Kurse zum Kurs des Handelstags, Ausschüttungen zum Kurs des Ex-Tags. Der EZB-Kurs ist ein Tageswert (etwa 16:00 Frankfurt), kein Handelskurs, und wird ohne Aufschlag und ohne Auslandspauschale angesetzt.",
   "Historische Rechnung, kein Ratschlag und keine Prognose.",
 ];
 
@@ -167,6 +168,11 @@ export function Longterm({ theme }: Props) {
           <p className="muted">
             Stand {dayFormat(ready.depots[0].totals.lastDay ?? ready.startDay)}; Wert = Stücke × Schlusskurs + Guthaben.
           </p>
+          {ready.depots.filter((d) => d.fx).map((d) => (
+            <p key={d.key} className="muted" data-testid={`longterm-fx-${d.key}`}>
+              {d.symbol} in {d.fx!.currency}, umgerechnet mit: {d.fx!.label}. Quelle: Europäische Zentralbank.
+            </p>
+          ))}
           <div className="scroll">
             <table className="positions num stacked" data-testid="longterm-table">
               <thead>

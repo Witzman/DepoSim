@@ -1,7 +1,7 @@
 import { type Cent, roundCent } from "./money.js";
 import { type FeeConfig, previewCost } from "./fees.js";
 
-/** One trading day in EUR. `day` is "YYYY-MM-DD" (UTC date of the bar). */
+/** One trading day. In EUR, or in the currency `fx` converts from. `day` is "YYYY-MM-DD" (UTC date of the bar). */
 export interface DailyBar {
   day: string;
   o: number;
@@ -11,7 +11,7 @@ export interface DailyBar {
 /** A distribution. Yahoo gives the ex-date only; the payment date is ASSUMED to be the ex-day. */
 export interface DividendEvent {
   exDay: string;
-  /** EUR per share. */
+  /** Per share, in the currency of the bars. */
   amount: number;
 }
 
@@ -23,6 +23,12 @@ export interface LongtermInput {
   startDay: string;
   startCash: Cent;
   fees: FeeConfig;
+  /**
+   * Units of the bars' currency per 1 EUR on a day (ECB reference rate). Absent: the bars are in EUR.
+   * A bar is converted at the rate of its own day, a distribution at the rate of its ex-day. A day
+   * without a rate (before the first ECB day) is left out.
+   */
+  fx?: (day: string) => number | undefined;
 }
 
 export interface LongtermPoint {
@@ -72,9 +78,13 @@ function affordable(open: number, cash: Cent, fees: FeeConfig) {
  * any leftover) is spent at the open of the next bar after the ex-day, with the app's fee model.
  */
 export function simulateLongterm(input: LongtermInput): LongtermResult {
-  const { fees, startCash } = input;
+  const { fees, startCash, fx } = input;
   const dividends = new Map<string, number>();
-  for (const d of input.dividends) dividends.set(d.exDay, (dividends.get(d.exDay) ?? 0) + d.amount);
+  for (const d of input.dividends) {
+    const rate = fx ? fx(d.exDay) : 1;
+    if (rate === undefined) continue;
+    dividends.set(d.exDay, (dividends.get(d.exDay) ?? 0) + d.amount / rate);
+  }
   // Ex-days without a bar are credited on the next bar: the shares are the same in between.
   const exDays = [...dividends.keys()].sort();
   let nextEx = 0;
@@ -98,7 +108,10 @@ export function simulateLongterm(input: LongtermInput): LongtermResult {
     return true;
   };
 
-  for (const bar of input.bars) {
+  for (const raw of input.bars) {
+    const rate = fx ? fx(raw.day) : 1;
+    if (rate === undefined) continue;
+    const bar = { day: raw.day, o: raw.o / rate, c: raw.c / rate };
     if (!(bar.o > 0) || !(bar.c > 0)) continue;
     if (!started) {
       if (bar.day < input.startDay) continue;

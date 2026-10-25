@@ -41,6 +41,17 @@ create table if not exists daily_fetched (
   last_day text,
   splits integer not null default 0
 );
+create table if not exists fx_daily (
+  ccy text not null,
+  day text not null,
+  rate real not null,
+  filled integer not null default 0,
+  primary key (ccy, day)
+);
+create table if not exists fx_fetched (
+  source text primary key,
+  fetched_at integer not null
+);
 create table if not exists simulations (
   id integer primary key,
   name text not null,

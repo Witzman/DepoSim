@@ -988,3 +988,56 @@ describe("orderbook over HTTP", () => {
     expect(looked).toMatchObject({ gross: plain.gross, commission: plain.commission, foreignFee: plain.foreignFee, status: "filled" });
   });
 });
+
+describe("GET /api/fx and the rate fetch in the app", () => {
+  const ecbRows = [
+    { day: "2026-10-22", rates: { USD: 1.075 } },
+    { day: "2026-10-23", rates: { USD: 1.08 } },
+  ];
+  const failing = { on: false };
+  const withFx = (calls: string[]) => {
+    const app = buildApp({
+      dbPath: ":memory:", marketData: makeSource().source, instruments: [SAP, AAPL], now: () => D0 + 5 * 86400, minGapMs: 0, tickMs: 20,
+      fxSource: { fetch: async (range) => { calls.push(range); if (failing.on) throw new MarketDataError("network", "down"); return ecbRows; } },
+    });
+    open.push(app);
+    return app;
+  };
+
+  it("404 before any rate was fetched, then the rows with source and last day", async () => {
+    const app = withFx([]);
+    expect((await app.inject({ url: "/api/fx?ccy=USD" })).statusCode).toBe(404);
+    await app.fx.update();
+    const body = (await app.inject({ url: "/api/fx?ccy=usd&from=2026-10-22" })).json();
+    expect(body).toMatchObject({ ccy: "USD", latestDay: "2026-10-23", latest: { day: "2026-10-23", rate: 1.08 }, fetchError: null });
+    expect(body.rows).toEqual([{ day: "2026-10-22", rate: 1.075, filled: false }, { day: "2026-10-23", rate: 1.08, filled: false }]);
+    expect(body.source).toContain("Europäische Zentralbank");
+  });
+
+  it("refuses a bad currency or day", async () => {
+    const app = withFx([]);
+    expect((await app.inject({ url: "/api/fx?ccy=DOLLAR" })).statusCode).toBe(400);
+    expect((await app.inject({ url: "/api/fx?ccy=USD&from=gestern" })).statusCode).toBe(400);
+  });
+
+  it("does not fetch by itself unless the check is switched on", async () => {
+    const calls: string[] = [];
+    withFx(calls);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls).toEqual([]);
+  });
+
+  it("a failed fetch shows up as fetchError and keeps the old rates", async () => {
+    const app = withFx([]);
+    await app.fx.update();
+    failing.on = true;
+    expect((await app.fx.update()).ok).toBe(false);
+    failing.on = false;
+    const body = (await app.inject({ url: "/api/fx?ccy=USD" })).json();
+    expect(body.latest.day).toBe("2026-10-23");
+    await app.fx.update();
+    failing.on = true;
+    await app.fx.update();
+    expect((await app.inject({ url: "/api/fx?ccy=USD" })).json().fetchError).toMatch(/nicht erreichbar/);
+  });
+});
