@@ -11,6 +11,7 @@ import type { InstrumentSearch } from "./data/search.js";
 import { DEFAULT_FEES } from "./domain/fees.js";
 import { describeError } from "./errors.js";
 import type { Fx } from "./fx.js";
+import type { Jobs } from "./jobs.js";
 import type { Longterm } from "./longterm.js";
 import { type InstrumentRegistry, RegistryError } from "./instruments.js";
 import type { SessionService } from "./session.js";
@@ -78,6 +79,7 @@ interface Deps {
   fx: Fx;
   db: Db;
   backup: BackupService;
+  jobs: Jobs;
   now: () => number;
 }
 
@@ -97,7 +99,7 @@ const invalid = (reply: FastifyReply, err: z.ZodError) => {
   return reply.code(400).send({ error: `Ungültige Eingabe (${where}): ${issue.message}` });
 };
 
-export function registerApi(app: FastifyInstance, { store, session, archive, instruments, search, hub, backfill, longterm, fx, db, backup, now }: Deps) {
+export function registerApi(app: FastifyInstance, { store, session, archive, instruments, search, hub, backfill, longterm, fx, db, backup, jobs, now }: Deps) {
   const simulationOf = (params: unknown) => {
     const id = Number((params as { id?: string }).id);
     return Number.isInteger(id) ? store.getSimulation(id) : undefined;
@@ -127,6 +129,14 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
   app.get("/api/archive/backfill", async () => backfill.status());
 
   // Wechselkurse (#51): the ECB reference rates, one per day. Without `from` the last 90 days.
+  // The scheduler (#48): what is planned, what ran. A hand start answers at once; the run goes on in the background.
+  app.get("/api/jobs", async () => ({ enabled: jobs.enabled, jobs: jobs.list(), runs: jobs.runs(30) }));
+  app.post("/api/jobs/:name/run", async (req, reply) => {
+    const result = jobs.run((req.params as { name: string }).name);
+    if (!result.ok) return reply.code(result.code).send({ error: result.reason });
+    return reply.code(202).send({ queued: true });
+  });
+
   app.get("/api/fx", async (req, reply) => {
     const q = req.query as { ccy?: string; from?: string; to?: string };
     const ccy = (q.ccy ?? "USD").toUpperCase();
@@ -282,6 +292,7 @@ export function registerApi(app: FastifyInstance, { store, session, archive, ins
       instruments.remove(inst.symbol); // nothing was shown yet, so it is as if it had not been added
       return sourceFailed(reply, err);
     }
+    jobs.warmUp(); // the nightly gap repair, started now: the new value gets its 29 days at once
     refreshClients();
     return reply.code(201).send(shown(inst));
   });

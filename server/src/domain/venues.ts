@@ -4,7 +4,7 @@ import { earlyClose, holidayName } from "./calendar.js";
 const formatters = new Map<string, Intl.DateTimeFormat>();
 
 /** Local date "YYYY-MM-DD", weekday and minutes since local midnight at UTC second `t`, in the zone. */
-function localTime(timeZone: string, t: number): { day: string; weekday: string; minutes: number } {
+export function localTime(timeZone: string, t: number): { day: string; weekday: string; minutes: number } {
   let f = formatters.get(timeZone);
   if (!f) {
     f = new Intl.DateTimeFormat("en-US", {

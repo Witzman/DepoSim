@@ -62,6 +62,8 @@ export interface BackfillReport {
   days: number;
   daysIsAssumption: boolean;
   stoppedByRateLimit: boolean;
+  /** Set when the run was stopped from outside (a live simulation started, shutdown); the rest is "skipped". */
+  interrupted?: string;
   counts: { loaded: number; empty: number; error: number; skipped: number; outOfRange: number };
   items: ReportItem[];
 }
@@ -80,15 +82,35 @@ export interface BackfillJob {
   error?: string;
 }
 
+/** What a run is given beyond the list: the scheduler spaces its calls out and can stop a run. */
+export interface ExecuteHooks {
+  /** Pause before every call after the first, in ms. */
+  gapMs?: number;
+  /** A reason to stop before the next call, or null. */
+  shouldStop?: () => string | null;
+  onProgress?: (done: number) => void;
+}
+
 export type BackfillStart = { ok: true; job: BackfillJob } | { ok: false; reason: string };
 
 const dayName = (dayStart: number) => new Date(dayStart * 1000).toISOString().slice(0, 10);
+
+export interface PlanItem {
+  symbol: string;
+  dayStart: number;
+  state: "never" | "incomplete";
+  inReach: boolean;
+}
 
 export interface Backfill {
   missing(days?: number): MissingList;
   /** Starts a background job and returns at once with its state, or says why it is refused. */
   start(days?: number): BackfillStart;
   status(): BackfillJob;
+  /** The finished days of the last `days` days that are missing or incomplete, newest first (no `blocked` check). */
+  planFor(days: number): PlanItem[];
+  /** Fetches the items one after the other. Shared by the button and the scheduler; never throws on a failed item. */
+  execute(items: PlanItem[], days: number, hooks?: ExecuteHooks): Promise<BackfillReport>;
   /** Resolves when the job that is running now has finished (for tests and shutdown). */
   settled(): Promise<void>;
 }
@@ -158,43 +180,55 @@ export function createBackfill(deps: {
     },
 
     status: () => ({ ...job }),
+    planFor: plan,
+    execute,
     settled: () => current,
   };
 
-  async function work(days: number, planned: ReturnType<typeof plan>, mine: BackfillJob): Promise<void> {
-    try {
-      const items: ReportItem[] = [];
-      let limited = false;
-      for (const m of planned) {
-        const base = { symbol: m.symbol, day: dayName(m.dayStart), dayStart: m.dayStart };
-        const add = (status: BackfillStatus, extra: { bars?: number; reason?: string } = {}) =>
-          items.push({ ...base, status, label: LABELS[status], ...extra });
-        if (!m.inReach) {
-          add("out_of_range", { reason: `Yahoo liefert Minutenbalken nur für die letzten ${REACH_DAYS} Tage.` });
-        } else if (limited) {
-          add("skipped", { reason: "Yahoo hat mit 429 abgelehnt; der Rest wurde nicht versucht." });
-        } else {
-          try {
-            const bars = await archive.fetchDay(m.symbol, m.dayStart);
-            add(bars > 0 ? "loaded" : "empty", { bars });
-          } catch (err) {
-            if (err instanceof MarketDataError && err.kind === "rate_limited") limited = true;
-            add("error", { reason: describeError(err) });
-          }
+  async function execute(planned: PlanItem[], days: number, hooks: ExecuteHooks = {}): Promise<BackfillReport> {
+    const items: ReportItem[] = [];
+    let limited = false;
+    let interrupted: string | undefined;
+    for (const m of planned) {
+      const base = { symbol: m.symbol, day: dayName(m.dayStart), dayStart: m.dayStart };
+      const add = (status: BackfillStatus, extra: { bars?: number; reason?: string } = {}) =>
+        items.push({ ...base, status, label: LABELS[status], ...extra });
+      interrupted ??= hooks.shouldStop?.() ?? undefined;
+      if (!m.inReach) {
+        add("out_of_range", { reason: `Yahoo liefert Minutenbalken nur für die letzten ${REACH_DAYS} Tage.` });
+      } else if (limited) {
+        add("skipped", { reason: "Yahoo hat mit 429 abgelehnt; der Rest wurde nicht versucht." });
+      } else if (interrupted) {
+        add("skipped", { reason: `${interrupted}; der Rest wurde nicht versucht.` });
+      } else {
+        try {
+          if (hooks.gapMs && items.some((i) => i.status !== "out_of_range")) await new Promise((r) => setTimeout(r, hooks.gapMs));
+          const bars = await archive.fetchDay(m.symbol, m.dayStart);
+          add(bars > 0 ? "loaded" : "empty", { bars });
+        } catch (err) {
+          if (err instanceof MarketDataError && err.kind === "rate_limited") limited = true;
+          add("error", { reason: describeError(err) });
         }
-        mine.done = items.length;
       }
-      const count = (s: BackfillStatus) => items.filter((i) => i.status === s).length;
-      mine.report = {
-        days,
-        daysIsAssumption: days === DEFAULT_DAYS,
-        stoppedByRateLimit: limited,
-        counts: {
-          loaded: count("loaded"), empty: count("empty"), error: count("error"),
-          skipped: count("skipped"), outOfRange: count("out_of_range"),
-        },
-        items,
-      };
+      hooks.onProgress?.(items.length);
+    }
+    const count = (s: BackfillStatus) => items.filter((i) => i.status === s).length;
+    return {
+      days,
+      daysIsAssumption: days === DEFAULT_DAYS,
+      stoppedByRateLimit: limited,
+      ...(interrupted ? { interrupted } : {}),
+      counts: {
+        loaded: count("loaded"), empty: count("empty"), error: count("error"),
+        skipped: count("skipped"), outOfRange: count("out_of_range"),
+      },
+      items,
+    };
+  }
+
+  async function work(days: number, planned: PlanItem[], mine: BackfillJob): Promise<void> {
+    try {
+      mine.report = await execute(planned, days, { onProgress: (n) => (mine.done = n) });
     } catch (err) {
       mine.error = describeError(err);
     } finally {

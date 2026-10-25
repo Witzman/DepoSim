@@ -52,6 +52,19 @@ create table if not exists fx_fetched (
   source text primary key,
   fetched_at integer not null
 );
+create table if not exists job_runs (
+  id integer primary key,
+  job text not null,
+  trigger text not null,
+  slot integer,
+  started_at integer not null,
+  finished_at integer,
+  status text not null,
+  message text,
+  counts text,
+  error text
+);
+create index if not exists job_runs_job on job_runs (job, started_at);
 create table if not exists simulations (
   id integer primary key,
   name text not null,

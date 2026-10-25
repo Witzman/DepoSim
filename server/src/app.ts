@@ -4,9 +4,11 @@ import fastifyStatic from "@fastify/static";
 import fastifyWebsocket from "@fastify/websocket";
 import Fastify, { type FastifyInstance } from "fastify";
 import { registerApi } from "./api.js";
+import { buildJobDefs } from "./jobdefs.js";
+import { type Jobs, createJobs } from "./jobs.js";
 import { createBackfill } from "./backfill.js";
 import { type BackupService, createBackupService } from "./backup.js";
-import { FX_SYMBOL, type Instrument, WATCHLIST } from "./config.js";
+import { FX_SYMBOL, type Instrument, type JobSettings, WATCHLIST } from "./config.js";
 import { createArchive } from "./data/archive.js";
 import { type EcbSource, createEcb } from "./data/ecb.js";
 import type { DailyData, MarketData } from "./data/marketdata.js";
@@ -45,15 +47,14 @@ export interface AppOptions {
   backupDir?: string;
   /** How many daily backups are kept. */
   backupKeep?: number;
-  /** How often the daily backup is looked at, in ms; 0: never (tests call it themselves). */
-  backupCheckMs?: number;
+  /** The scheduler (#48): `enabled: false` is `JOBS=off`; `overrides` change or switch off single jobs. */
+  jobSettings?: JobSettings;
+  /** How often the scheduler looks at the clock, in ms; 0: never (tests call `app.jobs.tick()` themselves). */
+  jobsTickMs?: number;
+  /** Pause between two Yahoo calls of a scheduled run, in ms. */
+  jobGapMs?: number;
   /** The ECB reference rates. Defaults to the ECB. */
   fxSource?: EcbSource;
-  /**
-   * How often the daily rate fetch is looked at, in ms; 0: never (tests call `app.fx` themselves).
-   * A stand-in until the scheduler (#48) calls `fx.runDaily()` at 16:30 Berlin.
-   */
-  fxCheckMs?: number;
 }
 
 declare module "fastify" {
@@ -61,6 +62,7 @@ declare module "fastify" {
     session: SessionService;
     backup: BackupService;
     fx: Fx;
+    jobs: Jobs;
   }
 }
 
@@ -94,25 +96,19 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   app.decorate("session", session);
   app.decorate("backup", backup);
   app.decorate("fx", fx);
-  // Once at start (only if the rates are missing or old), then a look every hour: the fetch itself happens once a day.
-  const fxMs = opts.fxCheckMs ?? 0;
-  let fxTimer: NodeJS.Timeout | undefined;
-  if (fxMs > 0) {
-    setTimeout(() => void fx.runStartup(), 3_000).unref();
-    fxTimer = setInterval(() => void fx.runDaily(), fxMs);
-    fxTimer.unref();
-  }
-  // The first look is at once (a missed night is made up), then every hour; a failure is in the job log, never thrown.
-  const checkMs = opts.backupCheckMs ?? 3_600_000;
-  let backupTimer: NodeJS.Timeout | undefined;
-  if (opts.backupDir && checkMs > 0) {
-    setTimeout(() => void backup.runDaily(), 5_000).unref();
-    backupTimer = setInterval(() => void backup.runDaily(), checkMs);
-    backupTimer.unref();
-  }
+  // The scheduler owns every timed job: collection, repair, daily prices, rates, backup, upkeep.
+  const jobs = createJobs({
+    db, now: nowS, settings: opts.jobSettings ?? { enabled: true, overrides: {} },
+    liveBusy: () => store.listSimulations().some((s) => s.live && s.endedAt === null && session.isRunning(s.id)),
+    log: (text, ok) => (ok ? app.log.info(text) : app.log.error(text)),
+    defs: buildJobDefs({
+      db, archive, backfill, instruments, longterm, fx, backup, backupOn: opts.backupDir !== undefined, now: nowS, gapMs: opts.jobGapMs ?? 0,
+    }),
+  });
+  app.decorate("jobs", jobs);
+  jobs.start(opts.jobsTickMs ?? 0);
   app.addHook("onClose", async () => {
-    if (backupTimer) clearInterval(backupTimer);
-    if (fxTimer) clearInterval(fxTimer);
+    await jobs.stop();
     hub.stopAll();
     db.close();
   });
@@ -125,7 +121,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   });
 
   app.get("/healthz", async (_req, reply) => reply.type("text/plain").send("ok"));
-  registerApi(app, { store, session, archive, instruments, search: opts.search ?? createYahooSearch(), hub, backfill, longterm, fx, db, backup, now: opts.now ?? (() => Date.now() / 1000) });
+  registerApi(app, { store, session, archive, instruments, search: opts.search ?? createYahooSearch(), hub, backfill, longterm, fx, db, backup, jobs, now: opts.now ?? (() => Date.now() / 1000) });
 
   if (existsSync(WEB_DIST)) {
     app.register(fastifyStatic, { root: WEB_DIST });

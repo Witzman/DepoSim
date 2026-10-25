@@ -27,7 +27,7 @@ function make(opts: { dir?: string; now?: number; backupDir?: string; keep?: num
   const { source } = makeSource();
   const app = buildApp({
     dbPath: join(dir, "db.sqlite"), marketData: source, instruments: opts.instruments ?? [SAP, AAPL], now: () => opts.now ?? NOW,
-    minGapMs: 0, tickMs: 20, backupDir: opts.backupDir, backupKeep: opts.keep, backupCheckMs: 0,
+    minGapMs: 0, tickMs: 20, backupDir: opts.backupDir, backupKeep: opts.keep,
   });
   open.push(app);
   return app;
@@ -296,7 +296,7 @@ describe("Tagessicherung", () => {
     const backupDir = join(dir, "b");
     let now = NOW;
     const { source } = makeSource();
-    const app = buildApp({ dbPath: join(dir, "db.sqlite"), marketData: source, instruments: [SAP, AAPL], now: () => now, minGapMs: 0, backupDir, backupKeep: 3, backupCheckMs: 0 });
+    const app = buildApp({ dbPath: join(dir, "db.sqlite"), marketData: source, instruments: [SAP, AAPL], now: () => now, minGapMs: 0, backupDir, backupKeep: 3 });
     open.push(app);
     await busySim(app);
     await app.backup.runDaily();

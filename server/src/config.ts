@@ -31,6 +31,25 @@ export function readSettings(env: Record<string, string | undefined>): Settings 
 
 export const SETTINGS = readSettings(process.env);
 
+export interface JobSettings {
+  /** False (`JOBS=off`): the scheduler runs nothing by itself; a job can still be started by hand. */
+  enabled: boolean;
+  /** Per job, from `JOB_<NAME>`: "off" or a local "HH:MM". Anything else is ignored. */
+  overrides: Record<string, "off" | string>;
+}
+
+/** The job names are those of `jobs.ts`; `sammlung-xetra` reads `JOB_SAMMLUNG_XETRA`. */
+export const JOB_NAMES = ["sammlung-xetra", "sammlung-us", "luecken", "tageskurse", "wechselkurse", "sicherung", "pflege"];
+
+export function readJobSettings(env: Record<string, string | undefined>, names: string[] = JOB_NAMES): JobSettings {
+  const overrides: JobSettings["overrides"] = {};
+  for (const name of names) {
+    const v = env[`JOB_${name.toUpperCase().replace(/-/g, "_")}`]?.trim().toLowerCase();
+    if (v === "off" || (v !== undefined && /^([01]\d|2[0-3]):[0-5]\d$/.test(v))) overrides[name] = v;
+  }
+  return { enabled: env.JOBS?.trim().toLowerCase() !== "off", overrides };
+}
+
 /** The markets an instrument can be traded on, which means the markets with a price source. */
 export type Venue = "XETRA" | "US";
 
@@ -115,3 +134,5 @@ export const WATCHLIST: Instrument[] = [
   us("QQQ", "Invesco QQQ (Nasdaq 100)"),
   us("VTI", "Vanguard Total Stock Market"),
 ];
+
+export const JOB_SETTINGS = readJobSettings(process.env);
